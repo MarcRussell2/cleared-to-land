@@ -1,0 +1,23 @@
+{
+  "name": "cleared-to-land",
+  "version": "0.1.0",
+  "description": "Cleared to Land - airplane landing challenges. Crosswinds, heavy jets, malfunctions, carrier traps, bush strips, and honest stalls.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "dev": "node tools/build.mjs --watch --serve",
+    "web": "node tools/package-web.mjs",
+    "test": "node tools/test-physics.mjs && node tools/test-fcs.mjs && node tools/test-yaw.mjs && node tools/test-flare.mjs && node tools/test-carrier.mjs && node tools/test-camera.mjs && node tools/test-art.mjs",
+    "perf-probe": "node tools/perf-probe.mjs",
+    "perf-budget": "node tools/perf-probe.mjs --budget"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@fontsource/barlow": "^5.3.0",
+    "@fontsource/barlow-condensed": "^5.3.0",
+    "@fontsource/share-tech-mono": "^5.3.0",
+    "esbuild": "^0.24.0",
+    "three": "^0.169.0"
+  }
+}

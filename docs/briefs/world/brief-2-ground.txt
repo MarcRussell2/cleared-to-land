@@ -1,0 +1,52 @@
+CLEARED TO LAND art pass 2 of the world rebuild: THE GROUND.
+
+You are the art department. Read AGENTS.md at the root, then src/art/AGENTS.md (the section "The world bench" is about this work), then src/art/README.md. This brief is fenced to THREE files:
+  src/art/world-ground.js
+  src/art/textures.js - only groundDetail(), and any NEW ground texture function you add
+  src/art/palette.js - only the `ground` and `groundDetail` blocks
+Do not edit anything else: not world-vegetation.js (it imports parcel() from you and is the next brief), not world-props.js, not sky.js, not src/world/terrain.js. If something outside these files seems necessary, say so in your answer and stop.
+
+THE DIRECTION, fixed by the owner: real and atmospheric. Fields with edges. Weathered, believable ground seen from 500 ft on final and from 3 ft in the flare. Not a cartoon.
+
+WHAT YOU ARE HANDED: `field`, the live Terrain, read-only - its methods are listed in the file header (height(x,z) is an analytic function, so you may sample it anywhere at any resolution; res/size are only the world's suggestion). WORLD_QUALITY.detail ('low'|'medium'|'high') from ./quality.js. The sky pass that just landed handles light, haze and exposure: a sunlit white surface is about 0.8 linear, the fill is bluish, shadows are visible. Do not compensate for lighting in colours; author albedos (grass 0.10-0.18 linear green, dry crop 0.25-0.35, bare earth 0.12-0.20, rock 0.25-0.35, snow 0.8-0.9).
+
+WHAT IS WRONG TODAY (from the review screenshots):
+- The mesh is one 330x330 grid over 26 km: 79 m quads. In the flare the ground is a flat plane; on final the hills are polygonal.
+- The ground is one draw with 218k triangles whatever the camera sees, and it receives shadows across the whole thing.
+- The vertex-colour recipe (groundColor) applies the plains' farm noise everywhere: the mountain valleys are covered in ploughed-brown and pale-pasture blotches on their slopes (the "mountain" and "ridge" scenes). The alpine zones are three flat bands.
+- The farm parcels (the onBeforeCompile shader) are the best thing on the ground: keep the idea (a staggered parcel grid with one seeded crop colour per parcel, hard borders evaluated per fragment, faint crop rows) but the colours lean brown and uniform, there is no bare-earth/field-track network, no variation inside a parcel, and the border is a plain dark line.
+- The detail texture (groundDetail, 512 px) is a bland grey noise with strokes: up close (flare, cockpit) it reads as a repeating blur, and at distance it makes everything the same texture.
+- Coast: the beach is a hard sand line at the water; no wet sand, no shelving.
+- Mountain: the river bank is a hard edge; no gravel banks, no scree below the rock, no slope-driven rock/grass mix; the snow line is a single noisy contour.
+
+WHAT TO BUILD
+
+1. A chunked, level-of-detail terrain mesh. buildGround(field, opts) returns a THREE.Group named 'world/ground'. Divide the field.size square into chunks (for example 8x8 chunks of 3.25 km on a 26 km field; pick what works) and put each chunk under a THREE.LOD with two or three levels (the renderer calls LOD.update(camera) itself every frame; nothing else in the engine will call you). Suggested spacing on high: about 20 m near (within ~2.5 km of the chunk), 60-80 m mid, 240 m far; on medium 30/100/300; on low 40/160/480 and only two levels. Add skirts (a vertical strip hanging down a few metres from each chunk edge) so that neighbouring chunks at different levels never show cracks - do not try to match edges. Every mesh gets a bounding sphere (computeBoundingSphere) so frustum culling works; nothing here is frustumCulled = false. receiveShadow on every level; castShadow off. The sum for a typical view on high must stay under about 400k triangles and 25 draw calls for the ground alone; report your numbers.
+   The runway sits on a "flat" (field.nearFlat / the flats built into field.height): keep the near sampling dense enough (20 m or finer) around the flats that the runway's own quad does not float above or sink into the ground.
+
+2. The ground colouring. Rewrite groundColor(field, h, slope, x, z, out) - keep the signature and export (the barrel and the test read it) - as a proper layered material by site style:
+   - plains/coast: farmland (the parcel system) on flat low ground, meadow/pasture on gentle slopes and around woodland (field.forestNoise), darker damp ground in hollows, bare earth on the steepest bits; the woodland floor under forests (forestNoise > 0.28) is a darker, browner green.
+   - coast: dry sand above the waterline, wet darker sand in the last 1.5 m to the water, shelving into the water colour over a few metres, dune grass above; the far hills as on the plains.
+   - mountain: NO farm parcels and NO ploughed/pasture blotches. Valley floor: meadow greens with gravel banks along the river (field.riverAxis), wet sand right at the water; slopes: grass to alpine turf by altitude, rock where the slope is steep (use the normal), scree fans below rock, the snow line from field.snowLine with wind-scoured rock showing on steep faces above it and snow pockets below it on shallow ground; the treeline band (field.snowLine - 280 m or so, the vegetation module uses this) slightly paler.
+   - sea: not built (the site is water).
+   Colours come from PALETTE.ground: keep every key that exists (the contract test checks them) and add what you need.
+
+3. The ground material and its textures. One MeshStandardMaterial (name 'world/ground') shared by every chunk and level, vertexColors on, with an onBeforeCompile pass (customProgramCacheKey 'ctl-ground-v2' or higher) that does, per fragment and cheaply:
+   - the farm parcels as today (parcel(x, z) stays the shared grid - world-vegetation.js places hedges on its edges - but you may change the border look): one seeded crop colour per parcel from a 64x64 nearest-filtered lookup, hard borders, faint crop rows, and now: per-parcel variation (a second lookup channel for "bare / stubble / green / tall"), a thin bare-earth headland strip inside the border, occasional tractor tracks, and a soft wet/dry gradient across the parcel.
+   - the detail texture layered at two scales (near ~8 m tile for the flare, far ~90 m) with the near layer fading out beyond ~400 m so distant ground does not turn into a uniform tile. Rebuild groundDetail(seed) in textures.js as a REAL ground texture: a 1024 px periodic canvas with clumped grass, small bare patches, tiny stones and shadowed tufts, mid-grey average (so vertex colours are the albedo; drop detailCompensation if you can, but keep the key), tinted per site by a uniform, not by the texture.
+   - a subtle normal/relief cue: a cheap slope-lit term from the detail texture's luminance gradient, so the ground near the airplane has visible micro-relief in low sun (a few instructions; no normal map texture required).
+   - a faint distance-based desaturation is NOT yours: the atmosphere already does aerial perspective. Do not add fog or haze here.
+   Keep the material fog-enabled (fog: true, the default) so installFog() gives it the aerial perspective; do not declare any uniform starting with `at`; prefix yours `gr`.
+
+PERFORMANCE (hard): on high, for the plains site: the whole ground group under 25 draw calls and 400k triangles in a typical chase view (the probe measures the scene alone, shadow pass included - the ground does not cast, so it is counted once); on medium under 250k; on low under 120k. Textures: canvases of 1024 px or less, generated once per buildGround call (they may be cached module-wide keyed by seed+detail: textures are immutable; materials are not cached). No per-frame work at all: the LOD selection is the renderer's. Build time for the plains ground under 400 ms on a desktop (sampling field.height 8x8 chunks x (163x163 near) is fine; do not sample the near level for chunks whose near level can never be seen from the flight path - within 4 km of the origin is where the flying happens, chunks beyond that need only mid and far).
+
+RULES, each learned from a pass that went wrong:
+- The file headers are the specification: keep them and update them with what you did.
+- No GLSL uniform starting with `at` (the atmosphere's; injected into your material by installFog). Yours start with `gr`.
+- Materials are never cached in module-level variables; textures may be.
+- Name every material ('world/ground'); onBeforeCompile materials carry a versioned customProgramCacheKey.
+- No Math.random(): makeRng/noise2/fbm2 from ../config.js, seeded from field.seed.
+- Keep the exported names and signatures: groundColor(field, h, slope, x, z, out), buildGround(field, opts), parcel(x, z) -> { edge, angle } (same grid as today, the hedges depend on it), and every PALETTE.ground / PALETTE.groundDetail key that exists now.
+- Do not touch anything about the runway quad, the flats or field.height: the world owns those.
+
+CHECK YOUR WORK: run `node tools/test-art.mjs` (plain Node) and make it pass. You cannot build or see the game; the owner builds it and shoots the eleven scenes, and measures the draw calls and triangles per scene. In your answer: what you changed file by file, the chunk/LOD layout and its expected triangle counts per tier, and what each of these scenes should now look like: plains 10:00 chase on final at 220 ft; the flare at 8 ft; cockpit at 300 ft; coast 13:00 (airliner over farmland with the sea to the right); plains from the tower 16:30; mountain valley 09:30 at 260 ft with the river; ridge strip 17:00 wing view; fog.

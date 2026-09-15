@@ -1,0 +1,46 @@
+CLEARED TO LAND art pass 6 of the world rebuild: THE CARRIER.
+
+You are the art department. Read AGENTS.md at the root, then src/art/AGENTS.md (the section "The world bench" is about this work), then src/art/README.md. This brief is fenced to THREE files:
+  src/art/carrier-look.js
+  src/art/textures.js - carrierDeck() and any new carrier texture; leave the ground and runway functions alone
+  src/art/palette.js - only the `deck` and `carrier` blocks
+Do not edit anything else: not src/world/carrier.js (it owns the deck outline the physics tests against, the deck height, the wires, the meatball lamps, the deck lights), not lights.js (done in the previous pass), not world-water.js. If something outside these files seems necessary, say so in your answer and stop.
+
+THE DIRECTION, fixed by the owner: real and atmospheric. A Nimitz-class carrier seen from the groove at 300 ft: a grey steel ship with a deck that has been landed on ten thousand times, an island with a mast and radars, a wake. At night, the deck readable by its own lighting.
+
+WHAT YOU ARE HANDED: c, the live Carrier, read-only: len 333, wid 77, deckH 20, deckPoly and hullPoly ([x,z] ship-local outlines, bow at z = -len/2), angle (-9 deg, the angled deck to port), rampLocal, landDirLocal, landRightLocal, landHalfWidth 14, landLength 240, wires [50, 62, 74, 86] metres up the landing area, hullNumber '68', night, landLocalPoint(u, v). The deck lights (centreline white, edges amber, the red drop line) and the IFLOLS lamps are placed by world/carrier.js with LightSet; you draw the housings and the ship. The sea is world-water.js's (already rebuilt: waves, reflection, glitter) and the light/exposure is the sky pass's (sunlit white about 0.8 linear).
+
+WHAT IS WRONG TODAY (from the review screenshots):
+- The ship is a dark grey extruded slab with a box island; from the groove it reads as a barge. No sponsons, no gallery deck detail, no catwalks, no antennas, no hull flare at the bow, no elevators, no jet blast deflectors, no parked aircraft on the bow.
+- The deck texture (1024x4096) is a flat noise with thin lines; the landing area, the foul lines and the hull number are there but the deck has no tie-down grid, no rubber, no non-skid grain, no elevator outlines that read, no "68" on the bow that reads from the groove.
+- At night the ship is invisible: only the LightSet points exist. There is no self-illumination on the island, no deck-edge lights reflected on the steel, no floodlit landing area.
+- The wake is a white plane with a pulsing opacity: it reads as a white board behind the ship.
+- The arresting wires are 5 cm cylinders (invisible from the groove); the sheaves are boxes.
+
+WHAT TO BUILD
+
+1. The hull and the deck. Keep buildDeck/buildHull/buildGallery's function names and returns. The deck slab: the extruded deckPoly as today (its outline is the physics), painted with a rebuilt carrierDeck texture at 1024x4096: non-skid grain (dark grey with a fine speckle), the tie-down grid (a diamond pattern of small dark dots on ~1.2 m pitch across the whole deck), the landing area with its white edge stripes, the dashed centreline, the foul lines (red/white dashed), the "68" on the bow in the big Navy typeface stroke as today but higher contrast, the four wires as dark lines with the pendant sheaves, the elevator outlines (four: three starboard, one port aft) as painted rectangles with hinge marks, the catapult tracks (two on the bow, two on the waist) as long dark slots with the JBD hinge lines, rubber streaks in the landing area between the wires and the 3-wire, oil and rust stains around the elevators, a "no-step" band at the round-down. Deck sides: a steel grey with a rust-weathered lower band (a small canvas texture wrapped along the side).
+   The hull: the extruded hullPoly as today (the outline is not yours), but with a material that has a boot-topping (black band at the waterline), a slightly lighter upper hull and the flare toward the bow suggested by shading (vertex colours or a canvas gradient), and hull plating lines (a cheap onBeforeCompile stripe term, uniforms prefixed `cv`). The gallery deck: replace the single box with a merged geometry of sponsons under the angled-deck overhang and the starboard side, catwalks along the deck edge (a thin merged strip 1 m below the deck edge with a railing suggested by an alpha-tested canvas strip), the LSO platform on the port side abeam the touchdown zone, the fantail. One or two draws for all of it (mergeGeos).
+
+2. The island. Keep buildIsland -> { group, radar } (carrier.js spins `radar`). A proper island: a stepped superstructure with the flag bridge and the navigation bridge as distinct glazed levels (dark glass bands), the pri-fly at the aft top, a lattice mast (merged thin boxes, not cylinders) with the SPS-48 style rotating radar as `radar` (a flat rectangular array on a pedestal), two dome radomes, a yardarm with antennas, the deck-edge hull number "68" painted large on the island's outboard side, a stack. Merged into as few draws as the materials allow (steel grey, glass, white domes, black antennas): under 10 draws. Window glow at night: a canvas emissive map on the glass bands (emissiveIntensity by c.night).
+
+3. The wires and sheaves: buildWires stays; make the wires 4 cm cylinders but with a dark shadow line painted into the deck texture beneath them so they read from the groove, and the sheaves proper pendant housings (small merged shapes at the deck edge).
+
+4. Night lighting (self-illumination only; the point lights are carrier.js's): emissive window bands on the island, a soft floodlight pool on the landing area (a subtle emissive gradient in the deck material driven by a `cvNight` uniform), red anti-collision glow on the mast top (a small emissive sphere), the deck-edge catwalk lights as a thin emissive strip. Nothing may exceed 1.0 linear except the point lights.
+
+5. The wake: buildWake returns one mesh as today, but as a tapered V of two churned bands astern with a bow wave at the stem, a canvas-drawn alpha texture (soft edges, streaks, foam that thins with distance), additive-free normal blending, opacity by day ~0.5; the animation carrier.js applies (opacity pulse) may stay, but drift the texture along the ship's axis via a uniform in the material's userData that you do not need the engine to call (keep the mesh's material.map.offset animated from an onBeforeRender on the mesh; no per-frame allocations).
+
+6. The IFLOLS housing (buildLensHousing): the lens box as the real thing: a tall narrow housing on the port deck edge with the datum arm, painted black with a white frame; the lamps are placed by carrier.js and must stay visible through/around your housing - do not enclose them.
+
+PERFORMANCE (hard): the whole ship under 30 draw calls, under 60k triangles; castShadow only on the deck, hull and island; textures 2048 px or less (the deck 1024x4096 as today); no per-frame work except the wake's offset. No frustumCulled = false.
+
+RULES, each learned from a pass that went wrong:
+- The file headers are the specification: keep them and update them with what you did.
+- No GLSL uniform starting with `at` (injected by installFog into your materials); yours start with `cv`.
+- Materials and geometries are never cached module-wide; textures may be.
+- Name every material ('carrier/deck', 'carrier/island' ...); onBeforeCompile materials carry a versioned customProgramCacheKey.
+- No Math.random(): makeRng/noise2/fbm2 from ../config.js, seeded from the hull number or the ship's length.
+- Keep every exported name and return shape: buildDeck, buildHull, buildGallery, buildIsland -> { group, radar }, buildWires -> Object3D[], buildLensHousing(c, lensPos) -> Object3D, buildWake -> Mesh (carrier.js sets wake.material.opacity), and every PALETTE.deck / PALETTE.carrier key that exists now (the LightSet colours and sizes are read by carrier.js).
+- Never change the deck outline, the deck height, the wire positions or the lens position: those are the simulation.
+
+CHECK YOUR WORK: run `node tools/test-art.mjs` (plain Node) and make it pass. You cannot build or see the game; the owner builds it and shoots the scenes and measures draw calls. In your answer: what you changed, the draw calls and triangles for the ship, and what these two scenes should now look like: carrier 14:00 30 km fly-by at 300 ft, the ship to the right of frame about 600 m away; carrier 22:30 15 km night at 400 ft in the groove, the ship ahead.

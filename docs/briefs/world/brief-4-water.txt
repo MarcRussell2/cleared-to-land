@@ -1,0 +1,37 @@
+CLEARED TO LAND art pass 4 of the world rebuild: WATER - the sea and the river.
+
+You are the art department. Read AGENTS.md at the root, then src/art/AGENTS.md (the section "The world bench" is about this work), then src/art/README.md. This brief is fenced to TWO files:
+  src/art/world-water.js
+  src/art/palette.js - only PALETTE.atmosphere.waterDeep and any new `water` block you add
+Do not edit anything else: not world-atmosphere.js or sky.js (you consume the atmosphere through the names you import), not world-ground.js (the coast and river banks are its job and are done), not src/world/terrain.js. If something outside these files seems necessary, say so in your answer and stop.
+
+THE DIRECTION, fixed by the owner: real and atmospheric. The sea from 300 ft on a carrier approach: a surface with scale, swell and chop, the sky reflected in it, the sun's glitter on the side toward the sun, the horizon a clean line. A river that reads as shallow moving water between gravel banks.
+
+WHAT YOU ARE HANDED: makeWater(size, level, sunDir) builds one horizontal plane (size metres, at height level; the world adds it to the terrain group and calls setSun(dir, dayness, fogColor) every frame and tick(dt) every frame). The atmosphere contract from world-atmosphere.js: include atmosphereGLSL, build your uniforms with atmosphereUniforms() (the sky pass has just rebuilt it around a lookup texture; read that file's header for what atmosphere(d) now costs and which uniforms exist - atSun, atMoon, atDay, atLow, atWeather, atWarm and the rest are all still there), and keep the fog installation as it is (material.fog = true with the standard fog chunks spliced in, so installFog() gives distant water the same aerial perspective as the land). Sea state is not handed in; the carrier scenes use seaState 0.2 (day) and 0.8 (night) for the ship's motion, but the water itself may show a fixed moderate sea; a `seaState` field on the returned object that the engine MAY set later is welcome (default 0.35).
+
+WHAT IS WRONG TODAY (from the review screenshots):
+- The wave pattern is a sum of five analytic cosines evaluated per pixel with fwidth() fades: it shows regular diagonal stripes and moire at the middle distance (carrier day), horizontal banding at night, and it is the most expensive fragment shader in the game on the scene where it covers most of the screen.
+- The colour is one flat deep blue everywhere; no change toward the horizon, no brightening in the shallows, no whitecaps, no foam at the shore or along the carrier's hull.
+- The horizon between sea and sky is a soft grey band, not a line.
+- At night the sea shows the banding and a faint sheen but no moonglade.
+- The river in the mountain valley is a hard-edged opaque dark polygon; it looks like a hole.
+
+WHAT TO BUILD
+
+1. One cheap normal-map style pass. Bake a tiling wave normal map once (a 512 px periodic canvas or DataTexture: a sum of a dozen seeded directional wave components with realistic dispersion, plus small capillary ripple, baked as a height field and converted to a normal map; RepeatWrapping, mipmaps, anisotropy 4). In the fragment shader sample it two or three times at different scales and drift speeds (a 60-90 m swell tile, a 12-18 m chop tile, a 2-3 m ripple tile that fades out beyond ~300 m), blend the normals, and shade: Fresnel (Schlick) between the sky reflection (atmosphere(reflect) - one LUT fetch) and the water body colour; the sun glitter as a narrow Blinn-Phong-style highlight on the perturbed normal, rolled off by distance so it does not alias (keep the trick of widening and dimming the lobe as the pixel footprint grows: fwidth on the reflected-sun dot is fine, once); a faint sky-lit whitecap term where the composite normal's slope is steep (a seeded threshold that rises with seaState); the moon's glitter at night from atMoon. The body colour: a deep blue-green that goes greener and lighter where the water is shallow - you do not know the depth, so approximate with distance from the shore if the terrain style exposes it, otherwise leave the shallows to the ground pass and keep the body colour by sun elevation. The horizon: as the view grazes the surface Fresnel goes to 1 and the sea takes the sky's horizon colour; make sure it does not go brighter than the sky above it (a clean line, not a glowing band).
+
+2. Cost. Target under 40 ALU instructions plus 4-5 texture fetches per fragment. No per-pixel noise, no loops. Vertex shader stays trivial (the plane is two triangles; do not tessellate it - the normals carry the waves). tick(dt) advances one or two drift uniforms and nothing else; setSun copies the sun direction and dayness. No per-frame allocations.
+
+3. The river (the mountain sites: waterLevel 516 m in a valley floor at 520 m) uses the same material: at that scale the chop tile alone reads as moving water; make sure the ripple layer, the glitter and the reflection work from a low chase camera at 09:30 with the sun behind the camera (the reflection will be sky and mountains - mountains are not in the reflection; the sky is fine).
+
+4. Night: dark water, a moonglade toward atMoon, the horizon still findable against the night sky (the sky pass keeps a lighter band there); no banding: if a component of your normal map is too regular, add seeded phase jitter to the bake.
+
+RULES, each learned from a pass that went wrong:
+- The file header is the specification: keep it and update it with what you did.
+- No GLSL uniform starting with `at` of your own: those come from atmosphereUniforms() and installFog() injects the same names into every fogged material, yours included; prefix your uniforms `wv`.
+- Do not cache the material in a module-level variable (a new scene, a new sky, every scenario); the normal map texture may be cached module-wide keyed by its seed.
+- Name the material ('world/water'); give the ShaderMaterial a versioned customProgramCacheKey is not needed (ShaderMaterials key on their source) but keep mat.fog = true and the fog chunk splicing so installFog() finds it.
+- No Math.random(): makeRng/noise2/fbm2 from ../config.js, seeded.
+- Keep the exported name and return shape: makeWater(size, level, sun) -> { mesh, material, setSun(dir, dayness, fogColor), tick(dt) } (add fields, remove none). sky.js re-exports makeWater and must keep working unchanged.
+
+CHECK YOUR WORK: run `node tools/test-art.mjs` (plain Node) and make it pass. You cannot build or see the game; the owner builds it and shoots the scenes. In your answer: what you changed, the shader's fetch/instruction count, and what these scenes should now look like: carrier 14:00 30 km fly-by at 300 ft (the sea fills the frame; the ship to the right); carrier 22:30 15 km night at 400 ft; coast 13:00 (the sea to the right, the coastline below); the mountain valley 09:30 with the river below the airplane.

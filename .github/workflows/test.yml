@@ -1,0 +1,19 @@
+# Headless checks on every push and pull request: the physics, control-law, flare,
+# carrier, camera and art-contract suites, then a build of the single-file game.
+# Nothing here needs a GPU; the visual review happens on the owner's machine.
+name: test
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build

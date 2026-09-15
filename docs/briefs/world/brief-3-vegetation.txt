@@ -1,0 +1,44 @@
+CLEARED TO LAND art pass 3 of the world rebuild: VEGETATION - forests, hedgerows, the obstacle trees.
+
+You are the art department. Read AGENTS.md at the root, then src/art/AGENTS.md (the section "The world bench" is about this work), then src/art/README.md. This brief is fenced to TWO files:
+  src/art/world-vegetation.js
+  src/art/palette.js - only the `trees` block
+Do not edit anything else: not world-ground.js (you import parcel() from it), not world-props.js, not sky.js, not src/world/terrain.js. If something outside these files seems necessary, say so in your answer and stop.
+
+THE DIRECTION, fixed by the owner: real and atmospheric. Trees with silhouettes, forests with depth and edges, hedgerows that are hedges. Not lollipops.
+
+WHAT YOU ARE HANDED: `field`, the live Terrain, read-only (methods in the file header; height(x,z) is analytic). parcel(x,z) -> { edge, angle } from world-ground.js: the farm-parcel grid; hedges run along parcel edges (edge < 8 m) at `angle`. opts.treeScale (0..1, the tier's thinning), opts.maxTrees, WORLD_QUALITY.detail. The sky pass gives real directional light: a tree must have a lit side and a shaded side. The ground pass gives a darker woodland floor where field.forestNoise(x,z) > 0.28 and keeps clutter off the flats (field.nearFlat).
+
+WHAT IS WRONG TODAY (from the review screenshots and the cost probe):
+- The plains site draws about 20,800 trees at 100-130 triangles each, twice (shadow pass and main): 2.5 million triangles for the forest alone, on a budget of 1.5 million for the whole world; the mountain sites draw 45,700 trees, 5.6 million triangles. Both InstancedMeshes have frustumCulled = false and every tree casts a shadow.
+- Conifers are two 6-sided cones on a stick; broadleaves are three icosahedra. From 500 ft they read as green blobs; at the horizon they merge into a hard green wall with no aerial depth.
+- Hedgerows are the broadleaf mesh squashed to 5 x 0.3 x 0.5 and laid flat: the "green slugs" lying on the fields in every plains scene. The owner has called this out twice.
+- Woodland edges are a straight cut; there is no undergrowth, no scattered singles at the margin, no clearing.
+- The mountain valleys are a uniform carpet of identical dark cones with no size variation by altitude and no treeline transition.
+- The obstacle trees on the bush strips (the spruce wall at the gravel bar) are the same cones, larger.
+
+WHAT TO BUILD
+
+1. Tree models, low-poly but shaped. Per type, three levels of detail, each one merged geometry (use mergeGeos from ../geom.js) with vertex colours or a per-instance colour:
+   - LOD0 (within ~350 m on high): a conifer with a tapered trunk and 5-7 tiers of branch whorls made of a few cross-planes or cones, irregular, about 200-300 triangles; a broadleaf with a trunk, two or three main limbs and a crown of 6-9 overlapping ellipsoid lobes at different heights and offsets, about 200-300 triangles. Alpha-tested cross-plane foliage cards drawn into a CanvasTexture (branch silhouettes, no image files) are welcome and cheap - they cast good shadows.
+   - LOD1 (350 m to ~1.5 km): the same silhouette in 40-70 triangles.
+   - LOD2 (beyond): a two-quad cross billboard or a single camera-facing quad from a baked silhouette texture (draw the tree's silhouette with lit/shaded halves into a 128x128 canvas; a cheap vertex shader rotates the quad to face the camera), 2-4 triangles.
+   Two conifer species (spruce: narrow, dark, drooping tiers; pine: taller trunk, flatter crown) and two broadleaf shapes (round oak-like; taller poplar-like), each with hue/lightness variation per instance from PALETTE.trees (keep the existing keys conifer/broadleaf/obstacle and add what you need). Sizes vary: 8-22 m broadleaf, 10-28 m conifer, smaller near the treeline.
+
+2. Placement and instancing. Keep the deterministic single-rng walk (the header explains why: lowering treeScale removes trees rather than moving the survivors). Group the trees into chunks of about 1.5-2 km; per chunk and per species one InstancedMesh per LOD level, all three under one THREE.LOD (level distances as above, scaled down on medium/low), each with computeBoundingSphere() called after the matrices are set and frustumCulled left on. Draw calls for a typical view on high: under 40 for all vegetation. castShadow: only LOD0 meshes cast (the shadow camera is a 180 m box around the airplane; LOD1/LOD2 never fall inside it usefully); receiveShadow off. Triangle budget for the plains on high: under 500k for all vegetation in a typical view (the probe counts the shadow pass too); mountain sites under 700k. Trees per site may stay at the current counts if the LODs bring the triangles down; reduce counts by treeScale as today.
+   Forest structure: woodland from field.forestNoise (keep the thresholds so the ground's woodland floor matches: a tree stands where the floor is dark), with a ragged margin (single trees and small groups scattered 30-80 m outside the edge, thinning with distance), the occasional clearing inside, species mix by site (plains: mixed broadleaf with a few pines; coast: more pine and wind-bent shapes near the shore; mountain: spruce almost everywhere, larch-like paler conifers near the treeline, broadleaf only on the valley floor along the river), density thinning toward the treeline (field.snowLine - 280 m or so, jittered) and nothing above it.
+
+3. Hedgerows as hedges. Along parcel edges on the plains and coast (parcel(px,pz).edge < 8, low ground, not woodland, not on a flat): a continuous hedge, not a row of trees. Build one hedge-segment geometry (a lumpy box about 2 m high x 3 m deep with a rounded, uneven top, 20-40 triangles, vertex-coloured dark green with a lighter top) and instance it end to end along the parcel edges with the edge's `angle`, with gaps at the field gates every 100-200 m, and an occasional real broadleaf tree standing in the hedge line (every 60-120 m, seeded). Under THREE.LOD like the trees: beyond ~2 km the hedge instances drop out (the ground's parcel borders carry the line at that distance). Keep hedges off the runway flats (field.nearFlat with a margin).
+
+4. Obstacle trees (buildObstacleTrees): the spruce wall and the singles across the bush approaches. Use the LOD0 spruce, one Mesh per entry as now (they are few), scaled by t.scale, seeded rotation. OBSTACLE_TREE { radius, height } is the collision cylinder at scale 1: if the new spruce is a different size, change the two numbers with it so the collision matches the picture. Trunk visibly bare for the lower third so the pilot can judge height against the wall.
+
+PERFORMANCE (hard): the numbers above. No per-frame work of your own (the LOD is the renderer's); no frustumCulled = false anywhere; textures are canvases of 512 px or less generated once per buildForest call (may be cached module-wide keyed by seed+species; geometries and materials are never cached); no Math.random. The vertex shader for the billboards, if you write one, is a ShaderMaterial or an onBeforeCompile on MeshStandardMaterial with a versioned customProgramCacheKey and uniforms prefixed `vg`; make it fog-enabled so installFog() gives it aerial perspective, and never declare a uniform starting with `at`.
+
+RULES, each learned from a pass that went wrong:
+- The file header is the specification: keep it and update it with what you did.
+- Materials and geometries are never cached in module-level variables; textures may be.
+- Name every material ('vegetation/spruce-lod0', 'vegetation/billboard', 'vegetation/hedge' ...).
+- Keep the exported names and shapes: buildForest(field, opts) -> { objects, count }, OBSTACLE_TREE { radius, height }, buildObstacleTrees(field, list) -> Object3D[] one per entry in order, and every PALETTE.trees key that exists now.
+- Do not change where the ground's woodland floor is (that is world-ground.js reading field.forestNoise); place your trees to match it.
+
+CHECK YOUR WORK: run `node tools/test-art.mjs` (plain Node) and make it pass. You cannot build or see the game; the owner builds it and shoots the eleven scenes, and measures draw calls and triangles per scene. In your answer: what you changed, the triangle count per LOD level per species, the chunk layout and the expected draws/triangles per tier for the plains and the mountain sites, and what these scenes should now look like: plains 10:00 chase on final (hedges, a woodland edge, the horizon treeline); cockpit 10:00; the tower 16:30 (foreground trees close to the camera); coast 13:00; mountain valley 09:30 (spruce forest on the slopes, the river-side broadleaves, the treeline); ridge strip 17:00 wing view; the gravel bar's spruce wall from short final.

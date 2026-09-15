@@ -1,0 +1,12 @@
+# dependencies and build output
+node_modules/
+dist/
+CTL.html
+CTL-web.zip
+web/*
+!web/README-HOSTING.md
+
+# OS / editor
+Thumbs.db
+.DS_Store
+*.log
