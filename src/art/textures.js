@@ -4,6 +4,8 @@
 // time and uploaded as a THREE.CanvasTexture. That keeps the game a single HTML
 // file, keeps it deterministic, and lets a texture be authored as code.
 //
+// CTL pass 5b: paved sheets are 2048 x 256 RGBA (2,097,152 bytes before
+// mipmaps); loose strips retain 2048 x 512. Marking coordinates are unchanged.
 // Rules for anything added here:
 //   - draw deterministically (use noise2/fbm2/makeRng from config.js)
 //   - set colorSpace = SRGBColorSpace on anything that carries colour
@@ -82,7 +84,7 @@ export function groundDetail(seed) {
 // aiming point at aimDistance, the touchdown-zone ladder, the runway numbers.
 // Their look is yours; their meaning is not.
 export function runwaySurface(rw) {
-  const W = 4096, H = 512;
+  const W = 2048, H = rw.surface === 'asphalt' ? 256 : 512;
   const c = document.createElement('canvas');
   c.width = W; c.height = H;
   const g = c.getContext('2d');
@@ -156,7 +158,7 @@ export function runwaySurface(rw) {
       g.fillRect(u * sx, v * sy - 1, (10 + rng() * 40) * sx, 3);
     }
     g.fillStyle = P.joints;
-    for (let u = 0; u < L; u += 25) g.fillRect(u * sx, 0, 1.5, H);
+    for (let u = 0; u < L; u += 25) g.fillRect(u * sx, 0, Math.max(0.3, 0.22 * sx), H);
     const white = P.markings;
     g.fillStyle = white;
     g.fillRect(0, 0, W, 0.9 * sy);

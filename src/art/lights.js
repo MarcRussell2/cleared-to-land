@@ -8,6 +8,8 @@
 // with halos in the flare. sizeAttenuation stays off (the scaling is our own,
 // clamped) so nothing vanishes at range. Exports and method names are frozen: the
 // world (airport.js, carrier.js) and the aircraft's navigation lights use them.
+// CTL pass 5b: finished batches have finite bounds; moving points expand them
+// without disabling culling. The API and shared hard-core sprite remain intact.
 import * as THREE from 'three';
 
 let _disc = null;
@@ -47,7 +49,7 @@ export class LightSet {
     mat.customProgramCacheKey = () => 'ctl-lights-v2';
     this.points = new THREE.Points(geo, mat);
     this.points.name = 'lights/set';
-    this.points.frustumCulled = false;
+    this.boundPoint = new THREE.Vector3();
     this.mat = mat;
   }
   add(x, y, z, r, g, b) {
@@ -58,6 +60,12 @@ export class LightSet {
     return i;
   }
   setColor(i, r, g, b) { this.col[i * 3] = r; this.col[i * 3 + 1] = g; this.col[i * 3 + 2] = b; this.geo.attributes.color.needsUpdate = true; }
-  setPos(i, x, y, z) { this.pos[i * 3] = x; this.pos[i * 3 + 1] = y; this.pos[i * 3 + 2] = z; this.geo.attributes.position.needsUpdate = true; }
-  finish() { this.geo.setDrawRange(0, this.n); this.geo.attributes.position.needsUpdate = true; this.geo.attributes.color.needsUpdate = true; }
+  setPos(i, x, y, z) { this.pos[i * 3] = x; this.pos[i * 3 + 1] = y; this.pos[i * 3 + 2] = z; this.geo.attributes.position.needsUpdate = true; if (this.geo.boundingSphere) this.geo.boundingSphere.expandByPoint(this.boundPoint.set(x,y,z)); }
+  finish() {
+    const box=new THREE.Box3();
+    for(let i=0;i<this.n;i++) box.expandByPoint(this.boundPoint.fromArray(this.pos,i*3));
+    this.geo.boundingSphere=new THREE.Sphere();
+    if(this.n) box.getBoundingSphere(this.geo.boundingSphere);
+    else this.geo.boundingSphere.set(this.boundPoint.set(0,0,0),0);
+    this.geo.setDrawRange(0, this.n); this.geo.attributes.position.needsUpdate = true; this.geo.attributes.color.needsUpdate = true; }
 }
