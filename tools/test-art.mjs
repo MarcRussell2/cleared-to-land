@@ -447,7 +447,7 @@ for (const f of ['terrain-look.js', 'airport-look.js', 'carrier-look.js']) {
     c.group.updateMatrixWorld(true);
     const opaque = []; c.group.traverse((o) => { if (o.isMesh && o.material && !(Array.isArray(o.material) ? o.material[0] : o.material).transparent) opaque.push(o); });
     const ray = new THREE.Raycaster(); ray.far = 2.5;
-    const eye = new THREE.Vector3(def.eye.x, def.eye.y, def.eye.z);
+    const eye = new THREE.Vector3(def.eye.x, def.eye.y + (def.seatUp || 0), def.eye.z);   // where the camera is: the design eye raised by the seat
     let clear = 0, total = 0, blockers = new Set();
     for (const yawDeg of [-25, -12, 0, 12, 25]) for (const pitchDeg of [-2, 6, 14]) {
       const yaw = yawDeg * DEG, pitch = pitchDeg * DEG;

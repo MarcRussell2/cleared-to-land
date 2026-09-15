@@ -61,6 +61,10 @@ export const SKYLARK = base({
   speeds: { Vs1: 49, Vs0: 42, Vref: 62, Vapp: 66, Vfe: 85, Vne: 160 },
   limits: { crashVS: 7.0, hardVS: 3.0, firmVS: 1.8, smoothVS: 1.0, tailStrikePitch: 99, maxSide: 4 },
   eye: { x: -0.35, y: 0.55, z: -1.0 },
+  // seatUp (m): how far the pilot's head sits above `eye`, the design eye the cockpit interior is built around.
+  // The cabin stays put and the head rises, like raising the seat (2026-09-15: "a bit taller in all the planes").
+  // Headroom and the windshield view were measured from the raised eye; tools/test-art.mjs checks the view from it.
+  seatUp: 0.10,
   approach: { glideslope: 3 * DEG, flareHeight: 5, aimDistance: 300, runwayNeed: 500 },
 });
 
@@ -95,6 +99,7 @@ export const TRAILBLAZER = base({
   speeds: { Vs1: 42, Vs0: 36, Vref: 48, Vapp: 52, Vfe: 80, Vne: 130 },
   limits: { crashVS: 7.5, hardVS: 3.2, firmVS: 2.0, smoothVS: 1.1, tailStrikePitch: 99, maxSide: 3.5 },
   eye: { x: 0, y: 0.5, z: -0.6 },
+  seatUp: 0.10,
   approach: { glideslope: 5 * DEG, flareHeight: 4, aimDistance: 60, runwayNeed: 150 },
 });
 
@@ -142,6 +147,7 @@ export const CONDOR = base({
   speeds: { Vs1: 135, Vs0: 110, Vref: 142, Vapp: 147, Vfe: 175, Vle: 270, Vne: 340 },
   limits: { crashVS: 6.5, hardVS: 3.0, firmVS: 1.8, smoothVS: 0.9, tailStrikePitch: 10.5 * DEG, maxSide: 6 },
   eye: { x: -0.5, y: 1.35, z: -15.3 },
+  seatUp: 0.08,   // higher and the top of the windshield frame starts to cut the view up the approach
   approach: { glideslope: 3 * DEG, flareHeight: 9, aimDistance: 400, runwayNeed: 1700 },
 });
 
@@ -181,6 +187,7 @@ export const HORNET = base({
   speeds: { Vs1: 118, Vs0: 101, Vref: 135, Vapp: 138, Vfe: 250, Vle: 250, Vne: 600 },
   limits: { crashVS: 9.5, hardVS: 5.5, firmVS: 4.0, smoothVS: 2.5, tailStrikePitch: 14 * DEG, maxSide: 6 },
   eye: { x: 0, y: 0.95, z: -5.4 },
+  seatUp: 0.08,   // higher and the HUD frame starts to cross the view just above the nose
   approach: { glideslope: 3.5 * DEG, flareHeight: 0, aimDistance: 70, runwayNeed: 200, onSpeedAoA: 8.1 * DEG },
 });
 

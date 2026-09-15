@@ -122,7 +122,8 @@ export class CameraRig {
       cam.lookAt(this.look);
       cam.fov = 55;
     } else if (this.mode === 'cockpit') {
-      const eye = this._t2.set(def.eye.x, def.eye.y, def.eye.z).applyQuaternion(ac.quat).add(ac.pos);
+      // def.seatUp raises the head above the design eye the interior is built around: the seat moves, not the cabin
+      const eye = this._t2.set(def.eye.x, def.eye.y + (def.seatUp || 0), def.eye.z).applyQuaternion(ac.quat).add(ac.pos);
       cam.position.copy(eye);
       cam.quaternion.copy(ac.quat);
       this._q.setFromAxisAngle(UP, -(this.lookYaw + this.headYaw));

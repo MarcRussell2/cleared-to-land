@@ -94,7 +94,7 @@ CTL/
 12. Brake Failure — reverse thrust and aero drag only
 13. Fog — 600 m visibility, fly the ILS needles
 14. Slow Flight — start 5 kt above stall, don't stall, land
-15. Stall Recovery — start in a stall at 1,500 ft
+15. Stall Recovery — take over at 850 ft while the previous pilot holds it stalled; recover, then land
 16. Carrier Qual — day, calm sea
 17. Night Trap — night, pitching deck
 18. Bush: Gravel Bar — 350 m river bar, trees on final

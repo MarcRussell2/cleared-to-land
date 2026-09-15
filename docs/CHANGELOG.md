@@ -3,6 +3,22 @@
 Newest first. Player-facing lines first in each entry, then the developer notes. The flight-model
 details behind each entry live in `docs/PHYSICS.md`.
 
+## 2026-09-15 - taller seats, a stall you can feel, full-stall landings
+
+- **Seats.** In the cockpit view the pilot sits higher in all four aircraft: 10 cm in the trainer and the bush
+  plane, 8 cm in the airliner and the fighter (`seatUp` in `src/aircraft/defs.js`). The cabin stays where it is,
+  so you see more over the nose. Headroom and the windshield view were measured from the new eye, and the art
+  suite's line-of-sight check now looks from it.
+- **Stall Recovery.** It starts closer and lower, at 850 ft and about 2.7 km out: power off, nose rising, the horn going, and the
+  previous pilot still holding the yoke back, so the wing breaks about 2.5 s in and stays broken until you push
+  the nose down or add power (`FlightControl.holdStall`). The old start dropped the trainer in fully stalled and
+  it flew itself out in under a second, before anyone saw it. The held stall is not scored against you.
+- **Landing at the stall is not a fault.** A slow touchdown no longer costs points, only a fast one does, and a
+  stall or the stall horn inside the flare zone counts as part of the landing rather than a stall on the
+  approach. The debrief says "held off to the stall" when you did, and the horn in the flare no longer brings
+  up the "lower the nose" hint.
+- Tests: `tools/test-scoring.mjs`, `tools/test-stall.mjs`, and a seat check in `tools/test-camera.mjs`.
+
 ## 2026-09-14 - the game is called Cleared to Land
 
 The working title is gone: every string, storage key, file name and the web address

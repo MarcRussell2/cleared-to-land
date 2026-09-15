@@ -10,6 +10,9 @@
 import { DEG, RAD, KT, G, clamp } from '../config.js';
 
 const approach = (c, t, d) => (t > c ? Math.min(c + d, t) : Math.max(c - d, t));
+const STALL_HOLD_PAST = 5 * DEG;   // holdStall(): how far past the break the held angle of attack sits
+const STALL_HOLD_GAIN = 12;        // holdStall(): elevator per radian of angle-of-attack error
+const STALL_HOLD_ENTRY = 2.5;      // holdStall(): seconds over which the held angle of attack rises to the break
 
 export class FlightControl {
   constructor(ac, settings) {
@@ -35,6 +38,7 @@ export class FlightControl {
       out.yaw = yaw;
       inp.trim = clamp(inp.trim, -0.45, 0.45);
       out.trim = inp.trim;
+      this.holdStall(dt, inp, ac, invert);
       return;
     }
     const f = def.fcs;
@@ -100,5 +104,31 @@ export class FlightControl {
       auto = clamp(-kYD * rErr + f.coord * ac.aero.beta + kARI * out.roll, -0.35, 0.35) * (1 - 0.6 * Math.min(1, Math.abs(yaw)));
     }
     out.yaw = clamp(yaw + auto, -1, 1);
+    this.holdStall(dt, inp, ac, invert);
+  }
+
+  // The Stall Recovery start (2026-09-15). The flight begins at a stall entry that "the previous pilot" keeps
+  // holding - elevator back, the angle of attack held a few degrees past the break - until you push the nose
+  // down or add power. Before this the trainer was dropped in already stalled and flew itself out of it in
+  // under a second (its own stability plus the assist mode's stall protection), while the challenge title was
+  // still on screen. While held, ac.stallHold is true and aircraft.js keeps those stalls out of the score.
+  // Works in both control modes; the autopilot bypasses it.
+  holdStall(dt, inp, ac, invert) {
+    if (!ac.stallHold) { this.holdT = null; return; }
+    const push = (inp.kbPitch || 0) * invert < -0.15 || (inp.pitch || 0) * invert < -0.15 || (inp.mouseYoke && (inp.mdy || 0) * invert < -0.5);
+    if (push || ac.input.throttle > 0.15) {
+      ac.stallHold = false; this.holdT = null;
+      // take over from where the airplane is, with no leftover pull in the integrator (it would re-stall it)
+      this.cmdPitch = ac.euler.pitch; this.cmdBank = ac.euler.roll; this.pitchInt = 0; this.lastTrim = null;
+      return;
+    }
+    if (this.holdT == null) { this.holdT = 0; this.holdA0 = ac.aero.alpha; this.holdE0 = ac.ctl.elevator || 0; }
+    this.holdT += dt;
+    // the nose comes up over the first seconds (the horn, then the break) rather than being yanked into the stall
+    const k = Math.min(1, this.holdT / STALL_HOLD_ENTRY);
+    const target = this.holdA0 + (ac.aero.alphaStall + STALL_HOLD_PAST - this.holdA0) * k;
+    ac.input.pitch = clamp((target - ac.aero.alpha) * STALL_HOLD_GAIN - ac.omega.x * 1.5 + this.holdE0 * (1 - k) + 0.45 * k, -0.2, 1);
+    // direct mode has no wings-leveller of its own, so the previous pilot keeps the wings roughly level too, unless you roll
+    if (this.mode === 'direct' && Math.abs(inp.roll || 0) < 0.1) ac.input.roll = clamp(-ac.euler.roll * 1.2 + ac.omega.z * 0.4, -1, 1);
   }
 }

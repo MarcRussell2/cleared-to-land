@@ -466,15 +466,13 @@ class Game {
     const gamma = sp.alt != null ? -1.5 * DEG : -gsAngle;
     ac.trim(heading, speed, gamma, flap, windVec);
     if (sp.stall) {
-      // put it into a stall: slow, nose high, wing dropping
-      const vs = Math.sqrt((2 * ac.mass * 9.81) / (1.225 * def.S * ac.aero.clMax || 1.5));
-      const v = Math.max(vs * 0.85, 18);
-      ac.setPose(pos, heading, def.stall.alpha + 6 * DEG, 12 * DEG);
-      ac.vel.copy(headingToVec(heading, new THREE.Vector3())).multiplyScalar(v);
-      ac.vel.y = -3;
-      ac.input.throttle = 0.2;
-      ac.input.trim = 0.35;
-      ac.omega.set(0, 0, 0.15);
+      // The Stall Recovery start (2026-09-15): a stall ENTRY, not a stall. Slow, power off, and the previous
+      // pilot keeps the yoke back (FlightControl.holdStall): the nose rises, the horn sounds, the wing breaks and
+      // stays broken until the pilot pushes or adds power. The old start dropped it in fully stalled and the
+      // airplane flew itself out in under a second, while the challenge title was still on screen.
+      ac.input.throttle = 0;
+      ac.input.trim = 0;
+      ac.stallHold = true;
     }
     if (w.carrier) ac.vel.add(w.carrier.vel.clone().multiplyScalar(0));
     for (const e of ac.engines) e.throttle = ac.input.throttle;
@@ -892,8 +890,8 @@ class Game {
       else if (def.id === 'condor') h = 'Hold R for reverse thrust, brakes with Space (or autobrake). Keep the centerline with rudder.';
       else if (def.id === 'hornet' && !ac.trap.engaged) h = ac.trap.boltered ? 'BOLTER: full throttle, fly off the deck, and come around for another pass.' : 'Full throttle until the wire stops you.';
       else h = 'Brakes: hold Space. Keep the centerline with rudder (Q/E).';
-    } else if (sc.id === 'stallrec' && ac.stats.stalls <= 1 && this.t < 20 && (ac.aero.stall > 0.1 || ac.ias < def.speeds.Vs1 * KT * 1.1)) h = 'STALL: push the nose down (up arrow), full throttle (W), level the wings gently.';
-    else if (ac.aero.warning) h = 'Stall warning: lower the nose a little and add power.';
+    } else if (sc.id === 'stallrec' && (ac.stallHold || (ac.stats.stalls <= 2 && this.t < 40 && (ac.aero.stall > 0.1 || ac.ias < def.speeds.Vs1 * KT * 1.1)))) h = 'STALL: push the nose down (up arrow), full throttle (W), level the wings gently.';
+    else if (ac.aero.warning && ac.radioAlt > ac.flareZone()) h = 'Stall warning: lower the nose a little and add power.';   // in the flare the horn is the landing, not a mistake
     else if (def.id === 'hornet') {
       if (ac.ctl.hook < 0.9) h = 'Hook down: press H. Gear: G. Flaps full: F twice.';
       else if (ac.ctl.gear < 0.9) h = 'Gear down: press G.';

@@ -151,9 +151,9 @@ export const SCENARIOS = [
   },
   {
     id: 'stallrec', n: 15, title: 'Stall Recovery', tags: T('stall'), aircraft: 'skylark', site: 'bayfield', time: 14, vis: 30000,
-    desc: 'You start stalled, wing dropping, at 1,500 ft on the extended centerline. Recover (nose down, full power, wings level), then fly the approach and land.',
-    tips: ['Nose down first. Power second. Level the wings with rudder if the ailerons are mushy.', 'Do not pull hard during the recovery or it will stall again (secondary stall).', 'You lose about 300 ft. You have 1,500.'],
-    wind: { rel: 0, speed: 5 }, weight: 'normal', spawn: { dist: 3500, flap: 0.333, alt: 460, stall: true, fixed: true }, failures: [], scoring: { type: 'runway', stallStart: true },
+    desc: 'You take over at 850 ft on final: power off, nose rising, the stall horn going, and the previous pilot still holding the yoke back. The wing breaks and stays broken until you act. Push the nose down and add power, level the wings, then fly the approach and land.',
+    tips: ['Push the nose down first, then full power. Either one hands you the airplane.', 'Once the airspeed is back, ease the nose up to the horizon and level the wings. Pull too hard and it stalls again (a secondary stall).', 'A quick recovery costs 150 to 250 ft of your 850. Touching down at the stall is a good landing, not a fault.'],
+    wind: { rel: 0, speed: 5 }, weight: 'normal', spawn: { dist: 2400, flap: 0.333, alt: 260, speedKt: 56, stall: true, fixed: true }, failures: [], scoring: { type: 'runway', stallStart: true },
   },
   {
     id: 'cq', n: 16, title: 'Carrier Qual', tags: T('carrier'), aircraft: 'hornet', site: 'carrier', time: 14, vis: 30000, seaState: 0.2,

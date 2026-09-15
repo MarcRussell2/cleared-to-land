@@ -93,5 +93,12 @@ ok(Math.abs(rig.orbitYaw) < 1e-9 && Math.abs(rig.orbitPitch) < 1e-9, `chase orbi
 inp.orbitDX = 300; settle(ac); rig.setMode('cockpit'); inp.orbitDX = 300; settle(ac); rig.reset(); rig.setMode('chase'); settle(ac, 400);
 ok(rig.headYaw === 0 && rig.viewZoom === 1 && Math.abs(rig.orbitYaw - 1.2) < 1e-6, `reset(): head straight, zoom 1, chase orbit kept (${rig.orbitYaw.toFixed(2)} rad)`);
 
+// --- (f) the seat (2026-09-15): the cockpit camera sits at the design eye raised by def.seatUp
+ac = mkAc(80); ac.def.seatUp = 0.12;
+rig.setMode('cockpit'); rig.reset(); settle(ac, 5);
+ok(Math.abs(cam.position.y - (80 + 1.1 + 0.12)) < 1e-6 && Math.abs(cam.position.z - 0.4) < 1e-6, `cockpit eye is the design eye raised by seatUp (y ${cam.position.y.toFixed(3)}, want ${(80 + 1.1 + 0.12).toFixed(3)})`);
+delete ac.def.seatUp; settle(ac, 5);
+ok(Math.abs(cam.position.y - (80 + 1.1)) < 1e-6, `no seatUp: the camera sits at the design eye (y ${cam.position.y.toFixed(3)})`);
+
 console.log(fails.length ? `\n${fails.length} FAILED` : '\nall camera checks passed');
 process.exit(fails.length ? 1 : 0);

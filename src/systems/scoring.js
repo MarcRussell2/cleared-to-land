@@ -1,5 +1,6 @@
 // Landing evaluation: points, grade, and the debrief line items.
 import { KT, FT, FPM, RAD, clamp } from '../config.js';
+import { stallSpeed } from '../physics/aero.js';
 
 export const GRADES = ['GREASED', 'SMOOTH', 'FIRM', 'HARD', 'DAMAGED', 'CRASH'];
 export const CARRIER_GRADES = ['OK (underline)', 'OK', 'FAIR', 'NO GRADE', 'CUT', 'CRASH'];
@@ -72,7 +73,15 @@ export function scoreLanding(ac, sc, approach) {
   // speed
   const vref = vrefFor(ac, sc);
   const dv = td.ias / KT - vref;
-  { const pp = Math.min(15, Math.round(Math.max(0, Math.abs(dv) - (def.id === 'trailblazer' ? 4 : 7)))); pen(pp, 'Speed at touchdown', `${(td.ias / KT).toFixed(0)} kt (Vref ${vref}, ${dv >= 0 ? '+' : ''}${dv.toFixed(0)})`, pp); }
+  // Slow is not a fault (2026-09-15). Holding it off until it touches at or near the stall is the textbook
+  // landing for these airplanes, and one that actually drops in is already scored by the sink rate. Only fast costs.
+  {
+    const tol = def.id === 'trailblazer' ? 4 : 7;
+    const pp = dv > 0 ? Math.min(15, Math.round(Math.max(0, dv - tol))) : 0;
+    const vsKt = stallSpeed(def, ac.mass, ac.ctl ? ac.ctl.flap : 0) / KT;
+    const note = td.ias / KT <= vsKt + 4 ? '  held off to the stall' : dv < -tol ? '  slow and gentle' : '';
+    pen(pp, 'Speed at touchdown', `${(td.ias / KT).toFixed(0)} kt (Vref ${vref}, ${dv >= 0 ? '+' : ''}${dv.toFixed(0)})${note}`, pp);
+  }
   // attitude
   const noseFirst = td.legs.includes('nose') && !td.legs.some((l) => l === 'left' || l === 'right');
   if (noseFirst) pen(15, 'Attitude', 'NOSE WHEEL FIRST', 15);
@@ -95,9 +104,13 @@ export function scoreLanding(ac, sc, approach) {
   }
   if (st.bounces) pen(Math.min(24, st.bounces * 8), 'Bounces', String(st.bounces), Math.min(24, st.bounces * 8));
   // stalls
-  const stalls = sc.scoring.stallStart ? Math.max(0, st.stalls - 1) : st.stalls;
+  // A stall or the horn inside the flare zone belongs to the landing, not the approach: a wing that quits a foot
+  // above the runway is a full-stall landing (2026-09-15). The stall the Stall Recovery challenge starts in is
+  // held for you until you act (FlightControl.holdStall), so it is not yours either. aircraft.js keeps the counts.
+  const stalls = Math.max(0, st.stalls - (st.stallsLow || 0) - (st.stallsHeld || 0));
+  const horn = st.stallWarnTime - (st.stallWarnTimeLow || 0);
   if (stalls) pen(Math.min(30, stalls * 15), 'Stalls on approach', String(stalls), Math.min(30, stalls * 15));
-  else if (st.stallWarnTime > 2 && !sc.scoring.stallStart) pen(5, 'Stall warning', `${st.stallWarnTime.toFixed(1)} s of horn`, 5);
+  else if (horn > 2 && !sc.scoring.stallStart) pen(5, 'Stall warning', `${horn.toFixed(1)} s of horn on the approach`, 5);
   // rollout
   if (approach.offRunway) pen(30, 'Rollout', 'LEFT THE RUNWAY', 30);
   else if (approach.overran) pen(40, 'Rollout', 'OVERRAN THE END', 40);

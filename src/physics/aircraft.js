@@ -87,11 +87,12 @@ export class Aircraft {
     this.hookTipWorld = new Vector3();
 
     this.stats = {
-      maxG: 1, minG: 1, stallTime: 0, stallWarnTime: 0, stalls: 0, bounces: 0, touchdown: null, touchdowns: [],
+      maxG: 1, minG: 1, stallTime: 0, stallWarnTime: 0, stallWarnTimeLow: 0, stalls: 0, stallsLow: 0, stallsHeld: 0, bounces: 0, touchdown: null, touchdowns: [],
       maxLoad: 0, damage: [], tailstrike: false, propstrike: false, belly: false, gearCollapse: false,
       maxSink: 0, minIasAirborne: 1e9, goArounds: 0, flightTime: 0, wingtip: false,
     };
     this._stalledNow = false;
+    this.stallHold = false;   // the Stall Recovery start: set by main.js spawn(), released by FlightControl.holdStall()
 
     this.euler = { heading: 0, pitch: 0, roll: 0 };
     this.fwd = new Vector3(0, 0, -1);
@@ -109,6 +110,10 @@ export class Aircraft {
   }
 
   // ---------- setup ----------
+  // The flare zone: below this radio altitude (m) a stall or the stall horn belongs to the landing, not the approach
+  // (scoring.js, 2026-09-15). The flare height of the control law, and never under 4 m.
+  flareZone() { return Math.max(this.def.fcs.flareH || 0, 4); }
+
   setPose(pos, heading, pitch, roll) {
     this.pos.copy(pos);
     const qy = new Quaternion().setFromAxisAngle(UP, -heading);
@@ -290,9 +295,9 @@ export class Aircraft {
 
     // Stall statistics
     const st = this.aero.stall;
-    if (st > 0.3 && !this.onGround && this.tas > 12) { this.stats.stallTime += h; if (!this._stalledNow) { this._stalledNow = true; this.stats.stalls++; this.events.push({ type: 'stall' }); } }
+    if (st > 0.3 && !this.onGround && this.tas > 12) { this.stats.stallTime += h; if (!this._stalledNow) { this._stalledNow = true; this.stats.stalls++; if (this.radioAlt < this.flareZone()) this.stats.stallsLow++; if (this.stallHold) this.stats.stallsHeld++; this.events.push({ type: 'stall' }); } }
     else if (st < 0.1 || this.onGround) this._stalledNow = false;
-    if (this.aero.warning && !this.onGround) this.stats.stallWarnTime += h;
+    if (this.aero.warning && !this.onGround) { this.stats.stallWarnTime += h; if (this.radioAlt < this.flareZone()) this.stats.stallWarnTimeLow += h; }
     if (!this.onGround) {
       if (this.ias < this.stats.minIasAirborne) this.stats.minIasAirborne = this.ias;
       if (-this.vs > this.stats.maxSink) this.stats.maxSink = -this.vs;
