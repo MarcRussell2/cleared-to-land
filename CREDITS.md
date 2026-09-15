@@ -29,3 +29,6 @@ procedurally by the game.
 ## Fonts
 
 Barlow, Barlow Condensed and Share Tech Mono via Google Fonts (SIL Open Font License).
+
+The models in `assets/models/` are not covered by the repository's MIT license: they stay
+Creative Commons Attribution 3.0 works by the authors above.
