@@ -22,6 +22,7 @@ import { Menus } from './ui/menus.js';
 import { AudioSys } from './audio.js';
 import { SITES, SCENARIOS, siteFlats, resolveScenario, makeFreeFlight } from './systems/scenarios.js';
 import { scoreLanding, vrefFor } from './systems/scoring.js';
+import { pilotName, publish, forget as forgetBoards } from './systems/leaderboard.js';
 import { applyFailure, shouldTrigger } from './systems/malfunctions.js';
 import { Autoland } from './systems/autopilot.js';
 import { FlightControl } from './systems/flightControl.js';
@@ -80,7 +81,7 @@ class Game {
     if (!saved.quality && this.touchDevice) this.settings.quality = 'medium';   // a phone starts a tier down; autoQuality() scales from there
     this.freeOpts = { ...DEFAULT_FREE, ...loadJSON('ctl.free', {}) };
     this.best = loadJSON('ctl.best', {});
-    this.pilot = loadStr('ctl.pilot');   // the logbook name new bests are stamped with (typed once per browser)
+    this.pilot = pilotName.get();   // the logbook name new bests are stamped with; shared with the rest of goodmarc.com
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -510,8 +511,10 @@ class Game {
   // A new best is stamped with this name. It lives in the browser's localStorage, so it is typed once; anyone else
   // landing on the same browser changes it on the debrief (or in Settings), and older entries keep the name they were flown under.
   setPilot(name) {
-    this.pilot = String(name || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 16);
-    try { if (this.pilot) localStorage.setItem('ctl.pilot', this.pilot); else localStorage.removeItem('ctl.pilot'); } catch (e) { /* ignore */ }
+    this.pilot = pilotName.set(name);
+    // Someone who flies first and names themselves afterwards should still appear on
+    // the board for the flights they have already logged.
+    if (this.pilot) { publish(this.best, this.pilot); forgetBoards(); }
     return this.pilot;
   }
   nameBest(id, name) {
@@ -565,7 +568,10 @@ class Game {
       const b = this.best[sc.id];
       if (sc.id !== 'free' && (!b || result.points > b.points)) {
         this.best[sc.id] = { points: result.points, grade: result.grade, ...(this.pilot ? { name: this.pilot } : {}) };
-        saveJSON('ctl.best', this.best); newBest = !!ac.stats.touchdown && result.points > 0;
+        saveJSON('ctl.best', this.best);
+        newBest = !!ac.stats.touchdown && result.points > 0;
+        publish(this.best, this.pilot, sc.id);
+        forgetBoards();
       }
     }
     const idx = SCENARIOS.findIndex((s) => s.id === sc.id);

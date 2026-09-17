@@ -168,6 +168,20 @@ button { font: inherit; }
 input[type=text] { background: #101a26; color: #fff; border: 1px solid var(--line2); border-radius: 3px; padding: 6px 10px; font: inherit; font-size: 15px; width: 190px; }
 input[type=text]:focus { outline: none; border-color: var(--hud); box-shadow: 0 0 0 3px rgba(159,247,200,0.15); }
 input[type=text]::placeholder { color: var(--dim); }
+/* The Logbook tab's boards: the career table and one challenge's top ten. */
+.board { margin: 6px 0 22px; max-width: 620px; }
+.board .note { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+table.lb { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.lb th { text-align: left; font-family: var(--mono); font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); font-weight: 400; padding: 0 8px 6px; border-bottom: 1px solid var(--line2); }
+table.lb td { padding: 6px 8px; border-bottom: 1px solid var(--line); }
+table.lb .n { text-align: right; font-family: var(--mono); }
+table.lb th.n { text-align: right; }
+table.lb tr.place td { color: #fff; }
+table.lb tr.p1 td { background: rgba(159, 247, 200, 0.07); }
+table.lb tr.p1 td:first-child { color: #ffd479; }
+table.lb tr.p2 td:first-child { color: #cfd6de; }
+table.lb tr.p3 td:first-child { color: #d9a273; }
+
 .ledger { border-top: 1px solid var(--line2); margin: 14px 0 22px; max-width: 720px; }
 .ledger div { display: grid; grid-template-columns: 200px 1fr; gap: 12px; padding: 7px 0; border-bottom: 1px dashed var(--line); font-size: 14px; }
 .ledger .k { color: var(--muted); }

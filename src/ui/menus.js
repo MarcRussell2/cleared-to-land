@@ -4,6 +4,7 @@ import { AIRCRAFT_LIST, AIRCRAFT } from '../aircraft/defs.js';
 import { FAILURES } from '../systems/malfunctions.js';
 import { KEY_HELP } from '../input.js';
 import { touchify } from '../touch.js';
+import { readBoard, pilotName } from '../systems/leaderboard.js';
 
 const GROUPS = [
   ['Basics', ['solo', 'xwind15', 'gusty']],
@@ -16,6 +17,8 @@ const GROUPS = [
 ];
 
 function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+// The top three get a tint on the board, the rest nothing.
+function cleanRowClass(i) { return i < 3 ? 'place p' + (i + 1) : ''; }
 function attr(s) { return esc(s).replace(/"/g, '&quot;'); }
 
 // The build stamp: the website copy carries it in <meta name="ctl-build">; the local copy uses the bundle time.
@@ -53,6 +56,7 @@ export class Menus {
         <nav class="tabs">
           <button class="tab ${tab === 'challenges' ? 'active' : ''}" data-tab="challenges">Challenges</button>
           <button class="tab ${tab === 'free' ? 'active' : ''}" data-tab="free">Free flight</button>
+          <button class="tab ${tab === 'logbook' ? 'active' : ''}" data-tab="logbook">Logbook</button>
           <button class="tab ${tab === 'controls' ? 'active' : ''}" data-tab="controls">Controls</button>
           <button class="tab ${tab === 'settings' ? 'active' : ''}" data-tab="settings">Settings</button>
         </nav>
@@ -70,6 +74,7 @@ export class Menus {
       const tab = t.dataset.tab;
       if (tab === 'challenges') this.showMain();
       else if (tab === 'free') this.showFree();
+      else if (tab === 'logbook') this.showLogbook();
       else if (tab === 'controls') this.showControls();
       else this.showSettings();
     }));
@@ -127,6 +132,97 @@ export class Menus {
     this.q('#btn-fly').addEventListener('click', () => this.game.startScenario(sc));
     const active = this.q('.row.active'); if (active) active.scrollIntoView({ block: 'nearest' });
   }
+  /* ------------------------------------------------------------- the logbook */
+
+  /**
+   * The leaderboard. Two tables: every pilot's career total across the twenty
+   * challenges, and the top ten on whichever challenge is selected in the rail.
+   *
+   * This replaces what the game used to show, which was a single line per challenge
+   * naming whoever last beat it — Marc's point being that one name is not a board.
+   * Rows are fetched, so the screen paints immediately with "reading…" and fills in;
+   * with no network it falls back to this machine's own bests and says so.
+   */
+  showLogbook() {
+    this.tab = 'logbook';
+    const sc = SCENARIOS.find((s) => s.id === this.selected) || SCENARIOS[0];
+    this.show(this.frame('logbook', this.rail(), this.logbookSheet(sc)));
+    this.bindTabs();
+    this.qa('.row').forEach((r) => r.addEventListener('click', () => { this.selected = r.dataset.id; this.showLogbook(); }));
+    const save = this.q('#btn-lb-pilot');
+    if (save) save.addEventListener('click', () => {
+      const input = this.q('#lb-pilot');
+      const saved = this.game.setPilot(input ? input.value : '');
+      if (input) input.value = saved;
+      this.showLogbook();
+    });
+    this.fillBoard('#board-career', '');
+    this.fillBoard('#board-one', sc.id);
+    const active = this.q('.row.active'); if (active) active.scrollIntoView({ block: 'nearest' });
+  }
+
+  logbookSheet(sc) {
+    const pilot = this.game.pilot || '';
+    const best = this.game.best || {};
+    const flown = Object.keys(best).length;
+    const career = Object.values(best).reduce((a, x) => a + (x && x.points ? x.points : 0), 0);
+    return `
+      <div class="eyebrow">Logbook</div>
+      <h1>The board</h1>
+      <p class="lead">Your career is every challenge's best added up &mdash; ${career} points from ${flown} of ${SCENARIOS.length} challenges.</p>
+      <div class="pilot">
+        <label for="lb-pilot">Logbook name</label>
+        <input id="lb-pilot" type="text" maxlength="16" value="${attr(pilot)}" placeholder="your name" autocomplete="off" autocapitalize="words" spellcheck="false">
+        <button class="btn small" id="btn-lb-pilot">Save</button>
+        <span class="note">Shared with the games on goodmarc.com, so you type it once.</span>
+      </div>
+      <h2>Career</h2>
+      <div class="board" id="board-career"><p class="note">Reading the board&hellip;</p></div>
+      <h2>${esc(sc.title)}</h2>
+      <div class="board" id="board-one"><p class="note">Reading the board&hellip;</p></div>`;
+  }
+
+  /** Fetch one board and paint it. Never throws into the menu. */
+  fillBoard(sel, board) {
+    const node = this.q(sel);
+    if (!node) return;
+    const local = () => this.localRows(board);
+    readBoard(board, local).then(({ rows, source }) => {
+      const live = this.q(sel);           // the pilot may have changed tab meanwhile
+      if (!live) return;
+      if (!rows.length) {
+        live.innerHTML = `<p class="note">${source === 'world' ? 'Nobody has flown this yet.' : 'Not flown on this machine yet.'}</p>`;
+        return;
+      }
+      live.innerHTML = `<table class="lb">
+        <thead><tr><th>#</th><th>Pilot</th><th class="n">Points</th><th class="n">${board ? 'Grade' : 'Flown'}</th></tr></thead>
+        <tbody>${rows.map((r, i) => `<tr class="${cleanRowClass(i)}">
+          <td class="n">${i + 1}</td>
+          <td>${esc(r.name)}</td>
+          <td class="n">${r.score}</td>
+          <td class="n">${esc(String(board ? (r.grade || '-') : (r.flown != null ? r.flown : '-')))}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+      <p class="note">${source === 'world' ? 'Everyone who has flown it.' : 'This machine only - the shared board is not reachable right now.'}</p>`;
+    }).catch(() => {
+      const live = this.q(sel);
+      if (live) live.innerHTML = '<p class="note">The board could not be read.</p>';
+    });
+  }
+
+  /** The offline fallback: what this machine knows, shaped like the API's rows. */
+  localRows(board) {
+    const best = this.game.best || {};
+    const name = pilotName.get() || 'YOU';
+    if (board) {
+      const b = best[board];
+      return b ? [{ name, score: b.points, grade: b.grade }] : [];
+    }
+    const ids = Object.keys(best);
+    if (!ids.length) return [];
+    return [{ name, score: ids.reduce((a, id) => a + (best[id].points || 0), 0), flown: ids.length }];
+  }
+
   showBriefing(sc) { this.selected = sc.id; this.showMain(); }
 
   showDebrief(result, sc, stats) {
