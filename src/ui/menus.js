@@ -391,10 +391,10 @@ export class Menus {
     }
     const count = (l) => `${l.filter((s) => this.bestOf(s.id)).length}/${l.length}`;
     let rail = `<button class="cat all ${this.cat === 'all' ? 'on' : ''}" data-cat="all"><span class="cn">All missions</span><span class="cc">${count(list)}</span></button><hr>`;
-    let inNew = false;
+    let inNew = false, newHead = false;
     for (const { g, list: l } of groups) {
       const isNew = l.every((s) => !isClassicMission(s.id));
-      if (isNew && !inNew) rail += '<div class="cats-h nw">New missions</div>';
+      if (isNew && !inNew) { rail += newHead ? '<hr>' : '<div class="cats-h nw">New missions</div>'; newHead = true; }
       else if (!isNew && inNew) rail += '<hr>';
       inNew = isNew;
       rail += `<button class="cat ${this.cat === g.id ? 'on' : ''}" data-cat="${attr(g.id)}"><span class="cn">${esc(g.title)}</span><span class="cc">${count(l)}</span></button>`;
@@ -500,10 +500,10 @@ export class Menus {
       + kv('Malfunction', failText(sc));
     if (wx) {
       const p = WEATHER_PRESETS.find((w) => w.id === wx.preset);
-      const bits = [p ? p.name : wx.preset || 'Weather'];
-      if (wx.rain > 0.05) bits.push('rain'); if (wx.snow > 0.05) bits.push('snow'); if (wx.dust > 0.05) bits.push('dust'); if (wx.lightning > 0.05) bits.push('lightning');
-      board += kv('Weather', [...new Set(bits)].join(', '));
-      board += kv('Cloud base', wx.ceiling != null ? `${fmtInt(wx.ceiling / 0.3048 / 100) * 100} ft` : 'High');
+      const name = p ? p.name : cap(wx.preset || 'weather');
+      const extra = ['rain', 'snow', 'dust', 'lightning'].filter((k) => wx[k] > 0.05 && !name.toLowerCase().includes(k));
+      board += kv('Weather', [name, ...extra].join(', '));
+      board += kv('Cloud base', wx.ceiling != null ? `${fmtInt(Math.round(wx.ceiling / 0.3048 / 100) * 100)} ft` : 'High');
       const ev = (wx.events || []).map((e) => EVENT_NAMES[e.type] || e.type);
       if (ev.length) board += kv('Expect', [...new Set(ev)].join(', '));
     }
@@ -671,7 +671,7 @@ export class Menus {
         const usable = ids.filter((id) => siteUsable(SITES[id], def).ok).length;
         return `<div class="blk">${head('Place', `${ids.length} places. The ${esc(def.short || def.name)} can use ${usable}.`)}<div class="tiles t6">${tiles}</div></div>
           <div class="two">
-            <div class="blk"><div class="blk-h"><h3>Start</h3>${bush ? '<span>Bush strips start 900 m out, over the trees</span>' : ''}</div>${seg('dist', starts, bush ? '' : String(o.dist), bush)}</div>
+            <div class="blk"><div class="blk-h"><h3>Start</h3>${bush ? '<span>Bush strips start close in, over the trees</span>' : ''}</div>${seg('dist', starts, bush ? '' : String(o.dist), bush)}</div>
             <div class="blk"><div class="blk-h"><h3>Obstacles</h3></div>${hasObs ? toggle('obstacles', o.obstacles ? 'Obstacles on' : 'Obstacles off', 'Trees, towers and wires on the approach', o.obstacles) : toggle('obstacles', 'None here', 'This place has nothing in the way', false, true)}</div>
           </div>`;
       }

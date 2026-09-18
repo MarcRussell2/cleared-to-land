@@ -177,6 +177,16 @@ function failureTrigger(when, o, prof, useWindow) {
   }
 }
 
+// A catalogue entry may say when it happens in free flight (`freeAt`: a tyre bursts on touchdown, a gear that will not
+// come down is known from the start); otherwise the moment the pilot picked. A seeded window this build cannot fire
+// becomes a plain time trigger at its start.
+function freeTrigger(entry, at, useWindow) {
+  const f = entry && entry.freeAt && typeof entry.freeAt === 'object' ? { ...entry.freeAt } : null;
+  if (!f) return { ...at };
+  if (f.type === 'window' && !useWindow) return { type: 'time', value: f.from || 0 };
+  return f;
+}
+
 // options -> scenario (src/missions/README.md). `seed` only picks the "Surprise me" failure.
 export function buildFreeFlight(opts, { sites, aircraft = AIRCRAFT, failures = FAILURES, seed = 1, defaults = null } = {}) {
   const o = validateFreeOpts(opts, { defaults: defaults || opts, sites, aircraft, failures });
@@ -210,7 +220,7 @@ export function buildFreeFlight(opts, { sites, aircraft = AIRCRAFT, failures = F
     },
     weight: o.weight,
     spawn,
-    failures: names.map((name) => ({ name, at: { ...at }, arg: 0, ...(o.surprise ? { silent: true } : {}) })),
+    failures: names.map((name) => ({ name, at: freeTrigger(failures[name], at, useWindow), arg: 0, ...(o.surprise ? { silent: true } : {}) })),
     surprise: !!o.surprise,
     scoring: { type: carrier ? 'carrier' : bush ? 'bush' : 'runway' },
   };

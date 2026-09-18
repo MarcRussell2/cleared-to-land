@@ -90,7 +90,6 @@ class Game {
     this.touchSeen = false;
     if (!saved.quality && this.touchDevice) this.settings.quality = 'medium';   // a phone starts a tier down; autoQuality() scales from there
     // a saved setup may name a site, aircraft or failure this build does not have (or be anything at all): cleaned, never trusted
-    this.freeDefaults = DEFAULT_FREE;
     this.freeOpts = validateFreeOpts(loadJSON('ctl.free', {}), { defaults: DEFAULT_FREE, sites: SITES, aircraft: AIRCRAFT, failures: FAILURES });
     this.best = loadJSON('ctl.best', {});
     this.pilot = pilotName.get();   // the logbook name new bests are stamped with; shared with the rest of goodmarc.com
