@@ -285,50 +285,55 @@ class PitotIce {
 // cockpit is told it is daytime, which is what its panel lighting keys on), the landing light goes out. The
 // airplane's own steam gauges and the stall horn need no electricity, so they carry on.
 class Electrical {
-  constructor(rt) { this.rt = rt; }
+  constructor(rt) { this.rt = rt; this.light = null; this.max = 0; }
   start() {
     const rt = this.rt;
     rt.display.dark = true; rt.power = 0;
+    // models.js sets the landing light's intensity to userData.max below 600 ft with the gear down: max 0 keeps it
+    // dark without hiding the light (a light switched invisible recompiles every lit shader in the scene)
     const m = rt.game && rt.game.model, L = m && m.parts && m.parts.landingLight;
-    if (L && L.userData) L.userData.max = 0;   // models.js sets intensity = max below 600 ft with the gear down
+    if (L && L.userData) { this.light = L; this.max = L.userData.max; L.userData.max = 0; }
   }
+  dispose() { if (this.light) this.light.userData.max = this.max; }
 }
 
 // The gear will not come down (or up: it goes up and stays there). Belly landing: the mission's scoring.belly says
-// that is the job, not a fault, and score() takes the belly off the damage list; fuel cutoff (U) is part of the drill.
+// that is the job, not a fault (scoreBelly below); fuel cutoff (U) is part of the drill.
 class GearUp {
-  constructor(rt) { this.rt = rt; this.cut = false; this.cutT = 0; this.runAtContact = null; }
+  constructor(rt) { this.rt = rt; this.cut = false; this.cutT = 0; }
   start() { this.rt.setAction('fuelCutoff', 'FUEL CUT', 'fuel cutoff', 'U', false); }
   pre(dt, ac, inp, w) {
     ac.input.gearCmd = 0;
     if (this.cut) { this.cutT += dt; w.throttle = 0; if (this.cutT > 2.5) this.rt.shutAll(ac); }
   }
-  post(dt, ac) {
-    if (this.runAtContact == null && ac.stats.touchdown) this.runAtContact = !this.cut;
-    this.rt.cfgLine('GEAR UNSAFE', 'bad');
-  }
+  post() { this.rt.cfgLine('GEAR UNSAFE', 'bad'); }
   action(name) {
     if (name !== 'fuelCutoff' || this.cut) return false;
     this.cut = true; this.rt.fuelCut = true; this.rt.clearAction('fuelCutoff');
     this.rt.say('Fuel cutoff.', 'FUEL CUTOFF', '');
     return true;
   }
-  score(result, ac, approach, rt) {
-    if (!rt.sc.scoring || !rt.sc.scoring.belly || ac.crashed || !ac.stats.touchdown) return result;
-    const st = ac.stats;
-    // what a belly landing touches: the engine pods first, and with the CG behind them it sits back onto the tail
-    const excused = ['Belly landing', 'Engine nacelle scraped', 'Tail strike'];
-    const view = Object.create(ac);
-    view.stats = { ...st, belly: false, tailstrike: false, damage: st.damage.filter((d) => !excused.includes(d)) };
-    const r = scoreLanding(view, rt.sc, approach);
-    for (const l of r.lines) if (l.k === 'Attitude') { l.v = `${(st.touchdown.pitch * RAD).toFixed(1)}° pitch, on the belly`; l.cls = 'good'; }
-    const running = this.runAtContact !== false;
-    let pts = r.points;
-    r.lines.push({ k: 'Belly landing', v: running ? 'engines still running when it touched  (-10)' : 'engines shut down before contact', cls: running ? 'warn' : 'good' });
-    if (running) pts -= 10;
-    r.points = clamp(Math.round(pts), 0, 100);
-    return r;
-  }
+}
+
+// scoring.belly (a mission that asks for a belly landing; this area owns the flag): the landing is scored again with
+// the belly taken off the damage list, and so is everything a gear-up airliner touches on the way down - the engine
+// pods first, then the nose as it comes down, and the tail if it sits back - since a belly landing asked for is the
+// job, not a fault. One line says whether the engines were still running when it touched (a fire risk: -10).
+// scoring.js is not edited: it is handed a view of the aircraft whose stats say so.
+const BELLY_EXCUSED = ['Belly landing', 'Engine nacelle scraped', 'Tail strike', 'Nose damage'];
+export function scoreBelly(result, ac, approach, sc, running) {
+  if (ac.crashed || !ac.stats.touchdown) return result;
+  const st = ac.stats;
+  const view = Object.create(ac);
+  view.stats = { ...st, belly: false, tailstrike: false, damage: st.damage.filter((d) => !BELLY_EXCUSED.includes(d)) };
+  const r = scoreLanding(view, sc, approach);
+  if (!st.belly && !st.damage.includes('Engine nacelle scraped')) return result;   // it landed on its wheels after all
+  for (const l of r.lines) if (l.k === 'Attitude') { l.v = `${(st.touchdown.pitch * RAD).toFixed(1)}° pitch, on the belly`; l.cls = 'good'; }
+  let pts = r.points;
+  r.lines.push({ k: 'Belly landing', v: running ? 'engines still running when it touched  (-10)' : 'engines shut down before contact', cls: running ? 'warn' : 'good' });
+  if (running) pts -= 10;
+  r.points = clamp(Math.round(pts), 0, 100);
+  return r;
 }
 
 // One main wheel is not there. A retractable leg stays up (stuckAt 0: that side lands on its engine pod or wing); on
@@ -435,6 +440,9 @@ class LensFail {
   start() {
     const rt = this.rt;
     rt.display.noBall = true;
+    // the green datum bars go dark with the ball (carrier.js lights them once and never writes them again)
+    const cv = rt.world && rt.world.carrier;
+    if (cv && cv.lensSet && cv.datum) for (const i of cv.datum) cv.lensSet.setColor(i, 0, 0, 0);
     if (rt.game && rt.game.calloutState) rt.game.calloutState.rogerBall = true;   // nobody will call the ball
     rt.later('Paddles contact. The lens is down. Fly your numbers, I will talk you in.', 0.3, true);
   }
@@ -519,6 +527,14 @@ export class FailureRuntime {
     this.touchify = touchify;
     // `at` is copied too: a 'window' trigger writes the moment it drew into it, and the scenario is shared
     this.pending = (sc.failures || []).map((f) => ({ ...f, at: f.at ? { ...f.at } : { type: 'start' } }));
+    // Free Flight deals every failure a random altitude and an arg of 0 (scenarios.js makeFreeFlight, which suits the
+    // first ten). The new ones take their own defaults there, and the moment the catalogue gives them (freeAt).
+    if (sc.id === 'free') for (const f of this.pending) {
+      const c = FAILURES[f.name];
+      if (!c || !c.effect) continue;
+      delete f.arg;
+      if (c.freeAt) f.at = { ...c.freeAt };
+    }
     const rng = makeRng(seed * SEED_K + SEED_C);
     for (const f of this.pending) if (f.at.type === 'window') { const a = f.at.from || 0, b = f.at.to ?? a; f.at.when = a + rng() * Math.max(0, b - a); }
     this.active = [];          // display names, for the HUD failure chips
@@ -528,6 +544,7 @@ export class FailureRuntime {
     this.t = 0;
     this.power = 1;            // electrical power, for the cockpit (0 = dead)
     this.fuelCut = false;
+    this.runAtContact = null;  // were the engines running at the first touch of the ground? (scoring.belly)
     this._hintTimer = null; this._laterTimers = [];
     this._shadow = {}; for (const k of CHANNELS) this._shadow[k] = { base: 0, out: NaN };
     this._w = { pitch: 0, roll: 0, yaw: 0, trim: 0, throttle: 0 };
@@ -656,6 +673,7 @@ export class FailureRuntime {
   }
   postStep(dt, ac) {
     this.t += dt;
+    if (this.runAtContact == null && ac.stats.touchdown) this.runAtContact = !this.fuelCut && ac.engines.some((e) => !e.failed);
     if (!this.fx.length && !this.display) return;
     const d = this._display, snd = this.sound;
     snd.bell = 0; snd.clacker = 0; snd.buzz = 0;
@@ -677,6 +695,7 @@ export class FailureRuntime {
   // The landing result with what the failures change (main.js: before the mission's own lines).
   score(result, ac, approach) {
     let r = result;
+    if (this.sc.scoring && this.sc.scoring.belly && this.sc.scoring.type !== 'carrier') r = scoreBelly(r, ac, approach, this.sc, this.runAtContact !== false);
     for (const f of this.fx) if (f.score) r = f.score(r, ac, approach, this);
     return r;
   }

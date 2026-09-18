@@ -371,7 +371,8 @@ export class Menus {
     const f = this.game.freeOpts;
     const acOpts = AIRCRAFT_LIST.map((a) => `<option value="${a.id}">${a.name} — ${a.category}</option>`).join('');
     const siteOpts = Object.values(SITES).map((s) => `<option value="${s.id}">${s.name} (${s.kind})</option>`).join('');
-    const failOpts = Object.entries(FAILURES).map(([k, v]) => `<label><input type="checkbox" class="f-fail" value="${k}" ${f.failures.includes(k) ? 'checked' : ''}> ${v.name}</label>`).join('');
+    // only what this aircraft can have (a single has no left engine, fixed gear none to jam: FAILURES[k].applies)
+    const failOpts = (id) => Object.entries(FAILURES).filter(([, v]) => !v.applies || !AIRCRAFT[id] || v.applies(AIRCRAFT[id])).map(([k, v]) => `<label><input type="checkbox" class="f-fail" value="${k}" ${f.failures.includes(k) ? 'checked' : ''}> ${v.name}</label>`).join('');
     const sheet = `
       <div class="eyebrow">Free flight</div>
       <h1>Your conditions</h1>
@@ -387,7 +388,7 @@ export class Menus {
         <label class="field"><span>Sea state (carrier)</span><input type="range" id="f-sea" min="0" max="1" step="0.05" value="${f.seaState}"><span class="v" id="f-sea-v">${f.seaState}</span></label>
         <label class="field"><span>Weight</span><select id="f-weight"><option value="light">Light</option><option value="normal">Normal</option><option value="heavy">Heavy</option></select></label>
         <label class="field"><span>Start distance</span><input type="range" id="f-dist" min="600" max="12000" step="100" value="${f.dist}"><span class="v" id="f-dist-v">${f.dist} m</span></label>
-        <div class="field full"><span>Malfunctions (at a random moment on the approach)</span><div class="checks">${failOpts}</div></div>
+        <div class="field full"><span>Malfunctions (at a random moment on the approach)</span><div class="checks" id="f-fails">${failOpts(f.aircraft)}</div></div>
       </div>
       <div class="actions"><button class="btn primary" id="btn-fly">Fly</button></div>`;
     this.show(this.frame('free', this.rail(), sheet));
@@ -403,6 +404,7 @@ export class Menus {
       f.weight = this.q('#f-weight').value; f.dist = +this.q('#f-dist').value; f.failures = this.qa('.f-fail:checked').map((c) => c.value);
     };
     this.qa('select, input').forEach((i) => i.addEventListener('change', read));
+    this.q('#f-ac').addEventListener('change', () => { this.q('#f-fails').innerHTML = failOpts(f.aircraft); read(); this.qa('.f-fail').forEach((i) => i.addEventListener('change', read)); });
     this.q('#btn-fly').addEventListener('click', () => { read(); this.game.startFree(); });
   }
 }

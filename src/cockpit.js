@@ -44,6 +44,7 @@ export function makeCockpitState() {
     vref: 0, vs0: 0, vs1: 0, onSpeedAoA: 0,
     stallWarning: false, stall: 0, onGround: false, wheelsOnGround: false, trapped: false,
     failures: null,
+    power: 1,                                          // electrical power, 0 = dead (src/systems/failureEffects.js; see update())
     ils: null, ilsGs: 0, ilsLoc: 0, meatball: null,
     time: 12, dayness: 1, night: false, sunDir: new THREE.Vector3(0, 1, 0), sunDirWorld: new THREE.Vector3(0, 1, 0),
     windDir: 0, windSpeed: 0,
@@ -93,6 +94,7 @@ export class CockpitView {
     this.state = makeCockpitState();
     this.active = false;
     this._q = new THREE.Quaternion();
+    this.failView = null;      // the flight's FailureRuntime (it sets and clears this itself): sensed readings, power
   }
   // Remember this world's lights, so the interior's copies can follow them every frame.
   attachScene(scene) {
@@ -179,6 +181,17 @@ export class CockpitView {
     }
     if (extra.wind) { s.windDir = extra.wind.dir; s.windSpeed = extra.wind.spd; }
     s.headYaw = rig.headYaw; s.headPitch = rig.headPitch;
+    // Failures (src/systems/failureEffects.js sets this.failView per flight): the instruments get what they would
+    // read, not the truth - an iced pitot's airspeed, no ball from a dark lens - and s.power. With the electrics dead
+    // the panel lights go out: every interior keys its panel lighting on the time of day, so it is told it is day
+    // (the gauges keep only their unlit faces, which read as a torch on the steam gauges).
+    const fv = this.failView;
+    s.power = fv ? fv.power : 1;
+    if (fv) {
+      if (fv.sensed && fv.sensed.ias != null) s.ias = fv.sensed.ias / KT;
+      if (fv.display && fv.display.noBall) s.meatball = null;
+      if (!s.power) { s.dayness = 1; s.night = false; }
+    }
     this.cockpit.update(s);
   }
   // Called from render(): decide whether the interior draws this frame (the cockpit

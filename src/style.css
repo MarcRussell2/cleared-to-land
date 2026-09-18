@@ -105,6 +105,35 @@ button { font: inherit; }
 #keys kbd.on { background: var(--hud); color: #04120c; border-color: var(--hud); }
 #keys .k.dim { opacity: 0.35; }
 
+/* ---------- Failures (2026-09-17, src/systems/failureEffects.js -> hud.js) ---------- */
+/* the failure drills on the key strip, and the extra config lines */
+#keys .k.hot { color: #ffd8c8; }
+#keys .k.hot kbd { border-color: rgba(255,92,92,0.85); color: #fff; background: rgba(120,20,20,0.55); }
+#cfg .bad { color: var(--bad); }
+#cfg .warn { color: var(--warn); }
+#eng .row.fire .k { color: var(--bad); animation: blink 0.5s steps(1) infinite; }
+/* a red IAS flag across the airspeed tape when the jet's two airspeeds disagree */
+.tape .flag { position: absolute; left: 50%; top: 24px; transform: translateX(-50%); display: none; padding: 1px 6px; background: #d62a2a; color: #fff; font-size: 12px; font-weight: 700; letter-spacing: 0.12em; border-radius: 2px; text-shadow: none; }
+/* the master caution (amber) or warning (red) light with its annunciators: left of the heading tape */
+#mc { position: absolute; right: calc(50% + 162px); top: 14px; width: 104px; display: flex; flex-direction: column; align-items: stretch; gap: 3px; font-family: var(--mono); text-shadow: none; }
+#mc .light { display: none; padding: 3px 0 2px; text-align: center; font-size: 11px; font-weight: 700; line-height: 1.15; letter-spacing: 0.1em; border-radius: 3px; border: 1px solid rgba(0,0,0,0.6); color: #1a0e00; }
+#mc .light.caution { display: block; background: #f0a91a; box-shadow: 0 0 10px rgba(240,169,26,0.6); }
+#mc .light.warning { display: block; background: #e3261f; color: #fff; box-shadow: 0 0 12px rgba(227,38,31,0.7); }
+#mc .light.blink { animation: blink 0.5s steps(1) infinite; }
+#mc .annun { display: flex; flex-direction: column; gap: 2px; }
+#mc .annun span { display: block; padding: 1px 4px; text-align: center; font-size: 10px; letter-spacing: 0.06em; border-radius: 2px; background: rgba(20,12,0,0.72); border: 1px solid rgba(240,169,26,0.6); color: #ffc24d; }
+#mc .annun span.bad { border-color: rgba(227,38,31,0.8); color: #ff6a5f; }
+/* the electrics are dead: every instrument goes dark; a torch lights the standby airspeed and altimeter */
+#stby { position: absolute; left: 50%; bottom: 58px; transform: translateX(-50%); width: 300px; height: 150px; display: none; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.8)); }
+#stby canvas { width: 100%; height: 100%; }
+#hud.dark #stby { display: block; }
+#hud.dark .tape, #hud.dark #adi, #hud.dark #aoa, #hud.dark #eng, #hud.dark #cfg, #hud.dark #wind, #hud.dark #gmeter, #hud.dark #gs, #hud.dark #loc, #hud.dark #ball, #hud.dark #mc { display: none; }   /* (the stall horn is not electric: #stall stays) */
+#hud.dark #hint { bottom: 220px; }
+/* a cracked windshield over the cockpit view (a bird strike): under the HUD, over the world */
+#crack { position: absolute; inset: 0; z-index: 2; pointer-events: none; display: none; opacity: 0.92; }
+#crack.on { display: block; }
+#crack svg { width: 100%; height: 100%; display: block; }
+
 /* ---------- Menus: flight list + kneeboard ---------- */
 .overlay { position: absolute; inset: 0; background: linear-gradient(90deg, rgba(6,9,13,0.92) 0%, rgba(6,9,13,0.85) 42%, rgba(6,9,13,0.55) 100%); }
 .overlay.hidden { display: none; }
@@ -266,6 +295,13 @@ input[type=checkbox] { accent-color: var(--hud); width: 15px; height: 15px; }
 #touch .trud .l { position: absolute; left: 0; right: 0; top: -13px; text-align: center; font-size: 9px; letter-spacing: 0.2em; color: var(--hud-dim); pointer-events: none; text-shadow: 0 1px 3px rgba(0,0,0,0.9); }
 #touch .trud .knob { position: absolute; left: 50%; top: 50%; width: 44px; height: 30px; border-radius: 8px; background: linear-gradient(to bottom, rgba(200,255,228,0.9), rgba(159,247,200,0.85)); box-shadow: 0 2px 8px rgba(0,0,0,0.5); transform: translate(-50%, -50%); pointer-events: none; }
 #touch .trud.on .knob { background: var(--hud); }
+/* the failure drills (touch.js setFailureButtons): FIRE / ENG OFF, TRIM CUT, FUEL CUT, only while they apply.
+   Right of centre at the top, under the wind box and clear of the throttle and the stick zone's home. */
+#touch .tb-fail { right: calc(var(--sr) + 72px); top: calc(var(--st) + 70px); flex-direction: column; align-items: stretch; }
+#touch .tb-fail.none { display: none; }
+#touch .tb-fail .tb { height: 38px; min-width: 92px; font-size: 12px; letter-spacing: 0.1em; }
+#touch .tb.hot { background: rgba(150,18,14,0.82); border-color: #ff5c5c; color: #fff; box-shadow: 0 0 10px rgba(255,60,50,0.5); }
+#touch .tb.hot.on { background: #ff5c5c; }
 
 /* ---------- Stick under the RIGHT thumb (2026-09-12, the default; Settings > Stick) ----------
    body.stick-right mirrors the layout above: the stick zone is the right side, and everything the left thumb works
@@ -332,6 +368,13 @@ body.stick-right #hud.compact #cfg { left: calc(max(6px, env(safe-area-inset-lef
 #hud.compact.narrow #aoa.needed { display: block; }
 #hud.compact.narrow #calls { top: calc(50% + 74px); }
 #hud.compact.narrow #loc, #hud.compact.narrow #ball { top: calc(50% + 66px); }
+/* failures on the compact HUD: the caution light left of the G readout, the standby gauges where the ADI was */
+#hud.compact #mc { right: calc(50% + 70px); top: 42px; width: 84px; }
+#hud.compact #mc .light { font-size: 9px; padding: 2px 0 1px; }
+#hud.compact #mc .annun span { font-size: 8px; padding: 0 3px; }
+#hud.compact .tape .flag { top: 16px; font-size: 10px; }
+#hud.compact #stby { bottom: auto; top: calc(50% + 30px); transform: translate(-50%, -50%); width: 200px; height: 100px; }
+#hud.compact.dark #hint { bottom: auto; }
 
 /* ---------- Menus on small landscape screens (phones) ---------- */
 body.touch .top { gap: 12px; }

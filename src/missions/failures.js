@@ -80,7 +80,7 @@ export const FAILURES_MISSIONS = [
   {
     id: 'unreliable-ias', n: 29, group: 'breaks', difficulty: 4, title: 'Unreliable Airspeed', tags: T('failure', 'heavy'),
     aircraft: 'condor', site: 'bayfield', time: 8, vis: 9000,
-    desc: 'Somewhere on this approach the pitot tube ices over and the airspeed starts to read low. Nothing will tell you when. Believe it and you will push the nose down, add power, and arrive very fast and very late.',
+    desc: 'Somewhere on this approach the pitot tube ices over and the airspeed starts to read low, a little at a time, and by the time IAS DISAGREE comes up it has been lying for a while. Believe it and you will push the nose down, add power, and arrive very fast and very late. Fly the numbers you know instead.',
     tips: [
       'Pitch and power: 1.5° nose up with the throttle at 24% holds Vref (142) at flaps 30 with the gear down. Fly that.',
       'Ground speed (top left, under the G) plus the headwind is your airspeed. The stall warning and the AoA still tell the truth.',
@@ -90,6 +90,13 @@ export const FAILURES_MISSIONS = [
     spawn: { dist: 7200, flap: 0.75, fixed: true },
     failures: [{ name: 'pitotIce', at: { type: 'window', from: 6, to: 16 }, arg: 0.6, tau: 22 }],
     scoring: { type: 'runway' },
+    hint: (ctx) => {
+      const f = fx(ctx, 'pitotIce');
+      if (ctx.ac.onGround) return null;
+      if (!f) return 'Note the numbers while the airspeed is honest: 142 kt, about 1.5° nose up, throttle near 24%.';
+      if (ctx.ra < 60) return 'Flare as usual: the stall warning still tells the truth.';
+      return 'Pitch and power: 1.5° nose up, throttle near 24%. Ground speed plus the headwind is your airspeed.';
+    },
   },
   {
     id: 'belly-landing', n: 30, group: 'breaks', difficulty: 3, title: 'Belly Landing', tags: T('failure', 'heavy'),
@@ -162,6 +169,13 @@ export const FAILURES_MISSIONS = [
     spawn: { dist: 3800, flap: 0.667, fixed: true },
     failures: [{ name: 'electrical', at: { type: 'time', value: 6 } }],
     scoring: { type: 'runway' },
+    hint: (ctx) => {
+      if (!fx(ctx, 'electrical')) return null;   // until the lights go, the usual help
+      if (ctx.ac.onGround) return 'Brakes: hold Space. Keep the centerline with rudder (Q/E).';
+      if (ctx.ra > 100) return 'No HUD: 62 kt on the standby airspeed, the PAPI two white and two red.';
+      if (ctx.ra > 15) return 'Short final: 62 kt, wings level on the approach lights, aim at the first edge lights.';
+      return 'Flare as the edge lights spread wide: throttle idle, nose up slowly, hold it off.';
+    },
   },
   {
     id: 'one-wheel', n: 34, group: 'breaks', difficulty: 4, title: 'One Wheel', tags: T('failure'),
@@ -194,6 +208,12 @@ export const FAILURES_MISSIONS = [
     spawn: { dist: 2600, hook: true, flap: 1.0, fixed: true },
     failures: [{ name: 'lensFail', at: { type: 'start' } }],
     scoring: { type: 'carrier' },
+    hint: (ctx) => {
+      const ac = ctx.ac;
+      if (ac.onGround) return null;   // the deck's own hints (full power until the wire has you)
+      if (ctx.d > 400) return 'No ball: on-speed AoA with power; the altimeter against the numbers: 1 NM 460 ft, ½ NM 270 ft, the ramp 85 ft.';
+      return 'Do what Paddles says, now. No flare: fly it into the deck.';
+    },
   },
 ];
 
