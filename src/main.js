@@ -29,7 +29,9 @@ import { MissionRuntime } from './systems/mission.js';
 import { RoutePilot } from './systems/routepilot.js';
 import { ObstacleField } from './world/obstacles.js';
 import { WeatherLook } from './art/weather-look.js';
-import { MISSION_GROUPS } from './missions/index.js';
+import { MISSION_GROUPS, missionOrder } from './missions/index.js';
+import { validateFreeOpts } from './missions/free.js';
+import { FAILURES } from './systems/malfunctions.js';
 import { Autoland } from './systems/autopilot.js';
 import { FlightControl } from './systems/flightControl.js';
 import { TouchControls, touchLikely, touchify } from './touch.js';
@@ -63,7 +65,9 @@ const AUTO_TARGET_MS = 1000 / 60;
 // Altitude callouts (metres are converted at the call site); module constants so a frame allocates nothing.
 const JET_CALLOUTS = [2500, 1000, 500, 400, 300, 200, 100, 50, 40, 30, 20, 10];
 const LIGHT_CALLOUTS = [500, 200, 100, 50, 20, 10];
-const DEFAULT_FREE = { aircraft: 'skylark', site: 'bayfield', windDir: 300, windSpeed: 8, windGust: 12, turb: 0.15, time: 15, vis: 30000, seaState: 0.3, weight: 'normal', dist: 5000, failures: [] };
+// Free flight's options (src/missions/free.js has the ranges and turns them into a scenario). windRel is degrees off the
+// landing direction, + = from the right (older saves carried an absolute windDir; validateFreeOpts converts it).
+const DEFAULT_FREE = { aircraft: 'skylark', site: 'bayfield', weather: 'clear', windRel: -60, windSpeed: 8, windGust: 12, turb: 0.15, microburst: false, time: 15, vis: 30000, ceilingFt: null, seaState: 0.3, weight: 'normal', dist: 5000, obstacles: true, failures: [], surprise: false, when: 'approach' };
 
 // 2026-09-14: the game got its name. Saved settings, logbook and pilot name from the
 // working-title keys carry over once; the old keys are left alone.
@@ -85,7 +89,9 @@ class Game {
     this.touchDevice = touchLikely();   // phones and tablets: touch controls, compact HUD, lighter graphics
     this.touchSeen = false;
     if (!saved.quality && this.touchDevice) this.settings.quality = 'medium';   // a phone starts a tier down; autoQuality() scales from there
-    this.freeOpts = { ...DEFAULT_FREE, ...loadJSON('ctl.free', {}) };
+    // a saved setup may name a site, aircraft or failure this build does not have (or be anything at all): cleaned, never trusted
+    this.freeDefaults = DEFAULT_FREE;
+    this.freeOpts = validateFreeOpts(loadJSON('ctl.free', {}), { defaults: DEFAULT_FREE, sites: SITES, aircraft: AIRCRAFT, failures: FAILURES });
     this.best = loadJSON('ctl.best', {});
     this.pilot = pilotName.get();   // the logbook name new bests are stamped with; shared with the rest of goodmarc.com
 
@@ -131,6 +137,7 @@ class Game {
     vignette.id = 'vignette';
     app.appendChild(vignette);
     this.input = new Input();
+    this.input.menuOpen = () => !!(this.menus && this.menus.visible);   // the menu owns Tab, Space, Enter, arrows and Esc while it is up
     this.input.attachMouse(this.renderer.domElement);
     this.audio = new AudioSys();
     this.hud = new HUD(app);
@@ -454,8 +461,10 @@ class Game {
   }
 
   startFree() {
+    this.freeOpts = validateFreeOpts(this.freeOpts, { defaults: DEFAULT_FREE, sites: SITES, aircraft: AIRCRAFT, failures: FAILURES });
     saveJSON('ctl.free', this.freeOpts);
-    const sc = makeFreeFlight(this.freeOpts);
+    // the seed only picks a "Surprise me" failure; pinned with the flight's own seed so a harness replay repeats it
+    const sc = makeFreeFlight(this.freeOpts, window.CTL_WIND_SEED || Math.floor(Math.random() * 1000) + 1);
     this.startScenario(sc);
   }
 
@@ -601,8 +610,10 @@ class Game {
         forgetBoards();
       }
     }
-    const idx = SCENARIOS.findIndex((s) => s.id === sc.id);
-    const next = idx >= 0 && idx < SCENARIOS.length - 1 ? SCENARIOS[idx + 1] : null;
+    // Next follows the menu's order (MISSION_GROUPS), not the order the missions happen to be listed in
+    const order = missionOrder(SCENARIOS);
+    const idx = order.findIndex((s) => s.id === sc.id);
+    const next = idx >= 0 && idx < order.length - 1 ? order[idx + 1] : null;
     this.hud.visible = false;
     this.touch.hide();
     document.body.classList.remove('flying');

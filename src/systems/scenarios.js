@@ -1,6 +1,7 @@
 // Sites (airports, carrier, bush strips) and the challenge list.
 import { DEG } from '../config.js';
 import { ALL_NEW_SITES, NEW_MISSIONS } from '../missions/index.js';
+import { buildFreeFlight } from '../missions/free.js';
 
 export const SITES = {
   bayfield: {
@@ -228,17 +229,8 @@ export function resolveScenario(sc, rng = Math.random, settings = null) {
   return s;
 }
 
-export function makeFreeFlight(o) {
-  const site = SITES[o.site];
-  const carrier = site.kind === 'carrier';
-  const sc = {
-    id: 'free', n: 0, title: 'Free Flight', tags: ['free'], aircraft: o.aircraft, site: o.site, time: o.time, vis: o.vis, seaState: o.seaState,
-    desc: 'Your own conditions.', tips: [], wind: { dir: o.windDir, speed: o.windSpeed, gust: o.windGust, turb: o.turb },
-    weight: o.weight, spawn: { dist: o.dist, hook: carrier, flap: o.aircraft === 'condor' ? 0.75 : o.aircraft === 'skylark' ? 0.667 : 1 },
-    failures: (o.failures || []).map((f) => ({ name: f, at: { type: 'alt', value: 300 + Math.random() * 900 }, arg: 0 })),
-    scoring: { type: carrier ? 'carrier' : site.kind === 'bush' ? 'bush' : 'runway' },
-  };
-  if (site.kind === 'bush') { sc.spawn.dist = Math.min(o.dist, 1500); sc.spawn.alt = 100 + (sc.spawn.dist - 900) * 0.09; sc.spawn.fixed = true; }
-  sc.spawn.fixed = true;
-  return sc;
+// Free flight: options -> scenario lives in src/missions/free.js (weather, trouble, obstacles, a seeded surprise).
+// `seed` only picks the "Surprise me" failure; main.js passes the flight's seed.
+export function makeFreeFlight(o, seed = 1) {
+  return buildFreeFlight(o, { sites: SITES, seed });
 }
