@@ -111,6 +111,7 @@ button { font: inherit; }
    markup. Everything here is scoped to .overlay so none of it reaches the in-flight HUD or the touch layer. */
 /* kept from the old flight list: the HUD's engine rows (#eng .row) have always picked this rule up */
 .row { display: grid; grid-template-columns: 34px 1fr auto; align-items: baseline; gap: 10px; padding: 8px 20px 8px 17px; cursor: pointer; border-left: 3px solid transparent; color: var(--text); background: none; border-top: 0; border-right: 0; border-bottom: 0; width: 100%; text-align: left; }
+@media (max-height: 520px) { .row { padding: 5px 12px 5px 10px; gap: 8px; grid-template-columns: 26px 1fr auto; } }   /* on phones too: the right-thumb throttle is placed under #eng at this height */
 
 :root { --hud-faint: rgba(159, 247, 200, 0.12); --g-greased: #9ff7c8; --g-smooth: #6ee7a8; --g-firm: #f4b942; --g-hard: #ffb347; --g-damaged: #ff8a5c; --g-crash: #ff5c5c; }
 .overlay {
@@ -935,12 +936,12 @@ button { font: inherit; }
 /* ================================================================== portrait and narrow windows */
 @media (max-width: 700px) and (min-height: 501px) {
   .overlay { --padx: 16px; font-size: 14px; }
-  .overlay .home-wrap { overflow-y: auto; grid-template-rows: auto auto auto; padding-top: max(16px, calc(var(--st) + 8px)); }
+  .overlay .home-wrap { display: block; overflow-y: auto; padding-top: max(16px, calc(var(--st) + 8px)); }
   .overlay .top { flex-direction: column; gap: 6px; }
   .overlay .top .quiet { margin: 0 0 0 -14px; flex-wrap: wrap; }
   .overlay .brand .bt { font-size: min(34px, 8.4vw); letter-spacing: 0.16em; }
   .overlay .brand .bs { font-size: 10px; letter-spacing: 0.22em; }
-  .overlay .doors { grid-template-columns: minmax(0, 1fr); height: auto; align-self: start; margin-top: 14px; gap: 10px; }
+  .overlay .doors { grid-template-columns: minmax(0, 1fr); height: auto; min-height: auto; margin-top: 14px; gap: 10px; }
   .overlay .door { padding: 14px 16px 16px; }
   .overlay .door-detail { padding: 10px 0 14px; }
   .overlay .fleet { grid-template-columns: repeat(4, 1fr); max-width: none; }
