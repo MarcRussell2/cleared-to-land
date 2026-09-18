@@ -23,7 +23,7 @@ import { AIRCRAFT } from '../src/aircraft/defs.js';
 import { Carrier } from '../src/world/carrier.js';
 import { SITES, SCENARIOS, resolveScenario } from '../src/systems/scenarios.js';
 import { FAILURES, applyFailure, shouldTrigger } from '../src/systems/malfunctions.js';
-import { FailureRuntime, EFFECT_NAMES, crackSVG } from '../src/systems/failureEffects.js';
+import { FailureRuntime, EFFECT_NAMES, crackPattern } from '../src/systems/failureEffects.js';
 import { FAILURES_MISSIONS } from '../src/missions/failures.js';
 import { NEW_MISSIONS, MISSION_GROUPS } from '../src/missions/index.js';
 import { scoreLanding, vrefFor } from '../src/systems/scoring.js';
@@ -137,6 +137,14 @@ export class MissionPilot {
     // pitchFF: the elevator a technique holds on top of the loop (the trim it flies without, see runaway-trim)
     inp.pitch = clamp(this.kp * (pitchCmd - ac.euler.pitch) - this.kd * ac.omega.x + (this.pitchFF || 0), -1, 1);
     if (T.after) T.after(this, g, dt);
+    // io.human: only what a person at the keyboard has. The pedals move at the rudder keys' ramp (src/input.js: 0.4 s
+    // to full, 1/6 s back), and on the wheels the ailerons get the assist mode's 60% (src/systems/flightControl.js).
+    if (this.io.human) {
+      const y = this.pedal ?? 0, want = inp.yaw;
+      this.pedal = want > y ? Math.min(want, y + (y >= 0 ? 2.5 : 6) * dt) : Math.max(want, y - (y <= 0 ? 2.5 : 6) * dt);
+      inp.yaw = this.pedal;
+      if (ac.wheelsOnGround) inp.roll = clamp(inp.roll, -0.6, 0.6);
+    }
   }
 }
 
@@ -361,7 +369,7 @@ function gameAction(ac, a) {
   }
 }
 
-export function flyMission(scBase, { seed = 307, logEvery = 0, maxT = 400, pilot = true, tech = null } = {}) {
+export function flyMission(scBase, { seed = 307, logEvery = 0, maxT = 400, pilot = true, tech = null, human = false } = {}) {
   const sc = resolveScenario(scBase, makeRng(seed), { approach: 'short' });
   const site = SITES[sc.site];
   const w = makeWorld(site, sc);
@@ -378,7 +386,7 @@ export function flyMission(scBase, { seed = 307, logEvery = 0, maxT = 400, pilot
   const inp = { yaw: 0, trim: ac.input.trim, throttle: ac.input.throttle, keys: new Set() };
   const rt = new FailureRuntime(ac, sc, { seed });
   const actions = [];
-  const p = pilot ? new MissionPilot(ac, w, sc, rt, { act: (a) => actions.push(a), tech }) : null;
+  const p = pilot ? new MissionPilot(ac, w, sc, rt, { act: (a) => actions.push(a), tech, human }) : null;
   const ap = { gsErr: 0, locErr: 0, spdErr: 0, gsSamples: 0, ballErr: 0, lineupErr: 0, aoaErr: 0, carrierSamples: 0, lowAtRamp: false, tdU: 0, tdV: 0, stopU: 0, offRunway: false, overran: false, noseDownSpeed: null, runway: w.runway };
   const dt = 1 / 25;
   let t = 0, endT = 0, done = false, nextLog = 0;
@@ -539,9 +547,13 @@ function runChecks() {
     check(Math.abs(ac.input.throttle - 0.7) < 1e-9, 'stuck throttle: the lever says 0.1, the engines get 0.7');
     check(rt.action('fuelCutoff') && !rt.action('fuelCutoff'), 'fuel cutoff (U) is taken once');
     run(ac, rt, 1, (t, a) => { a.input.throttle = 0.9; });
-    const spooling = ac.engines.every((e) => !e.failed) && ac.input.throttle === 0;
+    const spooling = ac.engines.every((e) => !e.failed && e.thrust > 0) && ac.input.throttle === 0;
     run(ac, rt, 2, (t, a) => { a.input.throttle = 0.9; });
-    check(spooling && ac.engines.every((e) => e.failed) && rt.display.engOff[0], 'the engines spool down, then stop (gauges say OFF)');
+    const rpm = ac.engines[0].rpm;
+    run(ac, rt, 4, (t, a) => { a.input.throttle = 0.9; });
+    check(spooling && ac.engines.every((e) => !e.failed && e.thrust === 0) && rt.display.engOff[0] && rt.display.engOff[1] && ac.engines[0].rpm < rpm * 0.5,
+      `the engines spool down, then stop: no thrust, the gauges say OFF and run down (N1 ${(rpm * 100).toFixed(0)}% -> ${(ac.engines[0].rpm * 100).toFixed(0)}%), and a shutdown is not a failure (no smoke)`);
+    check(AIRCRAFT.condor.engines[0].maxThrust > 0, '...on the aircraft\'s own copy of the engines, not the shared definition');
   }
   {
     const ac = airborne('condor'), rt = new FailureRuntime(ac, { failures: [] }, { seed: 1 });
@@ -574,7 +586,10 @@ function runChecks() {
   {
     const ac = airborne('condor'), rt = new FailureRuntime(ac, { failures: [] }, { seed: 3 });
     rt.trigger({ name: 'birdStrike', engine: 'right', arg: 0.6, surge: 0.6 });
-    check(typeof rt.display.crack === 'string' && rt.display.crack.startsWith('<svg') && crackSVG(makeRng(5)) === crackSVG(makeRng(5)), 'bird strike: a cracked windshield, the same crack for the same seed');
+    const cp = crackPattern(makeRng(5));
+    const inside = cp.paths.every((q) => q.pts.every((v) => Math.abs(v) < 1)) && cp.arcs.every((q) => q.every((v) => Math.abs(v) < 1));
+    check(rt.display.crack === true && cp.paths.length > 10 && inside && JSON.stringify(cp) === JSON.stringify(crackPattern(makeRng(5))) && JSON.stringify(cp) !== JSON.stringify(crackPattern(makeRng(6))),
+      `bird strike: the windshield cracks (${cp.paths.length} cracks, all inside the decal), the same crack for the same seed and another for another`);
     let lo = 1;
     run(ac, rt, 10, (t, a) => { a.input.throttle = 0.5; lo = Math.min(lo, a.engines[1].maxThrust / AIRCRAFT.condor.engines[1].maxThrust); });
     check(lo < 0.6 && ac.engines[0].maxThrust === AIRCRAFT.condor.engines[0].maxThrust, `...and the right engine surges down to ${(lo * 100).toFixed(0)}%, the left untouched`);
@@ -674,7 +689,7 @@ function runChecks() {
     check(ok, `${m.id}: ${r.ac.crashed ? 'CRASHED ' + r.ac.crashReason : `${r.result.points} ${r.result.grade}`}${carrier ? `, ${r.ac.trap.wire}-wire` : `, stopped ${r.ap.stopU.toFixed(0)} m in`} [${r.pilot.log.join(', ') || 'no keys'}]`);
   }
   const L = (id) => results[id].result.lines;
-  check(results['stuck-throttle'].pilot.log.some((s) => /fuelCutoff/.test(s)) && results['stuck-throttle'].ac.engines.every((e) => e.failed), 'stuck throttle: the fuel was cut and the engines are off');
+  check(results['stuck-throttle'].pilot.log.some((s) => /fuelCutoff/.test(s)) && results['stuck-throttle'].ac.engines.every((e) => e.thrust === 0 && !e.failed), 'stuck throttle: the fuel was cut and the engines are off');
   check(results['runaway-trim'].pilot.log.some((s) => /trimCutout/.test(s)), 'runaway trim: the cutout was used');
   check(results['engine-fire'].rt.get('engineFire').out && results['bird-strike'].rt.get('birdStrike').surge.shut, 'engine fire and bird strike: the handle was pulled');
   check(!L('belly-landing').some((l) => /BELLY LANDING/.test(l.v)) && L('belly-landing').some((l) => l.k === 'Belly landing' && l.cls === 'good'), 'belly landing: no gear-up penalty (scoring.belly), engines off before contact');

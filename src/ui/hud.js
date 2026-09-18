@@ -3,9 +3,9 @@
 // Failures (2026-09-17, src/systems/failureEffects.js) reach the HUD through two fields of the context:
 //   ctx.sensed   what an instrument reads when it is lying (sensed.ias, m/s: an iced pitot); null = honest
 //   ctx.display  what has failed, one object refilled by the failure runtime; null until something fails:
-//     dark         the electrics are dead: every instrument goes, a torch-lit standby airspeed and altimeter stay
+//     dark         the electrics are dead: every instrument goes (the ILS and the ball too), a torch-lit standby
+//                  airspeed and altimeter stay
 //     noBall       the carrier's lens is dark: no ball on the HUD either
-//     crack        an SVG of a cracked windshield, shown over the cockpit view only (cockpit = the camera is there)
 //     caution      { level: 'caution'|'warning', text, blink }: the master caution (amber) or warning (red) light
 //     annun        [{ text, cls }]: annunciators under it (L ENG FIRE, STAB TRIM, IAS DISAGREE)
 //     cfg          [{ text, cls }]: extra lines in the config box (THR JAMMED 75%, TRIM MAN ND 1.2)
@@ -116,10 +116,8 @@ export class HUD {
     this.stbyCanvas = document.createElement('canvas'); this.stbyCanvas.width = 400; this.stbyCanvas.height = 200;
     this.stby.appendChild(this.stbyCanvas); h.appendChild(this.stby);
     this.stbyCtx = this.stbyCanvas.getContext('2d');
-    // the cracked windshield: under the HUD and over the world, in the cockpit view only
-    this.crack = el('div'); this.crack.id = 'crack';
-    root.insertBefore(this.crack, this.root);
-    this._crack = null; this._dark = false;
+    this._dark = false;
+    // (a cracked windshield is not the HUD's: src/cockpit.js lays it on the cockpit's own glass)
   }
 
   // The failure drills on the key strip while they apply: [[label, [[keycap, action]]], ...] (failureEffects.js).
@@ -202,8 +200,7 @@ export class HUD {
   callout(text, dur = 1.2) { this.calls.textContent = text; this.calls.classList.add('on'); this.callT = dur; }
   setHint(text) { if (!this.showHints) { this.hint.textContent = ''; return; } if (text !== this.lastHint) { this.hint.textContent = (this.touch ? touchify(text) : text) || ''; this.lastHint = text; } }
   setFailures(list) { this.fails.innerHTML = list.map((f) => `<span class="f">${f}</span>`).join(''); }
-  // (the crack is the windshield's, not the HUD's: update() puts it back next frame if the flight goes on)
-  set visible(v) { this.root.classList.toggle('hidden', !v); if (!v) this.crack.classList.remove('on'); }
+  set visible(v) { this.root.classList.toggle('hidden', !v); }
   get visible() { return !this.root.classList.contains('hidden'); }
 
   update(ac, ctx, dt) {
@@ -262,7 +259,7 @@ export class HUD {
         const pct = e.type === 'jet' ? e.rpm * 100 : e.rpm * 2700 / 27;
         const rev = e.thrust < -100;
         // a failure's word for this engine (FIRE, SURGE), or OFF for one shut down on purpose (handle, fuel cutoff)
-        const note = fd ? fd.engNote[i] : '', off = fd && fd.engOff[i] && e.failed;
+        const note = fd ? fd.engNote[i] : '', off = !!(fd && fd.engOff[i]);
         const val = note || (off ? 'OFF' : e.failed ? 'FAIL' : rev ? 'REV' : e.type === 'jet' ? pct.toFixed(0) + '%' : (e.rpm * 2700).toFixed(0));
         const col = note === 'FIRE' || (e.failed && !off) ? 'color:var(--bad)' : note || off ? 'color:var(--warn)' : '';
         rows.push(`<div class="row${note === 'FIRE' ? ' fire' : ''}"><span class="k">${e.type === 'jet' ? 'N1' : 'RPM'}${eng.length > 1 ? ' ' + (i + 1) : ''}</span><div class="bar"><i class="${rev ? 'rev' : ''}" style="width:${clamp(pct, 0, 100).toFixed(0)}%"></i></div><span class="v" style="${col}">${val}</span></div>`);
@@ -298,12 +295,12 @@ export class HUD {
       setText(this.timer, ctx.status || '');
     }
     // ILS / meatball
-    if (ctx.ils && ctx.ils.dist > 0) {
+    if (ctx.ils && ctx.ils.dist > 0 && !this._dark) {
       setStyle(this.gs, 'display', 'block'); setStyle(this.loc, 'display', 'block');
       setStyle(this.gsN, 'top', (50 - ctx.ils.gsDots * 9).toFixed(2) + '%');
       setStyle(this.locN, 'left', (50 + ctx.ils.locDots * 9).toFixed(2) + '%');
     } else { setStyle(this.gs, 'display', 'none'); setStyle(this.loc, 'display', 'none'); }
-    if (ctx.meatball && ctx.meatball.inRange && !(fd && fd.noBall)) {
+    if (ctx.meatball && ctx.meatball.inRange && !(fd && (fd.noBall || fd.dark))) {
       this.ball.classList.add('on');
       setStyle(this.ballCell, 'top', (50 - ctx.meatball.cells * 7).toFixed(2) + '%');
       this.ballCell.classList.toggle('red', ctx.meatball.cells < -2);
@@ -337,17 +334,11 @@ export class HUD {
   }
 
   // What has failed (see the header): the caution light and its annunciators, the flag on a lying airspeed tape, the
-  // dark HUD with its standby instruments, the crack over the cockpit view. DOM writes only on change.
+  // dark HUD with its standby instruments. DOM writes only on change.
   failures(ac, fd, ias, alt, textDue) {
     const dark = !!(fd && fd.dark);
     if (dark !== this._dark) { this._dark = dark; this.root.classList.toggle('dark', dark); }
     setStyle(this.iasFlag, 'display', fd && fd.iasFlag && !dark ? 'block' : 'none');
-    const crack = fd && fd.crack && fd.cockpit ? fd.crack : null;
-    if (crack !== this._crack) {
-      this._crack = crack;
-      if (crack && this.crack.__h !== crack) setHTML(this.crack, crack);
-      this.crack.classList.toggle('on', !!crack);
-    }
     // the master caution: flashing while its blink runs, then steady until the annunciators have all gone out
     let mc = '';
     if (fd) {
@@ -358,7 +349,7 @@ export class HUD {
       this._mc = mc;
       const [lvl, blink] = mc.split('|');
       this.mcLight.className = mc ? `light ${lvl}${blink === '1' ? ' blink' : ''}` : 'light';
-      setHTML(this.mcLight, mc ? (lvl === 'warning' ? 'MASTER<br>WARNING' : 'MASTER<br>CAUTION') : '');
+      setHTML(this.mcLight, mc ? `<span class="m">MASTER</span><span>${lvl === 'warning' ? 'WARNING' : 'CAUTION'}</span>` : '');   // (a phone shows the second word only)
     }
     if (textDue) setHTML(this.annun, fd ? fd.annun.map((a) => `<span class="${a.cls}">${a.text}</span>`).join('') : '');
     if (dark && textDue) this.drawStandby(ac, ias, alt);

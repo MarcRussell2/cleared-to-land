@@ -95,6 +95,8 @@ export class CockpitView {
     this.active = false;
     this._q = new THREE.Quaternion();
     this.failView = null;      // the flight's FailureRuntime (it sets and clears this itself): sensed readings, power
+    this.crack = null;         // the cracked-windshield decal (prepareCrack / showCrack), per interior
+    this._dim = null;          // without electrical power: the interior's lit materials and what the art set them to
   }
   // Remember this world's lights, so the interior's copies can follow them every frame.
   attachScene(scene) {
@@ -110,6 +112,8 @@ export class CockpitView {
   clear() {
     if (this.cockpit && this.cockpit.group.parent) this.cockpit.group.parent.remove(this.cockpit.group);
     if (this.cockpit && this.cockpit.dispose) this.cockpit.dispose();
+    if (this.crack) { this.crack.mesh.geometry.dispose(); this.crack.mat.dispose(); this.crack.tex.dispose(); this.crack = null; }
+    this._dim = null;
     this.cockpit = null; this.model = null; this.active = false; this.pass.enabled = false;
   }
   // Build the interior for this aircraft and hang it on the model.
@@ -182,17 +186,122 @@ export class CockpitView {
     if (extra.wind) { s.windDir = extra.wind.dir; s.windSpeed = extra.wind.spd; }
     s.headYaw = rig.headYaw; s.headPitch = rig.headPitch;
     // Failures (src/systems/failureEffects.js sets this.failView per flight): the instruments get what they would
-    // read, not the truth - an iced pitot's airspeed, no ball from a dark lens - and s.power. With the electrics dead
-    // the panel lights go out: every interior keys its panel lighting on the time of day, so it is told it is day
-    // (the gauges keep only their unlit faces, which read as a torch on the steam gauges).
+    // read, not the truth - an iced pitot's airspeed, no ball from a dark lens - and s.power.
     const fv = this.failView;
     s.power = fv ? fv.power : 1;
     if (fv) {
       if (fv.sensed && fv.sensed.ias != null) s.ias = fv.sensed.ias / KT;
       if (fv.display && fv.display.noBall) s.meatball = null;
-      if (!s.power) { s.dayness = 1; s.night = false; }
     }
+    // With the electrics dead the panel lights go out. The interiors light their panels (emissive) by the time of
+    // day and know nothing of power, so what the art sets is scaled here, after its update, by what daylight alone
+    // would give the panel (dayness squared: all of it by day, none at night), and put back before the next update so
+    // the art always starts from its own numbers. Uniform writes only: nothing recompiles.
+    const dim = !s.power ? this._dimmer() : null;
+    if (dim) for (let i = 0; i < dim.mats.length; i++) dim.mats[i].emissiveIntensity = dim.set[i];
     this.cockpit.update(s);
+    if (dim) {
+      const k = clamp(sky ? sky.dayness : 1, 0, 1) ** 2;
+      for (let i = 0; i < dim.mats.length; i++) { const m = dim.mats[i]; dim.set[i] = m.emissiveIntensity; m.emissiveIntensity *= k; }
+    }
+    if (this.crack && this.crack.on) this.crack.mat.color.setScalar(0.3 + 0.7 * clamp(sky ? sky.dayness : 1, 0, 1));
+  }
+  // Every lit material of the interior (collected once, the first time the power is off).
+  _dimmer() {
+    if (this._dim) return this._dim;
+    const mats = [];
+    this.cockpit.group.traverse((o) => {
+      const ms = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
+      for (const m of ms) if (m && typeof m.emissiveIntensity === 'number' && !mats.includes(m) && (!this.crack || m !== this.crack.mat)) mats.push(m);
+    });
+    this._dim = { mats, set: new Float32Array(mats.length) };
+    for (let i = 0; i < mats.length; i++) this._dim.set[i] = mats[i].emissiveIntensity;
+    return this._dim;
+  }
+
+  // ---- a cracked windshield (a bird strike: src/systems/failureEffects.js) ----
+  // A decal laid on the windshield pane straight ahead of the pilot: a ray from the eye (raised by def.seatUp, as the
+  // camera is) a few degrees up and to one side finds parts.windshield, and the decal lies on the glass there, a few
+  // millimetres inside it, drawn after it; the glareshield and the posts, nearer the eye, hide what overhangs the
+  // pane. prepareCrack() makes it at the start of a flight that has a bird strike in it, blank and visible, so it
+  // compiles with the rest of the interior; showCrack() draws the crack into it (one canvas upload, no compile).
+  // It is not lit: its colour follows the daylight (update()), so a crack glints by day and is a dark web at night.
+  prepareCrack(def, rng) {
+    const c = this.cockpit;
+    if (!c || this.crack || typeof document === 'undefined') return;
+    const S = 1024, canvas = document.createElement('canvas');
+    canvas.width = canvas.height = S;
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, side: THREE.DoubleSide });
+    mat.name = 'cockpit:crack'; mat.fog = false; mat.forceSinglePass = true;
+    const size = def.id === 'condor' ? 0.95 : 0.75;
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(size, size), mat);
+    mesh.name = 'crack'; mesh.renderOrder = 8; mesh.layers.set(COCKPIT_LAYER);
+    mesh.castShadow = false; mesh.receiveShadow = false;
+    // where the ray from the eye meets the windshield, in the interior's own (body) frame
+    const eye = new THREE.Vector3(def.eye.x, def.eye.y + (def.seatUp || 0), def.eye.z);
+    const dir = new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler((5 + rng() * 4) * DEG, (rng() - 0.5) * 14 * DEG, 0, 'YXZ'));
+    const hit = this._rayWindshield(c, eye, dir);
+    const n = new THREE.Vector3(0, 0, 1);
+    if (hit) { mesh.position.copy(hit.point); n.copy(hit.normal); if (n.dot(dir) > 0) n.negate(); }
+    else mesh.position.copy(eye).addScaledVector(dir, 0.7);
+    mesh.position.addScaledVector(n, 0.004);
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
+    mesh.rotateZ(rng() * Math.PI * 2);
+    c.group.add(mesh);
+    this.crack = { mesh, mat, tex, canvas, on: false };
+  }
+  // The nearest triangle of the windshield along a ray (both in the interior group's frame), or null.
+  _rayWindshield(c, eye, dir) {
+    const ws = c.parts && c.parts.windshield;
+    if (!ws || !ws.geometry || !ws.geometry.attributes.position) return null;
+    const m = new THREE.Matrix4();
+    for (let o = ws; o && o !== c.group; o = o.parent) { o.updateMatrix(); m.premultiply(o.matrix); }
+    const pos = ws.geometry.attributes.position, idx = ws.geometry.index;
+    const ray = new THREE.Ray(eye, dir.clone().normalize());
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), d = new THREE.Vector3(), p = new THREE.Vector3();
+    let best = null;
+    const n = idx ? idx.count : pos.count;
+    for (let i = 0; i + 2 < n; i += 3) {
+      const i0 = idx ? idx.getX(i) : i, i1 = idx ? idx.getX(i + 1) : i + 1, i2 = idx ? idx.getX(i + 2) : i + 2;
+      a.fromBufferAttribute(pos, i0).applyMatrix4(m); b.fromBufferAttribute(pos, i1).applyMatrix4(m); d.fromBufferAttribute(pos, i2).applyMatrix4(m);
+      if (!ray.intersectTriangle(a, b, d, false, p)) continue;
+      const dist = p.distanceTo(eye);
+      if (dist < 0.15 || (best && dist >= best.dist)) continue;
+      best = { dist, point: p.clone(), normal: new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(d, a)).normalize() };
+    }
+    return best;
+  }
+  // Draw the crack (failureEffects.js crackPattern(): unit coordinates, the impact at 0, the decal's edges at +-1).
+  showCrack(pattern) {
+    const k = this.crack;
+    if (!k || !pattern) return;
+    const S = k.canvas.width, g = k.canvas.getContext('2d'), h = S / 2, sc = h * 0.98;
+    const X = (v) => h + v * sc;
+    g.clearRect(0, 0, S, S);
+    // the smear of the bird, and a frosted star where it hit
+    const sm = pattern.smear;
+    g.save(); g.translate(h, X(sm.dy)); g.rotate(sm.rot); g.scale(1, sm.ry / sm.rx);
+    let grd = g.createRadialGradient(0, 0, 0, 0, 0, sm.rx * sc);
+    grd.addColorStop(0, 'rgba(58,44,36,0.62)'); grd.addColorStop(0.5, 'rgba(92,76,62,0.3)'); grd.addColorStop(1, 'rgba(120,104,90,0)');
+    g.fillStyle = grd; g.beginPath(); g.arc(0, 0, sm.rx * sc, 0, Math.PI * 2); g.fill(); g.restore();
+    grd = g.createRadialGradient(h, h, 0, h, h, 0.09 * sc);
+    grd.addColorStop(0, 'rgba(236,242,246,0.55)'); grd.addColorStop(0.6, 'rgba(226,234,240,0.14)'); grd.addColorStop(1, 'rgba(226,234,240,0)');
+    g.fillStyle = grd; g.beginPath(); g.arc(h, h, 0.09 * sc, 0, Math.PI * 2); g.fill();
+    // the cracks: a dark edge under a bright one, as a crack in laminated glass catches the light
+    const stroke = (pts, w, style, dx, dy) => {
+      g.strokeStyle = style; g.lineWidth = w; g.beginPath();
+      for (let i = 0; i < pts.length; i += 2) { const x = X(pts[i]) + dx, y = X(pts[i + 1]) + dy; if (i) g.lineTo(x, y); else g.moveTo(x, y); }
+      g.stroke();
+    };
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    for (const pass of [['rgba(6,8,10,0.5)', 1.35, 2, 2.6], ['rgba(240,245,248,0.88)', 1, 0, 0]]) {
+      for (const q of pattern.paths) stroke(q.pts, q.w * 2.8 * pass[1], pass[0], pass[2], pass[3]);
+      for (const a of pattern.arcs) stroke(a, 2.2 * pass[1], pass[0], pass[2], pass[3]);
+    }
+    k.tex.needsUpdate = true;
+    k.on = true;
   }
   // Called from render(): decide whether the interior draws this frame (the cockpit
   // camera mode, with an interior built) and copy the world camera's pose so the

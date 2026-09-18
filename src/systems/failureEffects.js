@@ -42,6 +42,9 @@ function legIndex(ac, spec, rng) {
   const i = ac.legs.findIndex((l) => l.name === s);
   return i >= 0 ? i : ac.legs.findIndex((l) => l.main);
 }
+// Spark bursts made every few frames while a stub or a rim scrapes (made once: nothing allocates per frame)
+const SPARKS_STUB = { spread: 0.12, velSpread: 3, life: 0.55, lifeJitter: 0.5, size0: 0.1, size1: 0.04 };
+const SPARKS_RIM = { spread: 0.1, velSpread: 3, life: 0.5, lifeJitter: 0.5, size0: 0.1, size1: 0.04 };
 // A slow, smooth wander in -1..1 from two sines with seeded phases (no allocation, no state).
 function wander(t, a, b) { return 0.6 * Math.sin(0.31 * t + a) + 0.4 * Math.sin(0.83 * t + b); }
 
@@ -81,8 +84,9 @@ class RunawayTrim {
     if (!this.cut) this.bias = clamp(this.bias + this.rate * dt, -this.limit, this.limit);
     else if (this.rt.fcsFlying() && inp) {
       // the pilot's trim keys live in the Input (the assist mode nudges its attitude with them, direct mode uses them
-      // as electric trim): each frame's movement turns the manual wheel instead, and the Input is put back
-      if (this.held == null) this.held = inp.trim || 0;
+      // as electric trim): each frame's movement turns the manual wheel instead, and the Input is put back (held clear
+      // of the Input's +-1 stops, or a pilot who had trimmed to a stop could not wind that way at all)
+      if (this.held == null) this.held = clamp(inp.trim || 0, -0.9, 0.9);
       const d = (inp.trim || 0) - this.held;
       inp.trim = this.held;
       this.bias = clamp(this.bias + d * 0.35, -this.limit, this.limit);
@@ -111,23 +115,15 @@ class RunawayTrim {
   }
 }
 
-// The throttles jam at `arg` (default: wherever the lever is when it happens). Fuel cutoff (U) takes the lever to
-// idle for the spool-down and then shuts every engine down (no reverse after that).
+// The throttles jam at `arg` (default: wherever the lever is when it happens). Fuel cutoff (U, the runtime's own
+// cutFuel()) takes the lever to idle for the spool-down and then shuts every engine down (no reverse after that).
 class StuckThrottle {
-  constructor(rt, spec, ac) { this.rt = rt; this.jam = spec.arg != null ? clamp(spec.arg, 0, 1) : clamp(ac.input.throttle, 0, 1); this.cut = false; this.cutT = 0; }
+  constructor(rt, spec, ac) { this.rt = rt; this.jam = spec.arg != null ? clamp(spec.arg, 0, 1) : clamp(ac.input.throttle, 0, 1); }
   start() { this.rt.setAction('fuelCutoff', 'FUEL CUT', 'fuel cutoff', 'U', true); }
-  pre(dt, ac, inp, w) {
-    if (this.cut) { this.cutT += dt; w.throttle = 0; if (this.cutT > 2.5) this.rt.shutAll(ac); }
-    else w.throttle = this.jam;
-  }
-  post() { this.rt.cfgLine(this.cut ? 'FUEL CUTOFF' : `THR JAMMED ${Math.round(this.jam * 100)}%`, 'bad'); }
-  action(name) {
-    if (name !== 'fuelCutoff' || this.cut) return false;
-    this.cut = true; this.rt.fuelCut = true;
-    this.rt.clearAction('fuelCutoff');
-    this.rt.say('Fuel cutoff.', 'FUEL CUTOFF', '');
-    return true;
-  }
+  get cut() { return this.rt.fuelCut; }
+  pre(dt, ac, inp, w) { if (!this.rt.fuelCut) w.throttle = this.jam; }
+  post() { if (!this.rt.fuelCut) this.rt.cfgLine(`THR JAMMED ${Math.round(this.jam * 100)}%`, 'bad'); }
+  action(name) { return name === 'fuelCutoff' && this.rt.cutFuel(); }
 }
 
 // An engine gives `arg` (default 0.5) of its power. Per-instance numbers only (ac.def is shared: never touched);
@@ -181,10 +177,13 @@ class EngineSurge {
 // Fire. It grows from the moment it starts; `spec.burn` seconds later (default 32) the wing (or the cabin, on a
 // single) is gone: a crash. At about 55% of that the engine itself seizes. The fire handle (A) shuts the engine
 // down (the aircraft's own engine failure, so everything that knows about a dead engine knows) and puts it out.
-// The flames and the smoke are the art bench's own particle pools (src/art/effects.js: fire, blackSmoke), driven
-// through their public emitter API from here; effects.js itself is not edited.
+// The flames and the smoke are the art bench's own particle pools (src/art/effects.js: fire, soot, blackSmoke),
+// driven through their public emitter API from here; effects.js itself is not edited. Four emitters on the burning
+// engine, all at rest in the air behind it (inherit 0), so at approach speed they draw a trail rather than a ball:
+// a short yellow core at the nacelle, a longer orange flame around it, dense black smoke, and a grey trail that
+// spreads behind (black alone disappears against a field seen from above; the grey reads on grass and on sky).
 class EngineFire {
-  constructor(rt, spec, ac) { this.rt = rt; this.i = engineIndex(ac, spec); this.burn = spec.burn ?? 32; this.t = 0; this.out = false; this.outT = 0; this.fl = null; this.sm = null; this.seized = false; }
+  constructor(rt, spec, ac) { this.rt = rt; this.i = engineIndex(ac, spec); this.burn = spec.burn ?? 32; this.t = 0; this.out = false; this.outT = 0; this.em = null; this.seized = false; }
   start() {
     this.rt.setAction('fireHandle', 'FIRE', 'fire handle', 'A', true);
     this.rt.annun(`${sideName(this.rt.ac, this.i)}ENG FIRE`, 'bad');
@@ -192,16 +191,21 @@ class EngineFire {
   }
   emitters() {
     const fx = this.rt.world && this.rt.world.effects, model = this.rt.game && this.rt.game.model;
-    if (!fx || !model || !fx.fire || !fx.blackSmoke) return;
+    if (!fx || !model || !fx.fire || !fx.blackSmoke || !fx.soot) return;
     const e = this.rt.ac.engines[this.i];
-    const jet = e.type === 'jet';
-    // flames from the back half of the nacelle (a jet) or out of the cowling (a prop), carried off by the airflow
+    const jet = e.type === 'jet', R = jet ? 1 : 0.45, frame = model.group;
+    // from the back of the nacelle (a jet) or out of the cowling (a prop), streaming aft and a little up
     const ex = model.anchors && model.anchors.exhaust && model.anchors.exhaust[this.i];
     const pos = ex ? ex.position.clone() : e.pos.clone();
-    if (jet) pos.z -= 1.4;
-    const anchor = { position: pos, direction: pos.clone().set(0, 0.15, 1).normalize(), radius: jet ? 0.7 : 0.35 };
-    this.fl = fx.fire.emitter({ rate: 0, frame: model.group, anchor, speed: jet ? 6 : 3, speedSpread: 0.5, cone: 0.35, inherit: 0, life: 0.5, lifeJitter: 0.4, size0: jet ? 1.4 : 0.6, size1: jet ? 3.2 : 1.6, alpha: 1 });
-    this.sm = fx.blackSmoke.emitter({ rate: 0, frame: model.group, anchor, speed: jet ? 5 : 2.5, speedSpread: 0.5, cone: 0.3, inherit: 0, life: 3.2, lifeJitter: 0.35, size0: jet ? 2 : 0.8, size1: jet ? 11 : 5, alpha: 0.85 });
+    if (jet) pos.z -= 1.0;
+    const anchor = { position: pos, direction: pos.clone().set(0, 0.12, 1).normalize(), radius: jet ? 0.55 : 0.3 };
+    const base = { rate: 0, frame, anchor, inherit: 0 };
+    this.em = {
+      core: fx.fire.emitter({ ...base, speed: 4, speedSpread: 0.4, cone: 0.15, life: 0.12, lifeJitter: 0.3, size0: 0.5 * R, size1: 1.0 * R, tint: 0, alpha: 0.7 }),
+      flame: fx.fire.emitter({ ...base, speed: 6, speedSpread: 0.5, cone: 0.25, life: 0.22, lifeJitter: 0.4, size0: 0.8 * R, size1: 1.8 * R, tint: 0.85, alpha: 0.5 }),
+      black: fx.blackSmoke.emitter({ ...base, speed: 5, speedSpread: 0.5, cone: 0.25, life: 3, lifeJitter: 0.35, size0: 1.2 * R, size1: 7 * R, alpha: 1 }),
+      grey: fx.soot.emitter({ ...base, speed: 4, speedSpread: 0.5, cone: 0.3, life: 4.5, lifeJitter: 0.3, size0: 2 * R, size1: 12 * R, tint: 1, alpha: 0.9 }),
+    };
   }
   get severity() { return clamp(0.25 + 0.75 * this.t / this.burn, 0, 1); }
   pre(dt, ac) {
@@ -211,15 +215,20 @@ class EngineFire {
     if (this.t >= this.burn && !ac.crashed) ac.crash(ac.engines.length > 1 ? 'Engine fire: the wing burned through' : 'Engine fire: it reached the cabin');
   }
   post(dt, ac) {
+    const m = this.em;
     if (this.out) {
+      // the handle pulled: the flame is gone at once, the smoke thins out over a few seconds
       this.outT += dt;
-      if (this.fl) this.fl.rate = 0;
-      if (this.sm) this.sm.set({ rate: Math.max(0, 40 * (1 - this.outT / 8)), alpha: 0.6 * clamp(1 - this.outT / 8, 0, 1) });
+      if (m) { const k = clamp(1 - this.outT / 6, 0, 1); m.core.rate = 0; m.flame.rate = 0; m.black.rate = 30 * k * k; m.grey.rate = 30 * k; m.grey.alpha = 0.6 * k; }
       return;
     }
-    const s = this.severity;
-    if (this.fl) this.fl.set({ rate: ac.crashed ? 0 : 30 + 90 * s, size1: (ac.engines[this.i].type === 'jet' ? 2.6 : 1.3) * (0.7 + 0.8 * s) });
-    if (this.sm) this.sm.set({ rate: ac.crashed ? 0 : 25 + 45 * s });
+    const s = this.severity, on = ac.crashed ? 0 : 1, R = ac.engines[this.i].type === 'jet' ? 1 : 0.45;
+    if (m) {   // (fields written directly: Emitter.set() would take a new object every frame)
+      m.core.rate = on * (320 + 160 * s); m.core.size1 = 1.0 * R * (0.8 + 0.4 * s);
+      m.flame.rate = on * (160 + 120 * s); m.flame.size1 = 1.8 * R * (0.7 + 0.7 * s); m.flame.life = 0.16 + 0.16 * s;
+      m.black.rate = on * (50 + 70 * s);
+      m.grey.rate = on * (25 + 30 * s);
+    }
     this.rt.sound.bell = 1;
     this.rt.engNote(this.i, 'FIRE');
     this.rt.warnLight = true;
@@ -233,12 +242,13 @@ class EngineFire {
     this.rt.say('Fire handle pulled. Fire out.', 'FIRE OUT', '');
     return true;
   }
-  dispose() { if (this.fl) this.fl.rate = 0; if (this.sm) this.sm.rate = 0; }
+  dispose() { if (this.em) for (const k in this.em) this.em[k].rate = 0; }
 }
 
-// Bird strike: a thud, feathers, the windshield cracks (a picture over the cockpit view, see style.css #crack), and
-// the bird that went down an engine leaves it at `arg` (default 0.75) of its power and surging. A surge you can shut
-// down with the fire handle (A).
+// Bird strike: a thud, feathers, the windshield cracks (a decal on the pane in front of the pilot, drawn by
+// src/cockpit.js from crackPattern() below; the runtime asked for it to be made at the start of the flight, so the
+// strike costs a canvas upload and no shader compile), and the bird that went down an engine leaves it at `arg`
+// (default 0.75) of its power and surging. A surge you can shut down with the fire handle (A).
 class BirdStrike {
   constructor(rt, spec, ac, n) {
     this.rt = rt; this.spec = spec;
@@ -247,7 +257,9 @@ class BirdStrike {
   start() {
     const rt = this.rt, ac = rt.ac;
     rt.sound.thud = 1.8; rt.bump(1.2);
-    rt.display.crack = crackSVG(makeRng(rt.seed * SEED_K + SEED_C + 7));
+    rt.display.crack = true;
+    const cv = rt.game && rt.game.cockpitView;
+    if (cv && cv.showCrack) cv.showCrack(crackPattern(makeRng(rt.seed * SEED_K + SEED_C + 7)));
     const fx = rt.world && rt.world.effects;
     if (fx && fx.smoke) {   // feathers and down: a light burst at the nose, carried off by the airflow
       const p = ac.pos.clone().addScaledVector(ac.fwd, ac.def.span * 0.35).addScaledVector(ac.up, 0.6), v = ac.vel.clone().multiplyScalar(0.55);
@@ -276,43 +288,41 @@ class PitotIce {
     this.rt.sensed.ias = Math.max(0, s);
     if (ac.def.engines[0].type === 'jet') {
       this.dis = Math.abs(s - ac.ias) > 12 * KT ? this.dis + dt : 0;
-      if (this.dis > 4 && !this.said) { this.said = true; this.rt.caution('caution', 'IAS DISAGREE'); this.rt.annun('IAS DISAGREE', 'warn'); this.rt.display.iasFlag = true; }
+      if (this.dis > 4 && !this.said) { this.said = true; this.rt.caution('caution', 'IAS DISAGREE'); this.rt.annun('IAS DISAGREE', 'warn'); this.rt.display.iasFlag = true; this.rt.activeName('IAS disagree'); }
     }
   }
 }
 
-// The electrics die: the HUD goes dark but for a standby airspeed and altimeter, the panel loses its lights (the
-// cockpit is told it is daytime, which is what its panel lighting keys on), the landing light goes out. The
-// airplane's own steam gauges and the stall horn need no electricity, so they carry on.
+// The electrics die: the HUD goes dark but for a standby airspeed and altimeter, the panel loses its lights
+// (src/cockpit.js dims every interior light to what daylight alone would give it while s.power is 0), the landing
+// light and the navigation lights go out. The airplane's own steam gauges and the stall horn need no electricity,
+// so they carry on.
 class Electrical {
-  constructor(rt) { this.rt = rt; this.light = null; this.max = 0; }
+  constructor(rt) { this.rt = rt; this.light = null; this.max = 0; this.nav = null; }
   start() {
     const rt = this.rt;
     rt.display.dark = true; rt.power = 0;
+    const m = rt.game && rt.game.model, p = m && m.parts;
     // models.js sets the landing light's intensity to userData.max below 600 ft with the gear down: max 0 keeps it
     // dark without hiding the light (a light switched invisible recompiles every lit shader in the scene)
-    const m = rt.game && rt.game.model, L = m && m.parts && m.parts.landingLight;
+    const L = p && p.landingLight;
     if (L && L.userData) { this.light = L; this.max = L.userData.max; L.userData.max = 0; }
+    // the navigation lights, beacon and strobes are one Points object (not a light: hiding it recompiles nothing)
+    const nav = p && p.lights && p.lights.points;
+    if (nav) { this.nav = nav; nav.visible = false; }
   }
-  dispose() { if (this.light) this.light.userData.max = this.max; }
+  dispose() { if (this.light) this.light.userData.max = this.max; if (this.nav) this.nav.visible = true; }
 }
 
 // The gear will not come down (or up: it goes up and stays there). Belly landing: the mission's scoring.belly says
-// that is the job, not a fault (scoreBelly below); fuel cutoff (U) is part of the drill.
+// that is the job, not a fault (scoreBelly below); the fuel cutoff (U, the runtime's cutFuel()) is part of the drill.
 class GearUp {
-  constructor(rt) { this.rt = rt; this.cut = false; this.cutT = 0; }
+  constructor(rt) { this.rt = rt; }
   start() { this.rt.setAction('fuelCutoff', 'FUEL CUT', 'fuel cutoff', 'U', false); }
-  pre(dt, ac, inp, w) {
-    ac.input.gearCmd = 0;
-    if (this.cut) { this.cutT += dt; w.throttle = 0; if (this.cutT > 2.5) this.rt.shutAll(ac); }
-  }
+  get cut() { return this.rt.fuelCut; }
+  pre(dt, ac) { ac.input.gearCmd = 0; }
   post() { this.rt.cfgLine('GEAR UNSAFE', 'bad'); }
-  action(name) {
-    if (name !== 'fuelCutoff' || this.cut) return false;
-    this.cut = true; this.rt.fuelCut = true; this.rt.clearAction('fuelCutoff');
-    this.rt.say('Fuel cutoff.', 'FUEL CUTOFF', '');
-    return true;
-  }
+  action(name) { return name === 'fuelCutoff' && this.rt.cutFuel(); }
 }
 
 // scoring.belly (a mission that asks for a belly landing; this area owns the flag): the landing is scored again with
@@ -337,13 +347,16 @@ export function scoreBelly(result, ac, approach, sc, running) {
 }
 
 // One main wheel is not there. A retractable leg stays up (stuckAt 0: that side lands on its engine pod or wing); on
-// fixed gear the wheel came off and the leg ends in a stub: it touches lower down, scrapes instead of rolling, pulls
-// the nose toward its side, and has no brake. models.js hides the wheel (leg.wheelOff). score() says how slow the
-// wing was held up. The pull is a rudder bias: the stand-in for a per-leg rolling drag the flight model does not have.
+// fixed gear the wheel came off and the leg ends in a stub: it touches lower down, scrapes instead of rolling (and
+// throws sparks), pulls the nose toward its side, and has no brake. models.js hides the tyre (leg.wheelOff); the
+// fairing stays, its lower edge where the stub touches. score() says how slow the wing was held up. The pull is a
+// rudder bias: the stand-in for a per-leg rolling drag the flight model does not have.
 class OneMainStuck {
   constructor(rt, spec, ac) {
     this.rt = rt; this.i = legIndex(ac, { leg: spec.leg ?? 'left' }, makeRng(1)); this.leg = ac.legs[this.i];
-    this.side = this.leg.pos.x < 0 ? -1 : 1; this.heldTo = null; this.pull = spec.pull ?? 0.3;
+    this.side = this.leg.pos.x < 0 ? -1 : 1; this.heldTo = null; this.pull = spec.pull ?? 0.3; this.t = 0;
+    this.tip = ac.points.find((p) => p.name === (this.side < 0 ? 'wingtipL' : 'wingtipR')) || null;
+    this.nacelle = ac.points.find((p) => p.name === (this.side < 0 ? 'nacelleL' : 'nacelleR')) || null;
   }
   start() {
     const l = this.leg, ac = this.rt.ac;
@@ -356,10 +369,20 @@ class OneMainStuck {
     w.yaw = clamp(w.yaw + this.side * this.pull * load * clamp(ac.gs / 12, 0.25, 1), -1, 1);
   }
   post(dt, ac) {
+    const l = this.leg;
+    if (l.wheelOff && l.contact && ac.gsRel > 4) {   // the bare axle in its fairing, scraping: sparks (effects.js's own pool)
+      const fx = this.rt.world && this.rt.world.effects;
+      this.t += dt;
+      if (fx && fx.sparks && this.t > 0.05) {
+        this.t = 0;
+        const p = this.rt._v.copy(l.pos).applyQuaternion(ac.quat).add(ac.pos); p.y -= l.radius;
+        const v = this.rt._v2.copy(ac.vel).multiplyScalar(0.25); v.y += 1.5;
+        fx.sparks.burst(p, v, 4, SPARKS_STUB);
+      }
+    }
     if (this.heldTo != null || !ac.stats.touchdown) return;
-    const tip = ac.points.find((p) => p.name === (this.side < 0 ? 'wingtipL' : 'wingtipR'));
-    const nacelle = ac.points.find((p) => p.name === (this.side < 0 ? 'nacelleL' : 'nacelleR'));
-    if (this.leg.contact || (tip && tip.contact) || (nacelle && nacelle.contact) || ac.stopped) this.heldTo = ac.gs;
+    const tip = this.tip, nacelle = this.nacelle;
+    if (l.contact || (tip && tip.contact) || (nacelle && nacelle.contact) || ac.stopped) this.heldTo = ac.gs;
   }
   score(result, ac, approach, rt) {
     if (ac.crashed || !ac.stats.touchdown) return result;
@@ -412,7 +435,7 @@ class BlownTire {
       this.t = 0;
       const p = this.rt._v.copy(this.leg.pos).applyQuaternion(ac.quat).add(ac.pos); p.y -= this.leg.radius;
       const v = this.rt._v2.copy(ac.vel).multiplyScalar(0.2); v.y += 1.5;
-      fx.sparks.burst(p, v, 3, { spread: 0.1, velSpread: 3, life: 0.5, lifeJitter: 0.5, size0: 0.1, size1: 0.04 });
+      fx.sparks.burst(p, v, 3, SPARKS_RIM);
     }
   }
 }
@@ -479,44 +502,37 @@ const EFFECTS = {
 };
 export const EFFECT_NAMES = Object.keys(EFFECTS);
 
-// A cracked windshield: the SVG over the cockpit view (style.css #crack). A star at the impact with a smear of the
-// bird, long radial cracks that wander and fork, and a few arcs between them. Seeded: the same flight, the same crack.
-export function crackSVG(rng) {
-  const W = 1600, H = 900;
-  const cx = 560 + rng() * 480, cy = 150 + rng() * 170;
+// A cracked windshield, as data: src/cockpit.js draws it into the decal it lays on the pane in front of the pilot.
+// Unit coordinates with the impact at (0, 0) and the decal's edges at +-1 (y down, as on a canvas): a frosted star
+// at the impact, long radial cracks that wander and fork and die out before the decal's edge, a few arcs between
+// them, and a smear of the bird. Plain numbers, no DOM, so it is tested in Node. Seeded: the same flight, the same crack.
+export function crackPattern(rng) {
   const paths = [], arcs = [];
   const n = 11 + Math.floor(rng() * 5);
   for (let i = 0; i < n; i++) {
-    let a = (i / n) * Math.PI * 2 + (rng() - 0.5) * 0.45, x = cx, y = cy;
-    const len = 140 + rng() * (i % 3 === 0 ? 700 : 360);
-    let d = `M${x.toFixed(0)} ${y.toFixed(0)}`;
-    for (let s = 0, l = 0; l < len; s++) {
-      const step = 18 + rng() * 34; l += step;
+    let a = (i / n) * Math.PI * 2 + (rng() - 0.5) * 0.45, x = 0, y = 0;
+    const len = 0.22 + rng() * (i % 3 === 0 ? 0.68 : 0.42);
+    const pts = [0, 0];
+    for (let l = 0; l < len;) {
+      const step = 0.025 + rng() * 0.045; l += step;
       a += (rng() - 0.5) * 0.32;
-      x += Math.cos(a) * step; y += Math.sin(a) * step * 0.92;
-      d += ` L${x.toFixed(0)} ${y.toFixed(0)}`;
+      x += Math.cos(a) * step; y += Math.sin(a) * step;
+      pts.push(x, y);
       if (rng() < 0.12) {   // a fork
-        const b = a + (rng() < 0.5 ? -1 : 1) * (0.35 + rng() * 0.4), fl = 40 + rng() * 120;
-        paths.push({ d: `M${x.toFixed(0)} ${y.toFixed(0)} L${(x + Math.cos(b) * fl).toFixed(0)} ${(y + Math.sin(b) * fl * 0.92).toFixed(0)}`, w: 0.9 });
+        const b = a + (rng() < 0.5 ? -1 : 1) * (0.35 + rng() * 0.4), fl = 0.05 + rng() * 0.15;
+        paths.push({ pts: [x, y, x + Math.cos(b) * fl, y + Math.sin(b) * fl], w: 0.8 });
       }
     }
-    paths.push({ d, w: 1.1 + rng() * 0.8 });
+    paths.push({ pts, w: 1 + rng() * 0.8 });
   }
   for (let k = 0; k < 3; k++) {
-    const r = 36 + k * (38 + rng() * 26);
+    const r = 0.05 + k * (0.05 + rng() * 0.035);
     const a0 = rng() * 6.28, a1 = a0 + 0.8 + rng() * 2.2;
-    let d = '';
-    for (let a = a0, j = 0; a <= a1; a += 0.2, j++) { const rr = r * (0.9 + rng() * 0.2); d += `${j ? ' L' : 'M'}${(cx + Math.cos(a) * rr).toFixed(0)} ${(cy + Math.sin(a) * rr * 0.92).toFixed(0)}`; }
-    arcs.push(d);
+    const pts = [];
+    for (let a = a0; a <= a1; a += 0.2) { const rr = r * (0.9 + rng() * 0.2); pts.push(Math.cos(a) * rr, Math.sin(a) * rr); }
+    arcs.push(pts);
   }
-  const lines = paths.map((p) => `<path d="${p.d}" stroke-width="${p.w.toFixed(1)}"/>`).join('') + arcs.map((d) => `<path d="${d}" stroke-width="0.8"/>`).join('');
-  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">`
-    + `<defs><radialGradient id="crk-smear" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#4a3a30" stop-opacity="0.55"/><stop offset="0.45" stop-color="#6b5a4c" stop-opacity="0.28"/><stop offset="1" stop-color="#8a7a6a" stop-opacity="0"/></radialGradient>`
-    + `<radialGradient id="crk-frost" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#e8eef2" stop-opacity="0.5"/><stop offset="0.6" stop-color="#dfe7ec" stop-opacity="0.12"/><stop offset="1" stop-color="#dfe7ec" stop-opacity="0"/></radialGradient></defs>`
-    + `<ellipse cx="${cx.toFixed(0)}" cy="${(cy + 14).toFixed(0)}" rx="120" ry="70" fill="url(#crk-smear)" transform="rotate(${(rng() * 40 - 20).toFixed(0)} ${cx.toFixed(0)} ${cy.toFixed(0)})"/>`
-    + `<circle cx="${cx.toFixed(0)}" cy="${cy.toFixed(0)}" r="46" fill="url(#crk-frost)"/>`
-    + `<g fill="none" stroke="rgba(10,14,18,0.45)" stroke-linecap="round" transform="translate(1.2 1.6)">${lines}</g>`
-    + `<g fill="none" stroke="rgba(236,242,246,0.72)" stroke-linecap="round">${lines}</g></svg>`;
+  return { paths, arcs, smear: { rx: 0.2, ry: 0.11, rot: (rng() * 40 - 20) * DEG, dy: 0.02 } };
 }
 
 // ------------------------------------------------------------------------------------------------------------------
@@ -543,14 +559,16 @@ export class FailureRuntime {
     this.fx = [];              // the running effects (the classes above)
     this.t = 0;
     this.power = 1;            // electrical power, for the cockpit (0 = dead)
-    this.fuelCut = false;
+    this.fuelCut = false;      // the fuel cutoff (cutFuel): the levers to idle, and 2.5 s later the engines stop
+    this.fuelCutT = 0;
     this.runAtContact = null;  // were the engines running at the first touch of the ground? (scoring.belly)
+    this._offRpm = [0, 0, 0, 0];   // what the gauges of an engine shut off by the fuel cutoff read as it runs down
     this._hintTimer = null; this._laterTimers = [];
     this._shadow = {}; for (const k of CHANNELS) this._shadow[k] = { base: 0, out: NaN };
     this._w = { pitch: 0, roll: 0, yaw: 0, trim: 0, throttle: 0 };
     this._sensed = { ias: 0 };
     this._display = {
-      dark: false, noBall: false, crack: null, cockpit: false, iasFlag: false,
+      dark: false, noBall: false, crack: false, iasFlag: false,
       caution: { level: '', text: '', blink: 0 }, annun: [], cfg: [], engNote: ['', '', '', ''], engOff: [false, false, false, false],
     };
     this._actions = [];        // [{ a, label, name, key, hot }] for the touch buttons and the key strip
@@ -561,7 +579,11 @@ export class FailureRuntime {
     this._dark = { inRange: false, cells: 0, waveoff: false, range: 0, dl: null, dev: 0 };
     this.meatball = null;      // a harness without main.js hands the true ball in here (main.js keeps game.meatball)
     this.lso = { call: '', t: -10 };   // Paddles' last call (the lens failure): what a scripted pilot listens to
-    if (game && game.cockpitView) game.cockpitView.failView = this;
+    if (game && game.cockpitView) {
+      game.cockpitView.failView = this;
+      // a bird strike cracks the windshield: the decal is made now, blank, so it compiles with the rest of the interior
+      if (this.pending.some((f) => f.name === 'birdStrike') && game.cockpitView.prepareCrack) game.cockpitView.prepareCrack(ac.def, makeRng(seed * SEED_K + SEED_C + 13));
+    }
     if (touch && touch.setFailureButtons) touch.setFailureButtons([]);
     if (hud && hud.setExtraKeys) hud.setExtraKeys([]);
   }
@@ -649,7 +671,7 @@ export class FailureRuntime {
   }
 
   // Engines: one shut down by a handle (it becomes the aircraft's own engine failure, so the flight model, the hints
-  // and the autopilot know), or all of them by the fuel cutoff (a shutdown, not a failure: the gauges say OFF).
+  // and the autopilot know), or all of them by the fuel cutoff.
   shutEngine(i, handle = false) {
     const ac = this.ac, e = ac.engines[i];
     if (!e || e.failed) return;
@@ -658,7 +680,17 @@ export class FailureRuntime {
     e.failed = true;
     if (handle) this._display.engOff[i] = true;
   }
-  shutAll(ac) { for (let i = 0; i < ac.engines.length; i++) { ac.engines[i].failed = true; this._display.engOff[i] = true; } }
+  // The fuel cutoff (U): the levers go to idle at once (the engines spool down) and 2.5 s later every engine stops. A
+  // shutdown, not a failure: the engines' own numbers go to zero (per-instance copies; ac.def is never touched) rather
+  // than `failed`, so the particle effects do not stream a failed engine's smoke behind a deliberate shutdown, and the
+  // gauges say OFF and run down (preStep, postStep). Offered by the stuck throttle and the gear-up belly landing.
+  cutFuel() {
+    if (this.fuelCut) return false;
+    this.fuelCut = true; this.fuelCutT = 0;
+    this.clearAction('fuelCutoff');
+    this.say('Fuel cutoff.', 'FUEL CUTOFF', '');
+    return true;
+  }
 
   // ---- per frame ----
   _read(ac, k) { const s = this._shadow[k]; return ac.input[k] === s.out ? s.base : ac.input[k]; }
@@ -669,19 +701,40 @@ export class FailureRuntime {
     const base = this._base || (this._base = {});
     for (const k of CHANNELS) base[k] = w[k];
     for (const f of this.fx) if (f.pre) f.pre(dt, ac, inp, w);
+    if (this.fuelCut) {
+      // (last, so a surge or a partial-power effect cannot put the power back)
+      this.fuelCutT += dt;
+      w.throttle = 0;
+      if (this.fuelCutT > 2.5) for (let i = 0; i < ac.engines.length; i++) {
+        const e = ac.engines[i];
+        if (!this._display.engOff[i]) { this._display.engOff[i] = true; this._offRpm[i] = e.rpm; }
+        e.maxThrust = 0; e.maxPower = 0; e.staticThrust = 0;
+      }
+    }
     for (const k of CHANNELS) { const s = this._shadow[k]; s.base = base[k]; s.out = w[k]; ac.input[k] = w[k]; }
   }
   postStep(dt, ac) {
     this.t += dt;
-    if (this.runAtContact == null && ac.stats.touchdown) this.runAtContact = !this.fuelCut && ac.engines.some((e) => !e.failed);
+    if (this.runAtContact == null && ac.stats.touchdown) this.runAtContact = !(this.fuelCut && this.fuelCutT > 2.5) && ac.engines.some((e) => !e.failed);
     if (!this.fx.length && !this.display) return;
     const d = this._display, snd = this.sound;
     snd.bell = 0; snd.clacker = 0; snd.buzz = 0;
     this.shake = 0; this.warnLight = false; this._cfgN = 0;
     for (let i = 0; i < d.engNote.length; i++) d.engNote[i] = '';
     for (const f of this.fx) if (f.post) f.post(dt, ac);
+    if (this.fuelCut) {
+      this.cfgLine('FUEL CUTOFF', 'bad');
+      // an engine the fuel cutoff stopped runs down on the gauges (the flight model's rpm follows the lever, which only
+      // the gauges, the sound and the exhaust read: a jet to nothing, a propeller to a windmill)
+      for (let i = 0; i < ac.engines.length; i++) {
+        const e = ac.engines[i];
+        if (!d.engOff[i] || e.failed) continue;
+        const to = e.type === 'prop' ? 0.15 * clamp(ac.tas / 30, 0, 1) : 0;
+        this._offRpm[i] += (to - this._offRpm[i]) * Math.min(1, dt / 4);
+        e.rpm = this._offRpm[i];
+      }
+    }
     d.cfg.length = this._cfgN;
-    d.cockpit = !!(this.rig && this.rig.mode === 'cockpit');
     if (d.caution.blink > 0) d.caution.blink -= dt;
     if (this.warnLight) { d.caution.level = 'warning'; if (d.caution.blink <= 0) d.caution.blink = 0.5; }
     if (this.shake > 0 && !ac.crashed) this.bump(this.shake);
@@ -697,6 +750,12 @@ export class FailureRuntime {
     let r = result;
     if (this.sc.scoring && this.sc.scoring.belly && this.sc.scoring.type !== 'carrier') r = scoreBelly(r, ac, approach, this.sc, this.runAtContact !== false);
     for (const f of this.fx) if (f.score) r = f.score(r, ac, approach, this);
+    // scoring.js names the failures by their keys ("stuckThrottle"); for a flight with one of the new ones the line says
+    // their names instead ("Stuck throttle"). The original twenty's debriefs are left exactly as they were.
+    const fs = this.sc.failures || [];
+    if (fs.some((f) => FAILURES[f.name] && FAILURES[f.name].effect)) {
+      for (const l of r.lines) if (l.k === 'Malfunction handled') l.v = fs.map((f) => (FAILURES[f.name] ? FAILURES[f.name].name : f.name)).join(', ') + ' (+5)';
+    }
     return r;
   }
   // The ball the lens shows. The true one goes to the scoring, the callouts and the LSO; with the lens failed the
