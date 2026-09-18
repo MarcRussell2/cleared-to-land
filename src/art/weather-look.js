@@ -11,7 +11,8 @@
 //       flash, bolt {on,x,z,y0,y1,variant,dist,cg}, strike, strikePower, shafts[4] {x,z,r,a}, nShafts, wind (m/s
 //       at the aircraft), fieldY, kind }. `t` is SIM time (seconds since the flight began): nothing here reads a
 //       clock.
-//   dispose()
+//   dispose()   takes its meshes out of the scene and frees their buffers and the deck texture (not the
+//               materials: see dispose() below)
 //
 // What it draws, and the rules each part follows:
 //   precipitation   ONE instanced draw (rain streaks, snow flakes or blowing dust, chosen at build from the
@@ -686,11 +687,14 @@ export class WeatherLook {
     }
   }
 
+  // The buffers and the deck's texture go; the materials stay. A flight restarted while the last one's shaders
+  // were still compiling leaves three's compileAsync polling those materials, and a disposed one has no program
+  // left to ask (an uncaught TypeError). Nothing else in the engine disposes a material, and the next flight's
+  // identical shaders reuse the same programs, so keeping them costs nothing.
   dispose() {
     for (const o of this.objects) {
       if (o.parent) o.parent.remove(o);
       o.geometry.dispose();
-      o.material.dispose();
     }
     if (this.deck) this.deck.tex.dispose();
     this.objects.length = 0;

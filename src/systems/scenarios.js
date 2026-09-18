@@ -225,6 +225,17 @@ export function resolveScenario(sc, rng = Math.random, settings = null) {
   if (s.site === 'gravelbar' || s.site === 'oneway') { s.scoring.type = 'bush'; s.spawn.dist = 900; s.spawn.alt = 100; s.spawn.flap = 1; s.spawn.fixed = true; }
   if (s.aircraft === 'condor' && s.spawn.flap == null) s.spawn.flap = 0.75;
   if (s.spawn.flap == null) s.spawn.flap = s.aircraft === 'skylark' ? 0.667 : 1;
+  // Roulette's "random weather" (the storms work, 2026-09-18). Drawn after every draw above, so a pinned seed
+  // replays everything it always did; only Roulette asks. Nearly half the spins bring weather (src/systems/
+  // weather.js presets), nothing that needs a technique the briefing cannot teach (no microbursts), and a
+  // storm or rain brings the visibility down with it.
+  if (s.id === 'roulette' && !sc.weather && rng() < 0.45) {
+    const k = rng();
+    const preset = k < 0.35 ? 'rain' : k < 0.6 ? 'storm' : k < 0.75 ? 'snow' : k < 0.88 ? 'overcast' : 'rain';
+    s.weather = { preset, events: [] };
+    if (k >= 0.88) s.weather.events.push({ type: 'squall', at: { type: 'dist', value: 600 + rng() * 500 }, shift: (rng() < 0.5 ? -1 : 1) * (25 + rng() * 30), speed: Math.round(s.wind.speed + 6 + rng() * 6), rain: 0.9 });
+    if (preset === 'storm' || preset === 'rain' || preset === 'snow') s.vis = Math.min(s.vis, preset === 'storm' ? 5000 : 7000);
+  }
   return s;
 }
 

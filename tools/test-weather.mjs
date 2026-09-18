@@ -516,7 +516,35 @@ for (const m of WEATHER_MISSIONS) {
   ok(!threw, `the storm missions' hints run against a live weather without throwing${threw ? ' (' + threw + ')' : ''}`);
 }
 
-// 9. The look (src/art/weather-look.js), in plain Node: what it builds for each kind of weather, the art bench's
+// 9. Roulette's "random weather" (scenarios.js resolveScenario): drawn after every other draw, so each spin's
+// aircraft, field, time, wind, weight, failure and spawn are what they always were for that seed (and its visibility
+// only ever comes down); no other challenge gains weather; and a weather spin is still flyable (Autoland, runway
+// fields; this Node flight does not apply the spin's failure, the real build does).
+{
+  const base = SCENARIOS.find((s) => s.id === 'roulette');
+  let same = true, got = 0;
+  const kinds = {};
+  for (let seed = 1; seed <= 300; seed++) {
+    const a = resolveScenario(base, makeRng(seed), { approach: 'short' });
+    const b = resolveScenario({ ...base, weather: { preset: 'clear' } }, makeRng(seed), { approach: 'short' });   // asks for its own: no draw
+    for (const k of ['aircraft', 'site', 'time', 'weight', 'wind', 'failures', 'spawn']) if (JSON.stringify(a[k]) !== JSON.stringify(b[k])) same = false;
+    if (a.vis > b.vis) same = false;
+    if (a.weather) { got++; const k = a.weather.preset + (a.weather.events.length ? '+squall' : ''); kinds[k] = (kinds[k] || 0) + 1; }
+  }
+  ok(same, 'Roulette: the weather is drawn after everything else, so every spin keeps its aircraft, field, time, wind, weight, failure and spawn (300 seeds)');
+  ok(got >= 100 && got <= 165, `Roulette: ${got} of 300 spins bring weather (${Object.entries(kinds).map(([k, n]) => k + ' ' + n).join(', ')})`);
+  ok(SCENARIOS.filter((s) => s.id !== 'roulette' && !s.weather).every((s) => !resolveScenario(s, makeRng(7), {}).weather), 'no other challenge picks up weather it did not ask for');
+  const spins = [];
+  for (let seed = 1; spins.length < 6 && seed < 400; seed++) {
+    const s = resolveScenario(base, makeRng(seed), { approach: 'short' });
+    if (s.weather && SITES[s.site].kind === 'airport' && !spins.some((x) => x.w === s.weather.preset)) spins.push({ seed, w: s.weather.preset });
+  }
+  const rs = spins.map(({ seed }) => fly(base, seed));
+  say(`  roulette     autoland ${rs.map((r, i) => `${r.seed} ${spins[i].w}: ${outcome(r)}`).join('; ')}`);
+  ok(rs.every((r) => !r.crashed && r.td), `Roulette: a spin of each kind of weather lands on Autoland (${spins.map((x) => x.w).join(', ')})`);
+}
+
+// 10. The look (src/art/weather-look.js), in plain Node: what it builds for each kind of weather, the art bench's
 // rules (named materials, at* uniforms only as the sky's own objects, the sky's cloud sheets hidden under a deck),
 // that update() drives the light from the sky's values without drifting or toggling a light, the whiteout, the
 // budget, determinism, and dispose(). The GPU half (does it compile, does it look right) is the stills' job.
