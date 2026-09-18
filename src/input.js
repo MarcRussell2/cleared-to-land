@@ -14,8 +14,10 @@ const KEYMAP = {
   KeyP: 'pause', Escape: 'menu', KeyM: 'hudToggle', KeyN: 'hintToggle', F1: 'thrIdle', F4: 'thrFull', Tab: 'camNext',
   KeyJ: 'lookLeft', KeyI: 'lookRight', KeyO: 'lookBack', ShiftLeft: 'boost', ShiftRight: 'boost',
   Comma: 'orbitLeft', Period: 'orbitRight', Digit0: 'orbitReset', Numpad0: 'orbitReset',
+  // failure drills (2026-09-17, src/systems/failureEffects.js): they do something only while their failure is on
+  KeyA: 'fireHandle', KeyD: 'trimCutout', KeyU: 'fuelCutoff',
 };
-const ONESHOT = new Set(['flapsDown', 'flapsUp', 'gear', 'hook', 'spoiler', 'autobrake', 'cam1', 'cam2', 'cam3', 'cam4', 'cam5', 'camNext', 'pause', 'menu', 'hudToggle', 'hintToggle', 'thrIdle', 'thrFull', 'orbitReset']);
+const ONESHOT = new Set(['flapsDown', 'flapsUp', 'gear', 'hook', 'spoiler', 'autobrake', 'cam1', 'cam2', 'cam3', 'cam4', 'cam5', 'camNext', 'pause', 'menu', 'hudToggle', 'hintToggle', 'thrIdle', 'thrFull', 'orbitReset', 'fireHandle', 'trimCutout', 'fuelCutoff']);
 
 export class Input {
   constructor() {
@@ -225,6 +227,9 @@ export const KEY_HELP = [
   ['L', 'Autobrake (airliner)'],
   ['H', 'Tailhook'],
   ['T / Y  (Home/End)', 'Trim nose up / down'],
+  ['A', 'Fire handle: shuts down the engine that is burning (or surging)'],
+  ['D', 'Trim cutout, for a runaway trim (then T / Y wind it by hand)'],
+  ['U', 'Fuel cutoff: every engine off (a stuck throttle, a belly landing)'],
   ['1 – 5, X, Tab', 'Camera views / next view'],
   ['J / I / O', 'Look left / right / back'],
   ['M', 'Toggle HUD'],

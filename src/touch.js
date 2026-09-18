@@ -59,6 +59,30 @@ const TOUCH_WORDS = [
   ['Brake gently (Space)', 'Brake gently (BRAKES)'],
   ['rudder (Q/E)', 'the rudder slider'],
   ['push the nose down (up arrow), full throttle (W)', 'push the stick forward, throttle full'],
+  // the failure drills (2026-09-17): FIRE / ENG OFF, TRIM CUT and FUEL CUT appear on the touch bar when they apply
+  ['Pull the fire handle (press A)', 'Pull the fire handle (tap FIRE)'],
+  ['Pull the fire handle: press A.', 'Pull the fire handle: tap FIRE.'],
+  ['pull the fire handle, press A.', 'pull the fire handle: tap FIRE.'],
+  ['with the fire handle (press A)', 'with the ENG OFF button'],
+  ['hut it down (press A)', 'hut it down (tap ENG OFF)'],
+  ['hut it down: press A.', 'hut it down: tap ENG OFF.'],
+  ['(press D)', '(tap TRIM CUT)'],
+  ['press D', 'tap TRIM CUT'],
+  ['wind the trim back with T.', 'wind the trim back with TRIM ▲.'],
+  ['wind the trim back: hold T.', 'wind the trim back: hold TRIM ▲.'],
+  ['then T / Y wind it by hand', 'then the TRIM buttons wind it by hand'],
+  ['(press U)', '(tap FUEL CUT)'],
+  ['press U', 'tap FUEL CUT'],
+  ['(press F once more)', '(tap FLAPS ▼ once more)'],
+  ['Flaps 40: press F.', 'Flaps 40: tap FLAPS ▼.'],
+  ['press K twice', 'tap SPLR twice'],
+  ['the speedbrake: K twice.', 'the speedbrake: SPLR twice.'],
+  ['Speedbrake out: press K', 'Speedbrake out: tap SPLR'],
+  ['spoilers armed (K)', 'spoilers armed (SPLR)'],
+  ['brake hard (Space)', 'brake hard (BRAKES)'],
+  ['left rudder (Q)', 'left rudder'],
+  ['right rudder (E)', 'right rudder'],
+  ['one reverser (hold R)', 'one reverser (hold REV)'],
 ];
 export function touchify(text) {
   if (!text) return text;
@@ -170,6 +194,14 @@ export class TouchControls {
       + `<button class="tb hold" data-hold="trimUp">TRIM ▲</button><button class="tb hold" data-hold="trimDown">TRIM ▼</button>`;
     this.left.innerHTML = html;
     this.rev.style.display = def.engines[0].reverse ? '' : 'none';
+  }
+  // The failure drills (src/systems/failureEffects.js): FIRE / ENG OFF (the fire handle), TRIM CUT, FUEL CUT, each
+  // shown only while its failure is on and it has not been used; list = [{ a: action, label, hot }]. Their own bar
+  // (style.css #tb-fail), so the buttons the airplane always has do not move.
+  setFailureButtons(list) {
+    if (!this.failBar) { this.failBar = el('div', 'tbar tb-fail'); this.failBar.id = 'tb-fail'; this.root.appendChild(this.failBar); }
+    this.failBar.innerHTML = list.map((b) => `<button class="tb${b.hot ? ' hot' : ''}" data-tap="${b.a}">${b.label}</button>`).join('');
+    this.failBar.classList.toggle('none', !list.length);
   }
   // TILT (recentre) appears with the bottom-left holds only while tilt-to-fly is on
   setTiltButton(on) {

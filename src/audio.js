@@ -1,5 +1,6 @@
 // Synthesized audio (no sample files): engines, wind, stall horn, gear horn, tires, impacts, callouts.
 import { KT, clamp, lerp } from './config.js';
+import { Alarms } from './audio-alarms.js';   // failure alarms: chime, fire bell, trim clacker, flutter buzz (2026-09-17)
 
 function noiseBuffer(ctx, seconds = 2) {
   const n = ctx.sampleRate * seconds;
@@ -20,6 +21,7 @@ export class AudioSys {
     this.lastCall = {};
     this.speechQ = [];
     this.speaking = false;
+    this.alarms = new Alarms(this);
   }
   resume() {
     if (this.ready) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
