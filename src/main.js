@@ -460,6 +460,13 @@ class Game {
     }).then(done, done);
   }
 
+  // The free-flight builder hands its options back here: cleaned the same way a saved setup is, then saved.
+  setFreeOpts(o) {
+    this.freeOpts = validateFreeOpts(o, { defaults: DEFAULT_FREE, sites: SITES, aircraft: AIRCRAFT, failures: FAILURES });
+    saveJSON('ctl.free', this.freeOpts);
+    return this.freeOpts;
+  }
+
   startFree() {
     this.freeOpts = validateFreeOpts(this.freeOpts, { defaults: DEFAULT_FREE, sites: SITES, aircraft: AIRCRAFT, failures: FAILURES });
     saveJSON('ctl.free', this.freeOpts);

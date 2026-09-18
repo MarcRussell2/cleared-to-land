@@ -16,6 +16,10 @@ const KEYMAP = {
   Comma: 'orbitLeft', Period: 'orbitRight', Digit0: 'orbitReset', Numpad0: 'orbitReset',
 };
 const ONESHOT = new Set(['flapsDown', 'flapsUp', 'gear', 'hook', 'spoiler', 'autobrake', 'cam1', 'cam2', 'cam3', 'cam4', 'cam5', 'camNext', 'pause', 'menu', 'hudToggle', 'hintToggle', 'thrIdle', 'thrFull', 'orbitReset']);
+// While a menu is on screen (the home screen, pause, the debrief) these keys belong to the page: Tab moves the focus,
+// Space and the arrows work the buttons, Esc goes back, P resumes. They are neither swallowed nor queued as flight
+// actions (a queued Esc or P used to pause the flight again the moment it resumed). main.js sets `menuOpen`.
+const MENU_KEYS = new Set(['Tab', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Escape', 'KeyP']);
 
 export class Input {
   constructor() {
@@ -52,6 +56,7 @@ export class Input {
       if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA')) return;
       const a = KEYMAP[e.code];
       if (!a) return;
+      if (this.menuOpen && MENU_KEYS.has(e.code) && this.menuOpen()) return;
       e.preventDefault();
       if (e.repeat) return;
       this.keys.add(a);
@@ -60,7 +65,7 @@ export class Input {
     });
     window.addEventListener('keyup', (e) => {
       const a = KEYMAP[e.code];
-      if (a) { this.keys.delete(a); e.preventDefault(); }
+      if (a) { this.keys.delete(a); if (!(this.menuOpen && MENU_KEYS.has(e.code) && this.menuOpen())) e.preventDefault(); }   // Space activates a menu button on keyup
     });
     window.addEventListener('blur', () => this.keys.clear());
     window.addEventListener('gamepadconnected', () => { this.padConnected = true; });

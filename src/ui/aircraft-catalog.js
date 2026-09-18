@@ -58,7 +58,7 @@ const CATALOG = {
   trailblazer: {
     blurb: 'Big flaps, huge drag, goes where there is no runway.',
     work: 3,
-    facts: (d) => [['Needs', `${fmtInt(d.approach.runwayNeed)} m`], ['Gear', 'Taildragger']],
+    facts: (d) => [['Stops in', `${fmtInt(d.approach.runwayNeed)} m`], ['Gear', 'Taildragger']],
   },
   condor: {
     blurb: 'Sixty tonnes that do not want to slow down.',
@@ -94,13 +94,27 @@ export function aircraftInfo(def) {
 }
 
 // How hard each of the original twenty is, 1..5 (a new mission carries `difficulty` itself; scenarios.js, where
-// the twenty live, is left untouched).
+// the twenty live, is left untouched). Its keys double as the list of the original twenty: anything else is new.
 export const CLASSIC_DIFFICULTY = {
   solo: 1, xwind15: 2, gusty: 3, heavy: 2, short: 3, noflaps: 3, fog: 4, deadstick: 3, nosegear: 3, oneengine: 3,
   jammed: 4, ice: 4, brakes: 3, slow: 2, stallrec: 3, cq: 4, night: 5, gravel: 3, oneway: 4, roulette: 4,
 };
+export const isClassicMission = (id) => Object.prototype.hasOwnProperty.call(CLASSIC_DIFFICULTY, id);
+
+// The six places the game shipped with; any other site id is a new map and gets a NEW tag in the builder.
+export const CLASSIC_SITES = ['bayfield', 'harbor', 'ridgefield', 'carrier', 'gravelbar', 'oneway'];
 
 export function difficultyOf(sc) {
   const d = Number(sc && (sc.difficulty ?? CLASSIC_DIFFICULTY[sc.id]));
   return Number.isFinite(d) ? Math.max(1, Math.min(5, Math.round(d))) : 3;
+}
+
+// A place in a few words for a tile: the terrain, then the runway (or the deck).
+const STYLE_WORD = { plains: 'Plains', coast: 'Coast', sea: 'At sea', mountain: 'Mountains', desert: 'Desert', island: 'Island', arctic: 'Arctic', city: 'City' };
+export function siteLine(site) {
+  if (!site) return '';
+  if (site.kind === 'carrier' || (!site.runways && site.carrier)) return 'Carrier · 4 wires';
+  const rw = site.runways && site.runways[0];
+  const where = site.kind === 'bush' ? `Bush strip, ${rw && rw.surface ? rw.surface : 'dirt'}` : STYLE_WORD[site.terrain && site.terrain.style] || 'Airport';
+  return rw ? `${where} · ${fmtInt(rw.length)} m` : where;
 }
