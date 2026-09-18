@@ -3,3 +3,6 @@
 import { treeWall, rwToWorld } from './util.js';
 
 export const CITY_MISSIONS = [];
+
+// Sites this area adds (same shape as SITES in src/systems/scenarios.js). Merged into SITES by index.js.
+export const CITY_SITES = {};

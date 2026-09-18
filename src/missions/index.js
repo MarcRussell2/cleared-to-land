@@ -1,13 +1,14 @@
 // The mission registry: what src/systems/scenarios.js appends to SITES and SCENARIOS, and the menu groups.
 // Append-only. Each area keeps its missions in its own file so parallel work does not collide.
 import { NEW_SITES } from './sites.js';
-import { WEATHER_MISSIONS } from './weather.js';
-import { FAILURES_MISSIONS } from './failures.js';
-import { OBSTACLES_MISSIONS } from './obstacles.js';
-import { CITY_MISSIONS } from './city.js';
-import { MAPS_MISSIONS } from './maps.js';
+import { WEATHER_MISSIONS, WEATHER_SITES } from './weather.js';
+import { FAILURES_MISSIONS, FAILURES_SITES } from './failures.js';
+import { OBSTACLES_MISSIONS, OBSTACLES_SITES } from './obstacles.js';
+import { CITY_MISSIONS, CITY_SITES } from './city.js';
+import { MAPS_MISSIONS, MAPS_SITES } from './maps.js';
 
-export { NEW_SITES };
+// sites.js holds the new maps; an area file may add sites of its own (a site id is permanent too).
+export const ALL_NEW_SITES = { ...NEW_SITES, ...WEATHER_SITES, ...FAILURES_SITES, ...OBSTACLES_SITES, ...CITY_SITES, ...MAPS_SITES };
 export const NEW_MISSIONS = [...WEATHER_MISSIONS, ...FAILURES_MISSIONS, ...OBSTACLES_MISSIONS, ...CITY_MISSIONS, ...MAPS_MISSIONS];
 
 // Menu groups, in menu order. The first seven are the original rail (src/ui/menus.js GROUPS); a mission with

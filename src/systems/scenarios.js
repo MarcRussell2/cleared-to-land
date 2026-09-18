@@ -1,6 +1,6 @@
 // Sites (airports, carrier, bush strips) and the challenge list.
 import { DEG } from '../config.js';
-import { NEW_SITES, NEW_MISSIONS } from '../missions/index.js';
+import { ALL_NEW_SITES, NEW_MISSIONS } from '../missions/index.js';
 
 export const SITES = {
   bayfield: {
@@ -189,7 +189,7 @@ export const SCENARIOS = [
 
 // The missions expansion (2026-09-17): new maps and missions live in src/missions/ (see its README.md) and are
 // appended here, so the twenty above and every id and order that depends on them stay exactly as they were.
-Object.assign(SITES, NEW_SITES);
+Object.assign(SITES, ALL_NEW_SITES);
 SCENARIOS.push(...NEW_MISSIONS);
 
 const RANDOM_FAILS = ['engine', 'engineLeft', 'flapsStuck', 'noseGear', 'elevatorJam', 'brakes', 'hydraulics', 'ice'];
