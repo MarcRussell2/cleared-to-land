@@ -24,6 +24,7 @@ function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').
 function cleanRowClass(i) { return i < 3 ? 'place p' + (i + 1) : ''; }
 function attr(s) { return esc(s).replace(/"/g, '&quot;'); }
 const pad2 = (n) => String(n).padStart(2, '0');
+const cap = (w) => (w ? String(w)[0].toUpperCase() + String(w).slice(1) : '');
 const fmtInt = (n) => Math.round(n).toLocaleString('en-US');
 const wrap180 = (d) => { const x = ((d % 360) + 540) % 360 - 180; return x === -180 ? 180 : x; };
 
@@ -263,7 +264,8 @@ export class Menus {
     </header>`;
   }
   // The header for pages opened over a flight (pause > settings / controls): only the way back.
-  soloBar(title, backLabel = 'Back to the flight') {
+  soloBar(title, backLabel) {
+    backLabel = backLabel || 'Back to the flight';
     return `<header class="bar solo">
       <button class="brand sm" data-go="back" data-autofocus><span class="chev">${CHEV_L}</span><span class="bt">${esc(backLabel)}</span></button>
       <div class="bar-title">${esc(title)}</div>
@@ -348,9 +350,9 @@ export class Menus {
           <button class="door-link tab" data-tab="settings" aria-label="Settings: controls, graphics, sound, your logbook name"></button>
           <div class="door-no"><span>04</span></div>
           <div class="door-detail"><dl class="last set">
-            ${row('Graphics', s.quality || 'high')}${row('Controls', (s.controlMode || 'assist') === 'assist' ? 'Assisted' : 'Direct')}${row('Start', ({ short: 'Short final', medium: 'Medium', long: 'Long' })[s.approach] || 'Short final', 'ph-hide')}${row('Camera', s.camera || 'chase', 'ph-hide')}
+            <div class="last-h">In use</div>${row('Graphics', s.quality || 'high')}${row('Controls', (s.controlMode || 'assist') === 'assist' ? 'Assisted' : 'Direct')}${row('Start', ({ short: 'Short final', medium: 'Medium', long: 'Long' })[s.approach] || 'Short final', 'ph-hide')}${row('Camera', s.camera || 'chase', 'ph-hide')}
           </dl></div>
-          <div class="door-foot"><h2 class="door-title">Settings</h2><p class="door-copy">Controls, graphics, sound, your logbook name.</p></div>
+          <div class="door-foot"><h2 class="door-title">Settings</h2><p class="door-copy">Controls, graphics, sound, your logbook name.</p>${GO}</div>
         </div>
       </main>
       <footer class="foot">
@@ -494,7 +496,7 @@ export class Menus {
     const wx = sc.weather && typeof sc.weather === 'object' ? sc.weather : null;
     const kv = (k, v, cls = '') => `<div class="${cls}"><b>${k}</b><span>${esc(v)}</span></div>`;
     let board = kv('Wind', windText(sc)) + kv('Visibility', visText(sc.vis)) + kv('Time', sc.time === 'random' ? 'Random' : fmtTime(sc.time))
-      + kv('Weight', sc.weight === 'random' ? 'Random' : sc.weight) + kv('Vref', ac ? `${(sc.scoring && sc.scoring.vref) || ac.speeds.Vref} kt` : '—')
+      + kv('Weight', sc.weight === 'random' ? 'Random' : cap(sc.weight)) + kv('Vref', ac ? `${(sc.scoring && sc.scoring.vref) || ac.speeds.Vref} kt` : '—')
       + kv('Malfunction', failText(sc));
     if (wx) {
       const p = WEATHER_PRESETS.find((w) => w.id === wx.preset);
@@ -551,7 +553,7 @@ export class Menus {
     const stat = (l, w, v) => `<div class="stat"><span class="sl">${l}</span><span class="sb"><b style="width:${pct(w)}"></b></span><span class="sv">${v}</span></div>`;
     const cards = AIRCRAFT_LIST.map((def) => {
       const a = aircraftInfo(def);
-      const mine = this.order().filter((s) => s.aircraft === a.id);
+      const mine = this.order().filter((s) => s.aircraft === a.id || s.aircraft === 'random');
       const fl = mine.filter((s) => this.bestOf(s.id));
       const best = Math.max(0, ...fl.map((s) => this.bestOf(s.id).points || 0));
       const work = `<div class="stat"><span class="sl">Workload</span><span class="wp">${[1, 2, 3, 4, 5].map((i) => `<i class="${i <= a.work ? 'f' : ''}"></i>`).join('')}</span><span class="sv">${a.work} / 5</span></div>`;
@@ -846,7 +848,7 @@ export class Menus {
    * Rows are fetched, so the screen paints immediately with "reading…" and fills in;
    * with no network it falls back to this machine's own bests and says so.
    */
-  showLogbook(back) {
+  showLogbook(back, backLabel) {
     this.page = 'logbook';
     this.onBack = back || (() => this.showHome());
     const sc = this.selectedMission();
@@ -868,12 +870,12 @@ export class Menus {
         <section><h2>Career</h2><div class="board" id="board-career"><p class="note">Reading the board&hellip;</p></div></section>
         <section><h2><select id="lb-mission" aria-label="Mission board">${opts}</select></h2><div class="board" id="board-one"><p class="note">Reading the board&hellip;</p></div></section>
       </div>`;
-    this.show(`<div class="app app-page">${back ? this.soloBar('Logbook') : this.bar('logbook')}<main class="page"><div class="page-inner">${body}</div></main></div>`);
+    this.show(`<div class="app app-page">${back ? this.soloBar('Logbook', backLabel) : this.bar('logbook')}<main class="page"><div class="page-inner">${body}</div></main></div>`);
     this.act['btn-lb-pilot'] = () => {
       const input = this.q('#lb-pilot');
       const saved = this.game.setPilot(input ? input.value : '');
       if (input) input.value = saved;
-      this.showLogbook(back);
+      this.showLogbook(back, backLabel);
     };
     this.onInputs = (e, done) => {
       if (done && e.target.id === 'lb-mission') { this.selected = e.target.value; this.fillBoard('#board-one', e.target.value); }
@@ -1009,7 +1011,7 @@ export class Menus {
 
   /* ------------------------------------------------------------- controls */
 
-  showControls(back) {
+  showControls(back, backLabel) {
     this.page = 'controls';
     this.onBack = back || (() => this.showHome());
     const stickSide = (this.game.settings.stickSide || 'right') === 'right' ? 'right' : 'left';
@@ -1036,12 +1038,12 @@ export class Menus {
       <p>Crosswind: point the nose into the wind (crab) so the runway stays centered; in the flare, straighten the nose with rudder and lower the upwind wing. Carrier: no flare. Fly the ball to the deck at on-speed angle of attack.</p>
       <div class="actions"><button class="btn ghost" id="btn-back" data-go="back">${back ? 'Back' : 'Done'}</button></div>
       <div class="credit">Aircraft models from poly.pizza (CC-BY 3.0): Small Airplane by Vojtěch Balák · Airplane 3268 by Remy Tauziac · Biplane and Fighter jet by their authors (see CREDITS.md). Everything else is procedural. Built with three.js.</div>`;
-    this.show(`<div class="app app-page">${back ? this.soloBar('Controls') : this.bar('controls')}<main class="page"><div class="page-inner">${sheet}</div></main></div>`, back ? 'over' : 'inner');
+    this.show(`<div class="app app-page">${back ? this.soloBar('Controls', backLabel) : this.bar('controls')}<main class="page"><div class="page-inner">${sheet}</div></main></div>`, back ? 'over' : 'inner');
   }
 
   /* ------------------------------------------------------------- settings */
 
-  showSettings(back) {
+  showSettings(back, backLabel) {
     this.page = 'settings';
     this.onBack = back || (() => this.showHome());
     const s = this.game.settings;
@@ -1067,9 +1069,9 @@ export class Menus {
         <label class="field"><span>Starting camera</span><select id="s-cam"><option value="chase">Chase</option><option value="cockpit">Cockpit</option><option value="tower">Tower</option></select></label>
         <label class="field"><span>Logbook name (a new best is logged under it)</span><input type="text" id="s-pilot" maxlength="16" value="${attr(this.game.pilot || '')}" placeholder="your name" autocomplete="off" autocapitalize="words" spellcheck="false"></label>
       </div>
-      <div class="also"><span>Also here</span><button class="tab" data-go="${back ? 'controls-over' : 'controls'}">Controls ${CHEV_R}</button><button class="tab" data-go="${back ? 'logbook-over' : 'logbook'}">Logbook ${CHEV_R}</button></div>
+      <div class="also"><span>Also here</span><button class="tab" id="btn-set-controls">Controls ${CHEV_R}</button><button class="tab" id="btn-set-logbook">Logbook ${CHEV_R}</button></div>
       <div class="actions"><button class="btn fly" id="btn-back">Done</button><span class="note">Saved as you change it.</span></div>`;
-    this.show(`<div class="app app-page">${back ? this.soloBar('Settings') : this.bar('settings')}<main class="page page-set"><div class="page-inner">${sheet}</div></main></div>`, back ? 'over' : 'inner');
+    this.show(`<div class="app app-page">${back ? this.soloBar('Settings', backLabel) : this.bar('settings')}<main class="page page-set"><div class="page-inner">${sheet}</div></main></div>`, back ? 'over' : 'inner');
     this.q('#s-quality').value = s.quality;
     this.q('#s-cam').value = s.camera;
     this.q('#s-approach').value = s.approach || 'short';
@@ -1084,22 +1086,24 @@ export class Menus {
       s.voice = this.q('#s-voice').checked; s.hints = this.q('#s-hints').checked; s.invert = this.q('#s-invert').checked; s.camera = this.q('#s-cam').value;
       s.approach = this.q('#s-approach').value; s.autoTrim = this.q('#s-autotrim').checked; s.keyStrip = this.q('#s-keystrip').checked; s.controlMode = this.q('#s-control').value;
       s.touch = this.q('#s-touch').value; s.autoQuality = this.q('#s-autoq').checked; s.tilt = this.q('#s-tilt').checked; s.stickSide = this.q('#s-stick').value;
-      this.game.setPilot(this.q('#s-pilot').value);
+      // the name is published with the pilot's bests, so it is only handed on when it actually changed
+      const typed = this.q('#s-pilot').value;
+      if (typed !== pilotTyped) { pilotTyped = typed; const saved = this.game.setPilot(typed); if (saved !== typed) { this.q('#s-pilot').value = saved; pilotTyped = saved; } }
       this.game.applySettings();
     };
+    let pilotTyped = this.game.pilot || '';
     this.onInputs = (e, done) => {
       const i = e.target;
       if (fmt[i.id]) { const v = this.q('#' + i.id + '-v'); if (v) v.textContent = fmt[i.id](+i.value); paint(i); }
       if (done) save();
     };
+    const pilotInp = this.q('#s-pilot');
+    if (pilotInp) pilotInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); pilotInp.blur(); } });
     const leave = () => { save(); if (back) back(); else this.showHome(); };
     this.onBack = leave;
     this.act['btn-back'] = leave;
-    this.act.any = (b) => {
-      const g = b.dataset.go;
-      if (g === 'controls-over') { save(); this.showControls(() => this.showSettings(back)); }
-      else if (g === 'logbook-over') { save(); this.showLogbook(() => this.showSettings(back)); }
-    };
+    this.act['btn-set-controls'] = () => { save(); if (back) this.showControls(() => this.showSettings(back, backLabel), 'Settings'); else this.showControls(); };
+    this.act['btn-set-logbook'] = () => { save(); if (back) this.showLogbook(() => this.showSettings(back, backLabel), 'Settings'); else this.showLogbook(); };
   }
 }
 

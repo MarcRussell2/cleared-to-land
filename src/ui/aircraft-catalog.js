@@ -115,6 +115,7 @@ export function siteLine(site) {
   if (!site) return '';
   if (site.kind === 'carrier' || (!site.runways && site.carrier)) return 'Carrier · 4 wires';
   const rw = site.runways && site.runways[0];
-  const where = site.kind === 'bush' ? `Bush strip, ${rw && rw.surface ? rw.surface : 'dirt'}` : STYLE_WORD[site.terrain && site.terrain.style] || 'Airport';
+  const surf = rw && rw.surface ? rw.surface : 'dirt';
+  const where = site.kind === 'bush' ? `${surf[0].toUpperCase()}${surf.slice(1)} strip` : STYLE_WORD[site.terrain && site.terrain.style] || 'Airport';
   return rw ? `${where} · ${fmtInt(rw.length)} m` : where;
 }

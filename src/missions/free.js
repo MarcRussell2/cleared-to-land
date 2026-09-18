@@ -67,7 +67,7 @@ export function siteUsable(site, def) {
   if (site.kind === 'carrier' || (!site.runways && site.carrier)) return def.hook ? { ok: true, reason: '' } : { ok: false, reason: 'Needs a tailhook' };
   const rw = site.runways && site.runways[0];
   const need = (def.approach && def.approach.runwayNeed) || 0;
-  if (rw && rw.length < need) return { ok: false, reason: `${fmtInt(rw.length)} m runway, needs ${fmtInt(need)} m` };
+  if (rw && rw.length < need) return { ok: false, reason: `Too short: needs ${fmtInt(need)} m` };
   return { ok: true, reason: '' };
 }
 
