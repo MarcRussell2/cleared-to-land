@@ -23,13 +23,15 @@
 //                   fast airplane streams at the windscreen and rain seen from the tower falls. The mesh sits at
 //                   the camera with a bounding sphere around it, so it is culled honestly and never frustum-
 //                   culled out. Width never drops below ~1.3 pixels; a streak widened to that is made fainter by
-//                   the same factor, so distant rain is a veil, not a hatch.
+//                   the same factor, so distant rain is a veil, not a hatch. The nearest drops fade out, further
+//                   out the longer the lens (the tower's zoom), so no drop is ever magnified across the picture.
 //   storm deck      the cloud base: ONE opaque plane at the ceiling (weather.ceiling metres above the field),
 //                   following the camera, with a baked periodic belly texture (256 px, two samples). It replaces
 //                   the sky's own cloud sheets (hidden: the deck would hide them anyway, and a third layer would
 //                   break the sky budget in docs/PERF.md). It darkens with `darkness`, glows warm toward a low sun
 //                   along the far edge, flashes from inside around each strike, and hazes into the shared
-//                   atmosphere(d), so its far edge meets the sky dome without a seam.
+//                   atmosphere(d), so its far edge meets the sky dome without a seam. Seen from above its base
+//                   (the camera inside the cloud) it is drawn as the cloud itself, never as a dark floor.
 //   rain shafts     up to four vertical curtains under the storm cells and the microburst (state.shafts), one
 //                   draw, cylindrical billboards from the ground into the deck, hazed like everything else.
 //   lightning       the bolt: four pre-built jagged channels with branches in one geometry (seeded, fixed), one
@@ -47,7 +49,9 @@
 //                   the sun, the hemisphere light and the exposure are set from the values the sky's set() left
 //                   (never toggling a light's `visible`, which would recompile every program), and the shared
 //                   atExtinction uniform carries the visibility: the model's (a visDrop), thicker in heavy rain,
-//                   and the whiteout inside the cloud above the ceiling (a ragged base 30 m deep).
+//                   and the whiteout inside the cloud above the ceiling (a ragged base 30 m deep). Inside the
+//                   cloud atWeather is lifted to 1 as well, so the airlight has no horizon step (a false
+//                   horizon in a whiteout); outside it is the sky's own value, rewritten every frame.
 //
 // House rules (src/art/AGENTS.md): every material is named `weather/...`; this module's GLSL uniforms start with
 // `wx` (the at* names are the atmosphere's, read here through sky.uniforms, never declared); no material or
@@ -67,6 +71,10 @@ const WX = {
   dust: [0.52, 0.39, 0.24], snow: [0.92, 0.94, 0.97],
   inCloudVis: 140,                                                      // metres of visibility inside the cloud
 };
+
+// The lens the precipitation's near fade is sized for (tan of half a 55-degree field of view); a longer lens
+// pushes the fade out by the ratio (the tower's zoom).
+const NORMAL_LENS = Math.tan(55 * Math.PI / 360);
 
 // Drops per tier (low, medium, high); phones take 70 %.
 const COUNTS = { rain: [4000, 7000, 11000], snow: [3000, 5000, 8000], dust: [1600, 2600, 4000] };
@@ -189,7 +197,7 @@ export class WeatherLook {
     const U = sky ? sky.uniforms : null;
 
     // --- what the sky set, before the weather touches it (restored and scaled from these every frame) ---
-    this.base = sky ? { sun: sky.sun.intensity, sunOn: sky.sun.visible, hemi: sky.hemi.intensity, exposure: sky.renderer ? sky.renderer.toneMappingExposure : 1 } : null;
+    this.base = sky ? { sun: sky.sun.intensity, sunOn: sky.sun.visible, hemi: sky.hemi.intensity, exposure: sky.renderer ? sky.renderer.toneMappingExposure : 1, weather: U ? U.atWeather.value : 0 } : null;
     this.baseRain = s.rain || 0;
     // a flash is light added to the scene, and the night exposure (about 3x the day's) would multiply it again:
     // what the flash adds is scaled back by the exposure the sky chose, so a night strike is bright, not white
@@ -257,14 +265,14 @@ export class WeatherLook {
       wxOff: { value: new THREE.Vector3() }, wxFall: { value: new THREE.Vector3(0, -K.fall, 0) }, wxCamVel: { value: new THREE.Vector3() },
       wxBox: { value: K.box }, wxDensity: { value: 1 }, wxAlpha: { value: K.alpha }, wxExpo: { value: K.expo }, wxWidth: { value: K.width },
       wxLen: { value: K.len }, wxPix: { value: 0.001 }, wxShape: { value: K.shape }, wxFlutter: { value: K.flutter }, wxTime: { value: 0 },
-      wxFieldY: { value: 0 }, wxLow: { value: K.low }, wxColor: { value: new THREE.Color() },
+      wxFieldY: { value: 0 }, wxLow: { value: K.low }, wxColor: { value: new THREE.Color() }, wxZoom: { value: 1 },
     };
     const mat = new THREE.ShaderMaterial({
       name: 'weather/' + kind,
       uniforms, transparent: true, depthWrite: false, depthTest: true, side: THREE.DoubleSide, forceSinglePass: true,
       vertexShader: `
         attribute vec2 corner; attribute vec4 aSeed;
-        uniform vec3 wxOff, wxFall, wxCamVel; uniform float wxBox, wxDensity, wxAlpha, wxExpo, wxWidth, wxLen, wxShape, wxFlutter, wxTime, wxFieldY, wxLow;
+        uniform vec3 wxOff, wxFall, wxCamVel; uniform float wxBox, wxDensity, wxAlpha, wxExpo, wxWidth, wxLen, wxShape, wxFlutter, wxTime, wxFieldY, wxLow, wxZoom;
         varying vec2 vSC; varying float vLen, vA;
         ${RIBBON_GLSL}
         void main() {
@@ -279,7 +287,9 @@ export class WeatherLook {
           vec3 world = cameraPosition + rel;
           float d = length(rel);
           float a = wxAlpha * step(fract(aSeed.w * 7.31 + aSeed.x * 3.7), wxDensity);
-          a *= smoothstep(1.2, 3.5, d) * (1.0 - smoothstep(0.30 * wxBox, 0.47 * wxBox, d));
+          // the near fade moves out with the lens's zoom: through the tower's long lens a drop two metres away
+          // would be magnified into one bar across the whole picture
+          a *= smoothstep(1.2 * wxZoom, 3.5 * wxZoom, d) * (1.0 - smoothstep(0.30 * wxBox, 0.47 * wxBox, d));
           a *= 1.0 - wxLow * smoothstep(wxFieldY + 20.0, wxFieldY + 110.0, world.y);
           // where the drop was, relative to the camera, one exposure ago
           vec3 vr = wxFall * spd - wxCamVel;
@@ -358,9 +368,12 @@ export class WeatherLook {
           // lightning lights the cloud from inside, brightest around the strike
           float fd = length(vWorld.xz - wxFlashAt);
           col += vec3(${WX.flash.join(', ')}) * wxFlash * (0.08 + 0.55 * exp(-fd / 2200.0)) * (0.55 + 0.6 * belly);
-          // aerial perspective (and the whiteout inside the cloud), and the far edge becomes the sky itself
+          // aerial perspective (and the whiteout inside the cloud), and the far edge becomes the sky itself.
+          // Seen from above its base the deck is not a surface: the camera is inside the cloud, and a dark plane
+          // below it would draw a false horizon across the whiteout. There it is simply more cloud.
           float haze = 1.0 - exp(-dist * atExtinction);
-          col = mix(col, atmosphere(d), max(haze, smoothstep(15000.0, 23500.0, dist)));
+          float inside = smoothstep(0.0, 8.0, cameraPosition.y - vWorld.y);
+          col = mix(col, atmosphere(d), max(max(haze, inside), smoothstep(15000.0, 23500.0, dist)));
           gl_FragColor = vec4(col, 1.0);
           ${outputGLSL}
         }`,
@@ -578,6 +591,10 @@ export class WeatherLook {
       if (inCloud > 0) ext *= Math.pow(VISIBILITY_EXTINCTION / WX.inCloudVis / ext, inCloud * inCloud);
     }
     U.atExtinction.value = ext;
+    // Inside the cloud there is no horizon: atmosphere(d) darkens the airlight below the horizon by (1 - atWeather)
+    // (fog is exempt), which in a whiteout drew a sharp false horizon across the grey. The sky's own value
+    // everywhere else, set every frame from what the sky chose.
+    if (b) U.atWeather.value = b.weather + (1 - b.weather) * inCloud;
     this.inCloud = inCloud;
 
     // the light the rain and the glass catch: the sky near the horizon, and the flash
@@ -609,6 +626,9 @@ export class WeatherLook {
         u.wxCamVel.value.copy(this.camVel);
         u.wxTime.value = env.t;
         u.wxPix.value = pix;
+        // 1 at a 55-degree lens or wider; the tower's 3.5-degree lens (17) pushes the near fade past the box, so no
+        // drop shows at all there (out of focus, as through a real long lens; the rain is the extinction's haze)
+        u.wxZoom.value = clamp(NORMAL_LENS / Math.tan(cam.fov * Math.PI / 360), 1, 20);
         u.wxFieldY.value = st.fieldY;
         u.wxDensity.value = 0.2 + 0.8 * amt;
         u.wxAlpha.value = K.alpha * (0.45 + 0.55 * amt) * (1 - 0.6 * inCloud);

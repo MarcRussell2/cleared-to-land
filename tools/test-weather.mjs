@@ -251,7 +251,7 @@ export function fly(base, seed, { pilot = 'autoland', maxT = 420, trace = false,
   ac.stallSign = seed % 2 ? 1 : -1;
   spawn(ac, sc, w, wind);
   const env = { wind: (p, t, o) => { wind.at(p, t, o); if (weather) weather.addWind(p, t, o); return o; }, ground: (x, z, o) => w.ground(x, z, o), carrier: w.carrier };
-  const ap = pilot === 'escape' ? new EscapePilot(ac, w, sc, weather) : pilot === 'hold' ? new HoldPilot(ac, w, sc) : pilot === 'average' ? new AveragePilot(ac, w, sc) : pilot === 'ball' ? new BallPilot(ac, w, sc) : pilot === 'lens' ? new LensPilot(ac, w, sc) : pilot === 'lso' ? new LsoPilot(ac, w, sc) : new Autoland(ac, w, sc);
+  const ap = pilot === 'escape' ? new EscapePilot(ac, w, sc, weather) : pilot === 'hold' ? new HoldPilot(ac, w, sc) : pilot === 'ball' ? new BallPilot(ac, w, sc) : pilot === 'lens' ? new LensPilot(ac, w, sc) : pilot === 'lso' ? new LsoPilot(ac, w, sc) : new Autoland(ac, w, sc);
   const dt = 1 / 25;
   let t = 0, end = 0, minGs = 1e9, shearMin = 1e9, events = [];
   for (let i = 0; i < maxT / dt; i++) {
@@ -291,7 +291,7 @@ const flyAt = process.argv.indexOf('--fly');
 if (flyAt >= 0) {
   const id = process.argv[flyAt + 1];
   const [a, b] = (process.argv[flyAt + 2] || '1-6').split('-').map(Number);
-  const pilot = process.argv.includes('--escape') ? 'escape' : process.argv.includes('--hold') ? 'hold' : process.argv.includes('--average') ? 'average' : process.argv.includes('--ball') ? 'ball' : process.argv.includes('--lens') ? 'lens' : process.argv.includes('--lso') ? 'lso' : 'autoland';
+  const pilot = process.argv.includes('--escape') ? 'escape' : process.argv.includes('--hold') ? 'hold' : process.argv.includes('--ball') ? 'ball' : process.argv.includes('--lens') ? 'lens' : process.argv.includes('--lso') ? 'lso' : 'autoland';
   const approach = process.argv.includes('--long') ? 'long' : process.argv.includes('--medium') ? 'medium' : 'short';
   // --set '{"weather":{"seaState":0.8}}' tries a variant (nested objects are merged one level down)
   const setAt = process.argv.indexOf('--set');
@@ -593,11 +593,22 @@ for (const m of WEATHER_MISSIONS) {
   ok(calm[0] < storm.look.base.sun * 0.5 && calm[0] > 0.002 && calm[2] < storm.look.base.exposure, `under the deck the sun is mostly gone but never off (${calm[0].toFixed(3)} of ${storm.look.base.sun.toFixed(3)}), and the exposure is down`);
   ok([storm.sky.sun.visible, storm.sky.moon.visible, storm.sky.hemi.visible].join() === vis0, 'update() never toggles a light\'s visibility (that would recompile every program)');
   // the whiteout: inside the cloud the shared extinction is the cloud's; below the ragged base it is the air's
+  const weather0 = storm.look.base.weather;
   storm.look.update(0, wx.state, env(storm, wx.state.ceilingY + 60));
-  const inCloud = storm.sky.uniforms.atExtinction.value;
+  const inCloud = storm.sky.uniforms.atExtinction.value, weatherIn = storm.sky.uniforms.atWeather.value;
   storm.look.update(0, wx.state, env(storm, wx.state.ceilingY - 120));
-  const below = storm.sky.uniforms.atExtinction.value;
+  const below = storm.sky.uniforms.atExtinction.value, weatherBelow = storm.sky.uniforms.atWeather.value;
   ok(Math.abs(inCloud - 3.912 / 140) < 1e-9 && Math.abs(below / clearExtinction(wx.state.vis) - 1) < 0.35, `inside the cloud the view closes to 140 m (${(3.912 / inCloud).toFixed(0)} m); 120 m under the base it is the air's again (${(3.912 / below).toFixed(0)} m)`);
+  ok(weather0 < 0.9 && weatherIn === 1 && weatherBelow === weather0, `inside the cloud the airlight has no horizon step (atWeather ${weather0.toFixed(2)} -> ${weatherIn} -> ${weatherBelow.toFixed(2)} under the base)`);
+  // through the tower's long lens no drop is close enough to be magnified across the picture: the near fade
+  // (1.2-3.5 m at a normal lens) moves out past the rain's box; at a normal lens it stays where it was
+  wx.state.rain = 0.8;
+  const zoomAt = (fov) => { storm.camera.fov = fov; storm.look.update(0, wx.state, env(storm, 100, 'tower')); return storm.look.precip.uniforms.wxZoom.value; };
+  const zTower = zoomAt(3.5), zChase = zoomAt(55), zWide = zoomAt(75);
+  const ss = (a, b, x) => { const k = Math.min(1, Math.max(0, (x - a) / (b - a))); return k * k * (3 - 2 * k); };
+  const B = storm.look.precip.K.box;
+  let most = 0; for (let d = 0; d <= B; d += 0.25) most = Math.max(most, ss(1.2 * zTower, 3.5 * zTower, d) * (1 - ss(0.3 * B, 0.47 * B, d)));   // the shader's two fades
+  ok(most < 0.03 && Math.abs(zChase - 1) < 1e-9 && zWide === 1, `rain through the tower's 3.5-degree lens: no drop in the ${B} m box keeps more than ${(most * 100).toFixed(1)} % of its alpha (zoom ${zTower.toFixed(1)}); at 55 and 75 degrees the near fade is unchanged`);
   storm.look.update(0, wx.state, env(storm, 100, 'cockpit'));
   const glass = storm.look.glass.mesh.visible;
   storm.look.update(0, wx.state, env(storm, 100, 'chase'));
