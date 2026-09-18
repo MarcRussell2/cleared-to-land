@@ -651,8 +651,6 @@ button { font: inherit; }
 /* ================================================================== phones, held sideways */
 @media (max-height: 500px) {
   .overlay { --padx: 16px; --sb: max(10px, env(safe-area-inset-bottom)); font-size: 14px; }
-  body.touch .overlay .door, body.touch .overlay .dock, body.touch .overlay .pausebox { -webkit-backdrop-filter: none; backdrop-filter: none; }
-  body.touch .overlay .door { background: linear-gradient(180deg, rgba(12,17,24,0.78) 0%, rgba(10,14,20,0.90) 45%, rgba(9,13,19,0.96) 100%); }
   .overlay .home-wrap { padding-top: max(10px, calc(var(--st) + 6px)); }
   .overlay .brand .bt { font-size: 24px; letter-spacing: 0.2em; }
   .overlay .brand .bs { font-size: 9.5px; margin-top: 6px; letter-spacing: 0.3em; }
@@ -1016,6 +1014,9 @@ button { font: inherit; }
   .overlay .deb { grid-template-columns: 1fr; padding: 16px; gap: 20px; }
   .overlay .pausebox h1 { font-size: 46px; }
 }
+/* touch devices: no frosted glass over the live 3D view (a blur of the canvas every frame is not free on a phone GPU); the flat panels are a little more opaque instead */
+body.touch .overlay .door, body.touch .overlay .dock, body.touch .overlay .pausebox { -webkit-backdrop-filter: none; backdrop-filter: none; }
+body.touch .overlay .door { background: linear-gradient(180deg, rgba(12,17,24,0.78) 0%, rgba(10,14,20,0.90) 45%, rgba(9,13,19,0.96) 100%); }
 @media (prefers-reduced-motion: reduce) { .overlay .door, .overlay .door::before, .overlay .door-go { transition: none; } }
 
 #loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 12px; background: var(--bg); color: var(--muted); font-size: 12px; letter-spacing: 0.3em; font-family: var(--mono); }
