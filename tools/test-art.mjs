@@ -252,7 +252,8 @@ for (const f of ['terrain-look.js', 'airport-look.js', 'carrier-look.js']) {
 
   // House rules for every module that draws the world.
   const WORLD_FILES = ['sky.js', 'world-atmosphere.js', 'world-water.js', 'world-ground.js', 'world-vegetation.js', 'world-props.js',
-    'terrain-look.js', 'airport-look.js', 'carrier-look.js', 'textures.js', 'lights.js', 'palette.js', 'quality.js'];
+    'terrain-look.js', 'airport-look.js', 'carrier-look.js', 'textures.js', 'lights.js', 'palette.js', 'quality.js',
+    'weather-look.js'];
   for (const f of WORLD_FILES) {
     const code = src(`art/${f}`);
     ok(!FORBIDDEN.test(code), `art/${f} must not import from physics/, systems/ or ui/`);

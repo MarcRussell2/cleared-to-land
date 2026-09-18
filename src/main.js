@@ -24,7 +24,7 @@ import { SITES, SCENARIOS, siteFlats, resolveScenario, makeFreeFlight } from './
 import { scoreLanding, vrefFor } from './systems/scoring.js';
 import { pilotName, publish, forget as forgetBoards } from './systems/leaderboard.js';
 import { FailureRuntime } from './systems/failureEffects.js';
-import { Weather } from './systems/weather.js';
+import { Weather, resolveWeatherSpec } from './systems/weather.js';
 import { MissionRuntime } from './systems/mission.js';
 import { RoutePilot } from './systems/routepilot.js';
 import { ObstacleField } from './world/obstacles.js';
@@ -319,7 +319,7 @@ class Game {
     }
     const obstacles = course ? new ObstacleField(course, { terrain, site }) : null;
     if (obstacles) obstacles.build(scene, { night, quality: this.settings.quality });
-    const weatherLook = sc.weather ? new WeatherLook(scene, { spec: sc.weather, sky, quality: this.settings.quality, touch: this.touchActive }) : null;
+    const weatherLook = sc.weather ? new WeatherLook(scene, { spec: resolveWeatherSpec(sc.weather), sky, quality: this.settings.quality, touch: this.touchActive }) : null;
     const effects = new Effects(scene, { seed: 1 });
     this.cockpitView.attachScene(scene);   // this world's lights reach the cockpit layer
     // what the particle effects need from the engine each frame (t and viewH are refreshed in fxEnv())
