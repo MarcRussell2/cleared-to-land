@@ -178,7 +178,8 @@ button { font: inherit; }
 .overlay .brand .bs { display: block; margin-top: 10px; font: 400 13px/1 var(--mono); letter-spacing: 0.34em; color: var(--hud); text-transform: uppercase; white-space: nowrap; }
 .overlay .quiet { display: flex; align-items: center; gap: 6px; flex: none; }
 .overlay .quiet .tab { font: 400 12px/1 var(--mono); letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted); padding: 15px 14px; border-radius: 3px; white-space: nowrap; }
-.overlay .quiet .tab:hover, .overlay .quiet .tab.on { color: var(--text); background: rgba(255,255,255,0.05); }
+.overlay .quiet .tab:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+.overlay .quiet .tab.on { color: var(--text); background: none; text-decoration: underline 2px var(--hud); text-underline-offset: 7px; }
 .overlay .quiet #btn-fs { border: 1px solid var(--line2); padding: 11px 12px; }
 .overlay .top .quiet { margin-top: 6px; margin-right: -14px; }
 
@@ -244,9 +245,11 @@ button { font: inherit; }
 /* doors 3 and 4: the last setup, the settings in short */
 .overlay .last { width: 100%; margin: 0; }
 .overlay .last .last-h { display: block; font: 400 11px/1 var(--mono); letter-spacing: 0.26em; color: var(--hud-dim); margin-bottom: 12px; text-transform: uppercase; }
-.overlay .last div:not(.last-h) { display: grid; grid-template-columns: 104px minmax(0, 1fr); align-items: baseline; padding: 10px 0; border-bottom: 1px dashed rgba(255,255,255,0.08); }
+.overlay .last div:not(.last-h) { display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: baseline; padding: 10px 0; border-bottom: 1px dashed rgba(255,255,255,0.08); }
 .overlay .last dt { font: 400 11px/1 var(--mono); letter-spacing: 0.2em; color: var(--muted); text-transform: uppercase; }
 .overlay .last dd { margin: 0; font: 400 17px/1.15 var(--mono); letter-spacing: 0.04em; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* the trouble line may name several failures: two lines, then an ellipsis */
+.overlay .last .wrap dd { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 .overlay .last.set div:not(.last-h) { grid-template-columns: 1fr; gap: 6px; padding: 9px 0; }
 .overlay .last.set dd { font-size: 15px; text-transform: capitalize; }
 
@@ -390,7 +393,9 @@ button { font: inherit; }
 .overlay .hangar-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 22px; }
 .overlay .hangar-head h1 { margin: 0; font: 800 44px/0.9 var(--display); letter-spacing: 0.02em; text-transform: uppercase; }
 .overlay .hangar-head p { margin: 0; font: 400 12px/1.5 var(--mono); letter-spacing: 0.16em; color: var(--muted); text-transform: uppercase; text-align: right; }
-.overlay .planes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; flex: 1; min-height: 0; }
+/* the cards fill the height that is there, but never shrink below their content: a short window scrolls the hangar */
+.overlay .planes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; flex: 1 0 auto; }
+.overlay .plane > * { flex-shrink: 0; }
 .overlay .plane { position: relative; display: flex; flex-direction: column; min-width: 0; padding: 0 24px 22px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
 .overlay .plane::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--line2); z-index: 2; }
 .overlay .plane:hover { border-color: var(--line2); }
@@ -522,6 +527,8 @@ button { font: inherit; }
 .overlay .tile.off:hover { border-color: var(--line); }
 .overlay .tile.ac { flex-direction: row; align-items: center; gap: 14px; }
 .overlay .tile.ac .sil { width: 64px; height: 64px; flex: none; }
+.overlay .tile.ac .ti { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.overlay .tile.ac .tn { margin-bottom: 2px; }
 .overlay .tile.ac.on .sil path, .overlay .tile.ac.on .sil ellipse { stroke: var(--hud); }
 .overlay .fails { display: flex; flex-wrap: wrap; gap: 8px; }
 .overlay .fail { min-height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid var(--line2); background: rgba(12,17,24,0.8); font: 600 17px/1 var(--display); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); display: inline-flex; align-items: center; }
@@ -570,7 +577,8 @@ button { font: inherit; }
 .overlay .form { display: grid; grid-template-columns: repeat(auto-fill, minmax(460px, 1fr)); gap: 0 40px; margin: 0 0 8px; }
 .overlay .field { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 14px; min-height: 56px; padding: 8px 0; border-bottom: 1px dashed var(--line); font-size: 15px; }
 .overlay .field > span:first-child { color: var(--text); line-height: 1.3; }
-.overlay .field select { width: 310px; }
+.overlay .field select { width: 410px; }   /* wide enough for the longest choice ("Assisted: keys/mouse command attitude, ...") */
+.overlay .page-set .page-inner { max-width: 1328px; }
 .overlay .field input[type=range] { width: 170px; }
 .overlay .field input[type=text] { width: 200px; }
 .overlay .field .v { font: 400 13px/1 var(--mono); color: var(--hud); min-width: 44px; text-align: right; }
@@ -631,6 +639,10 @@ button { font: inherit; }
   .overlay .adv-body > :last-child { grid-column: 2 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 0 30px; }
   .overlay .dock-title { max-width: 360px; }
   .overlay .facts { gap: 22px; }
+  .overlay .step { padding: 12px 12px 14px 46px; margin-right: 16px; }
+  .overlay .step .sn { left: 12px; }
+  .overlay .step .sv { font-size: 19px; }
+  .overlay .btn.step-fly { flex-basis: 170px; }
 }
 @media (max-width: 1360px) and (min-height: 501px) { .overlay .fact:nth-child(4) { display: none; } }
 @media (max-height: 780px) and (min-height: 501px) {
@@ -644,6 +656,15 @@ button { font: inherit; }
   .overlay .door-foot { padding-top: 14px; }
   .overlay .bar { height: calc(64px + var(--st)); }
   .overlay .plane p { min-height: 0; }
+  .overlay .hangar { padding-top: 20px; padding-bottom: 20px; }
+  .overlay .hangar-head { margin-bottom: 14px; }
+  .overlay .hangar-head h1 { font-size: 36px; }
+  .overlay .plane-art { height: min(200px, 20vh); min-height: 118px; padding-top: 16px; }
+  .overlay .plane-art .sil { width: min(150px, 14vh); height: min(150px, 14vh); }
+  .overlay .plane-cat { margin-top: 14px; }
+  .overlay .stats { margin-top: 12px; gap: 7px; }
+  .overlay .plane-prog { padding-top: 12px; }
+  .overlay .plane-acts { margin-top: 10px; }
   .overlay .brief h1 { font-size: 52px; }
   .overlay .ba-art { height: 180px; }
 }
@@ -794,7 +815,7 @@ button { font: inherit; }
   .overlay .step::after { right: -9px; width: 5px; height: 5px; }
   .overlay .step .sn { left: 8px; width: 20px; height: 20px; font-size: 10px; }
   .overlay .step .sl { font-size: 8.5px; letter-spacing: 0.14em; }
-  .overlay .step .sv { font-size: 14px; }
+  .overlay .step .sv { font-size: 14px; letter-spacing: 0.01em; }
   .overlay .btn.step-fly { flex-basis: 108px; min-height: 48px; font-size: 22px; }
   .overlay .step-fly small { display: none; }
   .overlay .stage { padding: 12px var(--sr) 16px var(--sl); }
@@ -849,7 +870,9 @@ button { font: inherit; }
   .overlay .keys b { font-size: 11.5px; }
   .overlay .form { grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 0 24px; }
   .overlay .field { min-height: 48px; padding: 5px 0; font-size: 13px; gap: 10px; }
-  .overlay .field select { width: 210px; height: 38px; font-size: 13px; }
+  /* a choice goes under its label here, so its longest option still fits beside the other column */
+  .overlay .field:has(> select) { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .overlay .field select { width: min(420px, 100%); height: 38px; font-size: 13px; }
   .overlay .field input[type=range] { width: 140px; }
   .overlay .field input[type=text] { width: 170px; height: 38px; font-size: 14px; }
   .overlay .credit { margin-top: 14px; font-size: 10px; }
@@ -890,6 +913,9 @@ button { font: inherit; }
   .overlay .door-set { padding-left: 9px; padding-right: 9px; }
   .overlay .door-copy { font-size: 11.5px; }
   .overlay .door-set .door-copy { display: none; }
+  .overlay .door-set .door-go { display: none; }   /* the whole door is the button; the title needs the room */
+  .overlay .door-set .door-foot { grid-template-columns: minmax(0, 1fr); grid-template-areas: "t" "c"; }
+  .overlay .door-set .door-title { font-size: min(24px, 21cqw); }
   .overlay .door-go { width: 34px; height: 34px; }
   .overlay .fleet figcaption { font-size: 7.5px; letter-spacing: 0.04em; }
   .overlay .prog-big b { font-size: min(44px, 12vh); }

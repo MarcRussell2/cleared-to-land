@@ -342,7 +342,7 @@ export class Menus {
           <div class="door-no"><span>03</span></div>
           <div class="door-detail"><dl class="last">
             <div class="last-h">Last setup</div>
-            ${row('Aircraft', f.aircraft)}${row('Place', f.place)}${row('Weather', f.weather)}${row('Wind', f.wind, 'ph-hide')}${row('Time', f.time, 'ph-hide')}${row('Trouble', f.trouble)}
+            ${row('Aircraft', f.aircraft)}${row('Place', f.place)}${row('Weather', f.weather)}${row('Wind', f.wind, 'ph-hide')}${row('Time', f.time, 'ph-hide')}${row('Trouble', f.trouble, 'wrap')}
           </dl></div>
           <div class="door-foot"><h2 class="door-title">Free Flight</h2><p class="door-copy">Any plane, any place, any weather.</p>${GO}</div>
         </div>
@@ -654,7 +654,7 @@ export class Menus {
     const toggle = (key, label, sub, on, disabled = false) => `<button class="toggle ${on ? 'on' : ''}" data-tog="${key}" aria-pressed="${!!on}" ${disabled ? 'disabled' : ''}><span class="tl">${label}<small>${sub}</small></span><span class="sw"></span></button>`;
     switch (this.freeStep) {
       case 'aircraft': {
-        const tiles = AIRCRAFT_LIST.map((a) => { const i = aircraftInfo(a); return `<button class="tile ac ${o.aircraft === a.id ? 'on' : ''}" data-set="aircraft" data-v="${a.id}" aria-pressed="${o.aircraft === a.id}">${sil(a.id)}<span><span class="tn">${esc(i.name)}</span><br><span class="tk">${esc(i.category)} · Vref ${i.vref} kt</span></span></button>`; }).join('');
+        const tiles = AIRCRAFT_LIST.map((a) => { const i = aircraftInfo(a); return `<button class="tile ac ${o.aircraft === a.id ? 'on' : ''}" data-set="aircraft" data-v="${a.id}" aria-pressed="${o.aircraft === a.id}">${sil(a.id)}<span class="ti"><span class="tn">${esc(i.name)}</span><span class="tk">${esc(i.category)}</span><span class="tk">Vref ${i.vref} kt</span></span></button>`; }).join('');
         const weights = WEIGHTS.filter((w) => def.massOptions && def.massOptions[w]).map((w) => ({ id: w, name: w, small: def.massOptions[w] >= 10000 ? `${(def.massOptions[w] / 1000).toFixed(0)} t` : `${fmtInt(def.massOptions[w])} kg` }));
         return `<div class="blk">${head('Aircraft', 'Places it cannot use are greyed out on the next step.')}<div class="tiles t4">${tiles}</div></div>
           <div class="blk narrow"><div class="blk-h"><h3>Weight</h3></div>${seg('weight', weights, o.weight)}</div>`;
