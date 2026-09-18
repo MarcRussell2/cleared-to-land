@@ -23,6 +23,8 @@ export class Terrain {
       return { ...f, dir, right: new THREE.Vector3(-dir.z, 0, dir.x) };
     });
     this.obstacles = opts.obstacles ? opts.obstacles.slice() : [];
+    // Circles ({x, z, r}) where no clutter grows: a mission course's towers, bridges and pylons (src/world/obstacles.js).
+    this.keepOut = opts.keepOut ? opts.keepOut.slice() : [];
     this.treeDensity = opts.trees ?? 0.5;
     this.treeArea = opts.treeArea || 9000;
     this.snowLine = opts.snowLine || 1400;
@@ -141,6 +143,7 @@ export class Terrain {
       const m = f.treeMargin ?? f.margin * 0.6;
       if (Math.abs(u) < f.halfLength + m + margin && Math.abs(v) < f.halfWidth + m * 0.5 + margin) return true;
     }
+    for (const k of this.keepOut) { const dx = x - k.x, dz = z - k.z, r = k.r + margin; if (dx * dx + dz * dz < r * r) return true; }
     return false;
   }
 

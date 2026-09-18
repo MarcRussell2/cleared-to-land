@@ -15,3 +15,5 @@
 export { groundColor, buildGround, parcel } from './world-ground.js';
 export { buildForest, OBSTACLE_TREE, buildObstacleTrees } from './world-vegetation.js';
 export { buildRocks, buildRoad, buildVillage } from './world-props.js';
+// Mission obstacles (towers, bridges, cables, gates): the look of src/world/obstacles.js.
+export { buildCourse } from './city-look.js';

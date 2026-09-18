@@ -23,7 +23,13 @@ import { AudioSys } from './audio.js';
 import { SITES, SCENARIOS, siteFlats, resolveScenario, makeFreeFlight } from './systems/scenarios.js';
 import { scoreLanding, vrefFor } from './systems/scoring.js';
 import { pilotName, publish, forget as forgetBoards } from './systems/leaderboard.js';
-import { applyFailure, shouldTrigger } from './systems/malfunctions.js';
+import { FailureRuntime } from './systems/failureEffects.js';
+import { Weather } from './systems/weather.js';
+import { MissionRuntime } from './systems/mission.js';
+import { RoutePilot } from './systems/routepilot.js';
+import { ObstacleField } from './world/obstacles.js';
+import { WeatherLook } from './art/weather-look.js';
+import { MISSION_GROUPS } from './missions/index.js';
 import { Autoland } from './systems/autopilot.js';
 import { FlightControl } from './systems/flightControl.js';
 import { TouchControls, touchLikely, touchify } from './touch.js';
@@ -142,12 +148,16 @@ class Game {
     this.endTimer = 0;
     this.scenario = null;
     this.scenarioBase = null;
-    this.env = { wind: (p, t, o) => this.wind.at(p, t, o), ground: (x, z, o) => this.world.ground(x, z, o), carrier: null };
+    // The weather's local overlay (a microburst, a gust front's leading edge) rides on top of the physics wind
+    // here, for the aircraft and (through this.fx) the particles; src/physics/wind.js is not edited.
+    this.env = { wind: (p, t, o) => { this.wind.at(p, t, o); if (this.weather) this.weather.addWind(p, t, o); return o; }, ground: (x, z, o) => this.world.ground(x, z, o), carrier: null };
+    this.weather = null;       // src/systems/weather.js, per flight, only when the scenario has `weather`
+    this.failRt = null;        // src/systems/failureEffects.js, per flight
+    this.mission = null;       // src/systems/mission.js, per flight
+    this.flightSeed = 0;
     this._g = makeGroundOut();
     this.approach = null;
     this.clock = new THREE.Clock();
-    this.pendingFailures = [];
-    this.activeFailures = [];
     this.calloutState = {};
     this.applySettings();
 
@@ -261,8 +271,12 @@ class Game {
   // ---------- world ----------
   clearWorld() {
     if (this.world) {
+      if (this.world.weatherLook) this.world.weatherLook.dispose();
       this.scene.clear();
     }
+    if (this.failRt) { this.failRt.dispose(); this.failRt = null; }
+    if (this.mission) { this.mission.dispose(); this.mission = null; }
+    this.weather = null;
     this.world = null;
     this.env.carrier = null;
   }
@@ -288,7 +302,10 @@ class Game {
     // would build the next world a detail level down and leave it there.
     const sky = new SkySystem(scene, this.renderer, { time: sc.time, visibility: sc.vis, azimuth, elevation: site.terrain.elevation || 0, cloudCover: sc.vis < 7000 ? 0 : (sc.clouds ?? 0.3), shadowSize: this.profile.shadowMap });
     if (this.shadowMapSize && this.shadowMapSize !== this.profile.shadowMap) sky.setShadowSize(this.shadowMapSize);
-    const terrain = new Terrain({ ...site.terrain, flats: siteFlats(site) });
+    // A mission course (towers, bridges, cables, gates: src/world/obstacles.js) is planned before the terrain is
+    // built, so the forests and villages keep out of it.
+    const course = ObstacleField.plan(site, sc);
+    const terrain = new Terrain({ ...site.terrain, flats: siteFlats(site), keepOut: course ? course.keepOut : null });
     terrain.build(scene, { sun: sky.sunDir, treeScale: this.profile.treeScale });
     let airport = null, carrier = null;
     if (site.runways) {
@@ -300,12 +317,15 @@ class Game {
       carrier = new Carrier({ ...site.carrier, seaState: sc.seaState ?? site.carrier.seaState, night, x: 0, z: 0 });
       carrier.build(scene);
     }
+    const obstacles = course ? new ObstacleField(course, { terrain, site }) : null;
+    if (obstacles) obstacles.build(scene, { night, quality: this.settings.quality });
+    const weatherLook = sc.weather ? new WeatherLook(scene, { spec: sc.weather, sky, quality: this.settings.quality, touch: this.touchActive }) : null;
     const effects = new Effects(scene, { seed: 1 });
     this.cockpitView.attachScene(scene);   // this world's lights reach the cockpit layer
     // what the particle effects need from the engine each frame (t and viewH are refreshed in fxEnv())
-    this.fx = { windAt: (p, t, o) => this.wind.at(p, t, o), t: 0, camera: this.camera, viewH: 1080, sky };
+    this.fx = { windAt: (p, t, o) => this.env.wind(p, t, o), t: 0, camera: this.camera, viewH: 1080, sky };
     const w = {
-      site, terrain, airport, carrier, sky, effects, night,
+      site, terrain, airport, carrier, sky, effects, night, obstacles, weatherLook,
       _camG: makeGroundOut(),
       ground: (x, z, out) => {
         if (carrier && carrier.ground(x, z, out)) return;
@@ -337,6 +357,7 @@ class Game {
     // window.CTL_WIND_SEED replays an approach exactly, which is how the
     // screenshot harness compares two builds (tools/ctl-shots/looksheet.mjs).
     const flightSeed = window.CTL_WIND_SEED || Math.floor(Math.random() * 1000) + 1;
+    this.flightSeed = flightSeed;
     const flightRng = makeRng(flightSeed);
     const sc = resolveScenario(scBase, flightRng, this.settings);
     this.scenario = sc;
@@ -358,13 +379,15 @@ class Game {
     const dir = w.dir != null ? w.dir : ((rwHeading * RAD + (w.rel || 0)) + 720) % 360;
     this.wind.set({ dir, speed: w.speed || 0, gust: w.gust, turb: w.turb || 0, shear: w.shear || 0, seed: flightSeed });
     this.rig.setSeed(flightSeed);
+    this.weather = sc.weather ? new Weather(sc.weather, { seed: flightSeed, wind: this.wind, world: this.world, scenario: sc, hud: this.hud, audio: this.audio, rig: this.rig }) : null;
     // Which wing drops at the stall leaks a very small rolling bias into normal
     // flight, so it belongs to the flight's seed as well.
     ac.stallSign = flightSeed % 2 ? 1 : -1;
     this.spawn(sc);
-    this.pendingFailures = (sc.failures || []).map((f) => ({ ...f }));
-    this.activeFailures = [];
     this.hud.setFailures([]);
+    this.failRt = new FailureRuntime(ac, sc, { seed: flightSeed, hud: this.hud, audio: this.audio, rig: this.rig, input: this.input, world: this.world, touch: this.touch, game: this, touchify: (t) => (this.touchActive ? touchify(t) : t) });
+    this.mission = new MissionRuntime(sc, { world: this.world, weather: this.weather, failRt: this.failRt, hud: this.hud, audio: this.audio });
+    if (this.world.obstacles) this.world.obstacles.reset(ac);
     this.approach = this.newApproachLog();
     this.calloutState = {};
     this.eventLog = [];
@@ -452,10 +475,14 @@ class Game {
     } else {
       const rw = w.runway;
       heading = rw.heading;
-      pos = rw.aim.clone().addScaledVector(rw.dir, -(dist + rw.aimDistance)).addScaledVector(rw.right, sp.offset || 0);
+      // A mission may start anywhere in the runway frame (u along, v right; src/missions/README.md) and on its
+      // own heading (hdg, degrees relative to the runway); without those it is the extended centreline as always.
+      const u = sp.u != null ? sp.u : -dist, v = sp.v != null ? sp.v : (sp.offset || 0);
+      pos = rw.threshold.clone().addScaledVector(rw.dir, u).addScaledVector(rw.right, v);
+      if (sp.hdg) heading += sp.hdg * DEG;
       gsAngle = (rw.gsAngle || (def.approach.glideslope * RAD)) * DEG;
       groundYAtAim = rw.aim.y;
-      pos.y = groundYAtAim + (dist + rw.aimDistance) * Math.tan(gsAngle) + def.cgHeight;
+      pos.y = groundYAtAim + (rw.aimDistance - u) * Math.tan(gsAngle) + def.cgHeight;
       if (sp.alt != null) { w.ground(pos.x, pos.z, this._g); pos.y = Math.max(this._g.y, rw.elevation) + sp.alt; }
     }
     ac.pos.copy(pos);
@@ -464,7 +491,7 @@ class Game {
     const flap = sp.flap ?? 0;
     const speed = (sp.speedKt || sc.scoring?.vref || def.speeds.Vref) * KT;
     const windVec = this.wind.at(pos, 0, new THREE.Vector3());
-    const gamma = sp.alt != null ? -1.5 * DEG : -gsAngle;
+    const gamma = sp.gamma != null ? sp.gamma * DEG : sp.alt != null ? -1.5 * DEG : -gsAngle;
     ac.trim(heading, speed, gamma, flap, windVec);
     if (sp.stall) {
       // The Stall Recovery start (2026-09-15): a stall ENTRY, not a stall. Slow, power off, and the previous
@@ -488,7 +515,7 @@ class Game {
   retry() { this.startScenario(this.scenarioBase); }
 
   // ---- debugging helpers (console) ----
-  setAutopilot(on) { this.ap = on && this.ac ? new Autoland(this.ac, this.world, this.scenario) : null; return !!this.ap; }
+  setAutopilot(on) { this.ap = on && this.ac ? (this.scenario.route ? new RoutePilot(this.ac, this.world, this.scenario) : new Autoland(this.ac, this.world, this.scenario)) : null; return !!this.ap; }
   debugView(x, y, z, lookAtOffset = null) {
     this.rig.setMode('debug');
     this.rig.debugOffset = new THREE.Vector3(x, y, z);
@@ -562,7 +589,7 @@ class Game {
         ap.tdV = tdx * rw.right.x + tdz * rw.right.z;
       }
     }
-    const result = scoreLanding(ac, sc, ap);
+    const result = this.mission ? this.mission.score(scoreLanding(ac, sc, ap), ac, ap) : scoreLanding(ac, sc, ap);
     let newBest = false;
     if (!forced || ac.stats.touchdown) {
       const b = this.best[sc.id];
@@ -642,11 +669,21 @@ class Game {
     ac.step(dt, this.env);
     this.model.update(ac, dt);
     this.effects.update(dt, ac, this.model, this.fxEnv(dt));
+    if (w.obstacles) w.obstacles.update(dt, this.t, ac.pos);
+    if (this.weather) this.weather.update(dt, this.t, ac);
+    if (w.weatherLook) w.weatherLook.update(dt, this.weather.state, this.weatherEnv(ac));
     w.sky.update(ac.pos, dt);
     if (w.terrain.water) w.terrain.water.tick(dt);
     this.rig.update(dt, ac, w);
     this.model.setCockpitView(this.rig.mode === 'cockpit' && !!this.cockpitView.cockpit);   // the exterior skin hides only when an interior draws in its place
     this.cockpitView.update(dt, ac, this.rig, w, {});
+  }
+
+  // What the weather look reads each frame besides Weather.state (one object, refilled).
+  weatherEnv(ac) {
+    const e = this._wxEnv || (this._wxEnv = {});
+    e.camera = this.camera; e.t = this.t; e.sky = this.world.sky; e.renderer = this.renderer; e.ac = ac; e.cameraMode = this.rig.mode;
+    return e;
   }
 
   // The per-frame context the particle effects read (src/art/effects.js): the wind, the time, the camera,
@@ -685,28 +722,21 @@ class Game {
     if (w.carrier) {
       w.towerPos = w.carrier.group.localToWorld(this._tower.set(31, 20 + 26, 25));
     }
+    // weather and failures act on the inputs and the air after the pilot (or the autopilot) and before the physics
+    if (this.weather) this.weather.update(dt, this.t, ac);
+    this.failRt.preStep(dt, ac, inp);
     // physics
     if (w.carrier) w.carrier.update(dt);
     ac.step(dt, this.env);
+    // mission obstacles: swept probes against towers, bridges and cables (src/world/obstacles.js)
+    if (w.obstacles && !ac.crashed) { const hit = w.obstacles.hit(ac); if (hit) ac.crash('Hit ' + hit); }
     // events
     for (const e of ac.events) { this.onEvent(e); this.eventLog.push({ t: +this.t.toFixed(2), type: e.type, info: e.reason || e.wire || e.leg || (e.td ? Math.round(e.td.vs / FPM) + ' fpm ' + e.td.legs.join('+') : ''), pitch: +(ac.euler.pitch * RAD).toFixed(1), roll: +(ac.euler.roll * RAD).toFixed(1), gs: +(ac.gsRel).toFixed(1) }); }
     ac.events.length = 0;
-    // failures
-    const ctx = { t: this.t, distToThreshold: this.distToThreshold() };
-    for (let i = this.pendingFailures.length - 1; i >= 0; i--) {
-      const f = this.pendingFailures[i];
-      if (shouldTrigger(f, ac, ctx)) {
-        this.pendingFailures.splice(i, 1);
-        const info = applyFailure(ac, f);
-        this.activeFailures.push(info.name);
-        this.hud.setFailures(this.activeFailures);
-        this.hud.message(info.msg, 'bad', 4);
-        this.audio.beep(520, 0.4);
-        const hintText = this.touchActive ? touchify(info.hint) : info.hint;
-        if (info.hint) setTimeout(() => this.hud.callout(hintText, 6), 800);
-        this.audio.say('Warning. ' + info.name.toLowerCase(), true);
-      }
-    }
+    // failures (src/systems/failureEffects.js: triggers, announcements, and the effects that need no physics edit)
+    this.failRt.check(ac, { t: this.t, distToThreshold: this.distToThreshold() });
+    this.failRt.postStep(dt, ac);
+    this.mission.update(dt, this.t, ac);
     // approach logging
     this.logApproach(dt);
     // callouts
@@ -718,6 +748,8 @@ class Game {
     if (w.terrain.water) { w.terrain.water.setSun(w.sky.sunDir, w.sky.dayness, w.sky.fogColor); w.terrain.water.tick(dt); }
     this.model.update(ac, dt);
     this.effects.update(dt, ac, this.model, this.fxEnv(dt));
+    if (w.obstacles) w.obstacles.update(dt, this.t, ac.pos);
+    if (w.weatherLook) w.weatherLook.update(dt, this.weather.state, this.weatherEnv(ac));
     this.rig.update(dt, ac, w);
     // HUD
     const hudCtx = this._hudCtx;   // one object, refilled: the HUD reads it and keeps nothing
@@ -725,6 +757,7 @@ class Game {
     hudCtx.status = this.statusLine(); hudCtx.gsRef = def.approach.glideslope; hudCtx.vref = vrefFor(ac, sc); hudCtx.keys = inp.keys; hudCtx.input = inp;
     hudCtx.fcs = this.fcs && this.fcs.mode === 'assist' && !this.ap ? { pitch: this.fcs.cmdPitch, bank: this.fcs.cmdBank } : null;
     hudCtx.ils = null; hudCtx.meatball = null;
+    hudCtx.sensed = this.failRt.sensed; hudCtx.display = this.failRt.display; hudCtx.weather = this.weather ? this.weather.state : null;
     if (w.runway && w.runway.ils) { const d = w.airport.deviation(w.runway, ac.pos); if (d.dist > -50 && d.dist < 15000) hudCtx.ils = d; }
     if (w.carrier) { hudCtx.meatball = this.meatball; hudCtx.gsRef = 3.5 * DEG; }
     // the cockpit interior gets the same readings the HUD gets (only while the cockpit view is up;
@@ -732,7 +765,7 @@ class Game {
     if (this.rig.mode === 'cockpit') this.cockpitView.update(dt, ac, this.rig, w, { vref: hudCtx.vref, ils: hudCtx.ils, meatball: hudCtx.meatball, wind: this.wind.surface(this.t) });
     this.hud.update(ac, hudCtx, dt);
     this.hints();
-    this.audio.update(ac, { cameraMode: this.rig.mode }, dt);
+    this.audio.update(ac, { cameraMode: this.rig.mode, weather: this.weather ? this.weather.state : null }, dt);
     // end conditions
     if (ac.crashed) { this.endTimer += dt; if (this.endTimer > 3.5) this.finish(); }
     else if (ac.stopped) { this.endTimer += dt; if (this.endTimer > 2.0) this.finish(); }
@@ -742,6 +775,7 @@ class Game {
 
   action(a) {
     const ac = this.ac, inp = this.input, def = ac.def;
+    if (this.failRt && this.failRt.action(a)) return;   // failure-specific actions (fire handle, trim cutout, ...)
     switch (a) {
       case 'flapsDown': case 'flapsUp': {
         const d = def.flaps.detents;
@@ -817,6 +851,8 @@ class Game {
     const d = this.distToThreshold();
     const nm = d / NM;
     const cam = CAMERA_NAMES[this.rig.mode];
+    const ms = this.mission ? this.mission.status() : '';
+    if (ms) return `${this.scenario.title} · ${ms} · ${cam}`;
     if (d > 0) return `${this.scenario.title} · ${nm.toFixed(1)} NM to the ${this.world.carrier ? 'ramp' : 'threshold'} · ${cam}`;
     return `${this.scenario.title} · ${cam}`;
   }
@@ -889,7 +925,9 @@ class Game {
     const d = this.distToThreshold();
     const ra = ac.radioAlt / FT;
     let h = '';
-    if (ac.crashed) h = '';
+    const mh = !ac.crashed && this.mission ? this.mission.hint({ ac, ra, d, t: this.t }) : null;
+    if (mh) h = mh;
+    else if (ac.crashed) h = '';
     else if (ac.trap.trapped) h = 'Trapped. Throttle to idle.';
     else if (ac.onGround) {
       if (def.id === 'trailblazer') h = 'Keep it straight with rudder (Q/E). Brake gently (Space) or it will nose over.';
@@ -933,7 +971,7 @@ function loadJSON(k, d) { try { const v = localStorage.getItem(k); return v ? JS
 function loadStr(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
 function saveJSON(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* ignore */ } }
 
-window.G = { SCENARIOS, SITES, AIRCRAFT };
+window.G = { SCENARIOS, SITES, AIRCRAFT, MISSION_GROUPS };
 function boot() {
   if (window.game) return;
   try {

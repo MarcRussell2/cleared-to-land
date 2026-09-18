@@ -1,5 +1,6 @@
 // Sites (airports, carrier, bush strips) and the challenge list.
 import { DEG } from '../config.js';
+import { NEW_SITES, NEW_MISSIONS } from '../missions/index.js';
 
 export const SITES = {
   bayfield: {
@@ -186,13 +187,22 @@ export const SCENARIOS = [
   },
 ];
 
+// The missions expansion (2026-09-17): new maps and missions live in src/missions/ (see its README.md) and are
+// appended here, so the twenty above and every id and order that depends on them stay exactly as they were.
+Object.assign(SITES, NEW_SITES);
+SCENARIOS.push(...NEW_MISSIONS);
+
 const RANDOM_FAILS = ['engine', 'engineLeft', 'flapsStuck', 'noseGear', 'elevatorJam', 'brakes', 'hydraulics', 'ice'];
 
 export const APPROACH_LENGTH = { short: 1, medium: 1.8, long: 3 };
 
 export function resolveScenario(sc, rng = Math.random, settings = null) {
   const pick = (a) => a[Math.floor(rng() * a.length)];
+  // Nested objects are copied: the gust line below used to write into the SCENARIOS entry itself, so the
+  // second flight of a challenge inherited the first flight's gust (and its briefing showed it).
   const s = { ...sc, spawn: { ...sc.spawn }, scoring: { ...sc.scoring } };
+  if (sc.wind && typeof sc.wind === 'object') s.wind = { ...sc.wind };
+  if (sc.weather && typeof sc.weather === 'object') s.weather = { ...sc.weather, events: (sc.weather.events || []).map((e) => ({ ...e })) };
   const mult = APPROACH_LENGTH[settings?.approach] || 1;
   if (!s.spawn.fixed && s.spawn.dist) s.spawn.dist = Math.round(s.spawn.dist * mult);
   if (s.aircraft === 'random') s.aircraft = pick(['skylark', 'condor', 'skylark', 'trailblazer']);
