@@ -164,6 +164,14 @@ export class Airport {
         this.terrain.obstacles.push(...camp.obstacles);
       }
       if (rw.markers) this.add(look.buildMarkers(rw, place));
+      // The new maps (src/missions/sites.js): a site's own props (solid ones register like buildings), and
+      // roads and villages placed by the site even where there are no aerodrome buildings.
+      if (rw.props) {
+        const p = look.buildSiteProps(rw, place, rw.props, (x, z) => this.terrain.height(x, z));
+        this.add(p.objects);
+        this.terrain.obstacles.push(...p.obstacles);
+      }
+      if (rw.surroundings && !rw.buildings) this.buildSurroundings(rw);
     }
     scene.add(this.group);
     // An aerodrome does not move: matrices composed once (the windsock's sock turns with the wind and stays live).
@@ -257,6 +265,12 @@ export class Airport {
     const tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3();
     const T = this.terrain;
     const road = (u0, v0, u1, v1, w) => { this.point(rw, u0, v0, tmp); this.point(rw, u1, v1, tmp2); T.addRoad(tmp.x, tmp.z, tmp2.x, tmp2.z, w); };
+    // a site may place its own (the new maps: a coast road, a road through a saddle; runway frame)
+    if (rw.surroundings) {
+      for (const r of rw.surroundings.roads || []) road(...r);
+      for (const [u, v, n, spread] of rw.surroundings.villages || []) { this.point(rw, u, v, tmp); T.addVillage(tmp.x, tmp.z, n, spread); }
+      return;
+    }
     // a road crossing the approach path, a parallel road, an access road to the terminal
     road(-950, -2600, -950, 2600, 8);
     road(-3500, 700, 4000, 700, 8);
@@ -282,6 +296,9 @@ export class Airport {
       if (s === 'asphalt') { out.mu = rw.wet ? 0.5 : 0.85; out.kind = 'runway'; out.rough = 0; }
       else if (s === 'gravel') { out.mu = 0.62; out.kind = 'gravel'; out.rough = 0.45; y += 0.035 * noise2(x * 1.7, z * 1.7, 3); }
       else if (s === 'sand') { out.mu = 0.5; out.kind = 'sand'; out.rough = 0.6; y += 0.05 * noise2(x * 1.2, z * 1.2, 5); }
+      // the new maps: packed snow brakes at about a third of dry asphalt, lake ice at a seventh
+      else if (s === 'snow') { out.mu = 0.3; out.kind = 'snow'; out.rough = 0.35; y += 0.03 * noise2(x * 1.3, z * 1.3, 6); }
+      else if (s === 'ice') { out.mu = 0.12; out.kind = 'ice'; out.rough = 0.05; }
       else { out.mu = 0.55; out.kind = 'dirt'; out.rough = 0.7; y += 0.06 * noise2(x * 1.5, z * 1.5, 4); }
       out.y = y;
       return true;

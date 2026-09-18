@@ -19,7 +19,8 @@
 //
 //   size, res            the mesh's extent in metres and its grid resolution
 //   seed                 deterministic seed; derive your own from it, never Math.random()
-//   style                'plains' | 'coast' | 'mountain' | 'sea'
+//   style                'plains' | 'coast' | 'mountain' | 'sea', and the new maps'
+//                        'island' | 'desert' | 'arctic' (coloured by biomeColor below)
 //   elevation            the site's field elevation in metres
 //   waterLevel           sea/river level in metres, or null for no water
 //   snowLine             metres AMSL where snow starts
@@ -31,6 +32,8 @@
 //   fieldNoise(x, z)     -1..1, the farm-field pattern
 //   forestNoise(x, z)    -1..1, where woodland wants to be
 //   nearFlat(x, z, m)    true inside a runway's flattened area - keep clutter out
+//   island / desert / arctic   that style's parameters (null otherwise), and for the
+//                        arctic lakeShore(x, z): metres outside the frozen lake (< 0 on it)
 //
 // The quality tier comes from ./quality.js (WORLD_QUALITY.detail: 'low' | 'medium' |
 // 'high'); the engine sets it before the world is built. Honour it.
@@ -45,7 +48,7 @@
 // LOD is visible, so a level boundary does not blend or double-draw its skirts.
 import * as THREE from 'three';
 import { smoothstep, lerp, makeRng, noise2 } from '../config.js';
-import { PALETTE, FINISH } from './palette.js';
+import { PALETTE, FINISH, BIOMES } from './palette.js';
 import { groundDetail } from './textures.js';
 import { WORLD_QUALITY } from './quality.js';
 
@@ -61,6 +64,7 @@ export function parcel(x, z) {
 
 // Layered linear albedos. Slope is 1 - normal.y, as in the original contract.
 export function groundColor(field, h, slope, x, z, out) {
+  if(BIOMES[field.style]) return biomeColor(field, h, slope, x, z, out);
   const P=PALETTE.ground, n=noise2(x/180,z/180,field.seed+33);
   const broad=noise2(x/850,z/850,field.seed+44), rel=h-field.elevation;
   const mix=(c,t)=>{out.r=lerp(out.r,c[0],t);out.g=lerp(out.g,c[1],t);out.b=lerp(out.b,c[2],t);};
@@ -98,6 +102,59 @@ export function groundColor(field, h, slope, x, z, out) {
   return out;
 }
 
+// The new maps (2026-09-17): a tropical island, red desert and canyon, snow round a
+// frozen lake. Same layering as above, their own colours (BIOMES in palette.js); no
+// farm parcels on any of them.
+function biomeColor(field, h, slope, x, z, out) {
+  const n=noise2(x/180,z/180,field.seed+33), broad=noise2(x/850,z/850,field.seed+44);
+  const mix=(c,t)=>{out.r=lerp(out.r,c[0],t);out.g=lerp(out.g,c[1],t);out.b=lerp(out.b,c[2],t);};
+  if(field.style==='island') {
+    const B=BIOMES.island, d=h-(field.waterLevel??0);
+    const m1=noise2(x/95,z/95,field.seed+45), m2=noise2(x/37,z/37,field.seed+46);
+    out.setRGB(B.lush[0]+B.lushNoise[0]*n,B.lush[1]+B.lushNoise[1]*n,B.lush[2]+B.lushNoise[2]*n);
+    // drier up the hills and on the lee of the broad pattern; burnt grass in patches, the dry forest's
+    // shade where the woods are, red earth where the slopes erode, rock on the steep faces and knolls
+    mix(B.scrub,smoothstep(8,70,d)*(0.45+0.45*broad));
+    mix(B.dryGrass,smoothstep(0.05,0.65,m1+0.3*broad)*smoothstep(5,35,d)*0.6);
+    mix(B.woodFloor,smoothstep(-0.05,0.35,field.forestNoise(x,z))*smoothstep(3,12,d)*0.7);
+    mix(B.soil,smoothstep(0.10,0.28,slope)*(0.35+0.35*m2)*smoothstep(4,15,d));
+    mix(B.rock,Math.max(smoothstep(0.30,0.55,slope),smoothstep(0.55,0.85,m2)*smoothstep(25,70,d)*0.55));
+    // the beach: dry coral sand above the swash, wet below it, the sandy seabed under the shallows
+    mix(B.sand,1-smoothstep(2.4+0.5*n,3.5+0.5*n,d));
+    mix(B.wetSand,(1-smoothstep(0.15,0.6,d))*smoothstep(-0.8,0,d));
+    mix(B.seabed,1-smoothstep(-0.8,-0.2,d));
+  } else if(field.style==='desert') {
+    const B=BIOMES.desert, D=field.desert||{}, rel=h-(field.elevation+(D.floor??-150));
+    out.setRGB(B.sand[0]+B.sandNoise[0]*n,B.sand[1]+B.sandNoise[1]*n,B.sand[2]+B.sandNoise[2]*n);
+    const flat=1-smoothstep(0.06,0.18,slope);
+    mix(B.dune,smoothstep(0.05,0.5,noise2(x/620,z/620,field.seed+48))*0.55*flat*(1-smoothstep(15,40,rel)));
+    mix(B.wash,(1-smoothstep(-28,-8,rel))*flat);
+    mix(B.scrub,smoothstep(0.35,0.85,noise2(x/40,z/40,field.seed+49))*0.35*flat*(1-smoothstep(25,45,rel)));
+    // layered sandstone on the faces: paler and redder bands by height, varnish under the caprock
+    const band=0.5+0.5*Math.sin(h/7.5+1.8*noise2(x/260,z/260,field.seed+50));
+    const rock=[lerp(B.rock[0],B.rockLight[0],band*band),lerp(B.rock[1],B.rockLight[1],band*band),lerp(B.rock[2],B.rockLight[2],band*band)];
+    mix(B.talus,smoothstep(0.10,0.22,slope)*(1-smoothstep(0.3,0.5,slope)));
+    mix(rock,smoothstep(0.24,0.5,slope));
+    mix(B.varnish,smoothstep(0.45,0.8,slope)*smoothstep(0.1,0.6,noise2(x/90,z/90,field.seed+51))*0.45);
+    mix(B.caprock,smoothstep(40,90,rel)*flat*(0.75+0.25*broad));
+  } else {
+    const B=BIOMES.arctic;
+    out.setRGB(B.snow[0]+0.02*n,B.snow[1]+0.02*n,B.snow[2]+0.015*n);
+    mix(B.drift,smoothstep(-0.1,0.6,noise2(x/140,z/140,field.seed+52))*0.55);
+    if(field.lakeShore) {
+      const lake=1-smoothstep(-25,0,field.lakeShore(x,z));
+      // wind-cleared ice in streaks along the wind, darker where it is clear and thick
+      const scour=smoothstep(0.05,0.45,noise2(x/260+z/900,z/180,field.seed+53));
+      mix(B.ice,lake*scour*0.8);
+      mix(B.iceDark,lake*scour*smoothstep(0.3,0.7,noise2(x/90,z/90,field.seed+54))*0.5);
+    }
+    mix(B.underTrees,smoothstep(0.25,0.45,field.forestNoise(x,z))*(1-smoothstep(120,260,h-field.elevation))*0.6);
+    mix(B.scree,smoothstep(0.22,0.4,slope)*0.6);
+    mix(B.rock,smoothstep(0.34,0.62,slope));
+  }
+  return out;
+}
+
 // 16 central tiles + 8 outer tiles: <=24 draws even without frustum culling.
 // Central near grids are <=20 m on ALL tiers to honour runway flats. Only tiles
 // intersecting the 4 km flight region get near grids. Renderer-owned LOD switches
@@ -126,7 +183,10 @@ export function buildGround(field, opts = {}) {
     mat.name=farOnly?'world/ground-far':'world/ground';
     mat.userData.parcelMap=parcels;mat.userData.detailMap=detail;
     if(!farOnly)mat.addEventListener('dispose',()=>{parcels.dispose();detail.dispose();});
-    mat.customProgramCacheKey=()=> farOnly?'ctl-ground-v3-far':'ctl-ground-v3';
+    // The new maps' ground draws its near detail at a strength of their own (grass blades
+    // on snow and sand read as litter at full strength): a separate program, the others unchanged.
+    const biome=!!BIOMES[field.style];
+    mat.customProgramCacheKey=()=> (farOnly?'ctl-ground-v3-far':'ctl-ground-v3')+(biome?'-biome':'');
     mat.onBeforeCompile=shader=>{
       shader.uniforms.grParcels={value:parcels};shader.uniforms.grDetail={value:detail};
       shader.uniforms.grEarth={value:new THREE.Color(...P.ploughed)};
@@ -175,7 +235,8 @@ export function buildGround(field, opts = {}) {
         diffuseColor.rgb=mix(diffuseColor.rgb,grCrop,clamp(grFarm,0.0,1.0));
         }
         diffuseColor.rgb*=grTint*(1.0+(grWide-0.5)*0.18+(grFine-0.5)*0.65*grNear);
-      `).replace('#include <normal_fragment_maps>',farOnly?'#include <normal_fragment_maps>':`#include <normal_fragment_maps>
+      `).replace('(grFine-0.5)*0.65*grNear',biome?'(grFine-0.5)*0.32*grNear':'(grFine-0.5)*0.65*grNear')
+        .replace('#include <normal_fragment_maps>',farOnly?'#include <normal_fragment_maps>':`#include <normal_fragment_maps>
         // Perturb the lighting normal, so real sun direction drives the relief.
         if(grNear>0.0) {
         vec2 grGradient=vec2(texture2D(grDetail,grUV+vec2(0.0009765625,0)).r-grFine,

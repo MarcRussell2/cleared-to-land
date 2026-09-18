@@ -57,7 +57,7 @@ export class CameraRig {
     this.lookPitch += (tPitch - this.lookPitch) * k;
 
     // shake sources
-    const rough = ac.wheelsOnGround ? (ac.legs.some((l) => l.contact && (l.kind === 'gravel' || l.kind === 'dirt' || l.kind === 'grass' || l.kind === 'sand')) ? clamp(ac.gsRel / 15, 0, 1) * 0.5 : clamp(ac.gsRel / 60, 0, 1) * 0.08) : 0;
+    const rough = ac.wheelsOnGround ? (ac.legs.some((l) => l.contact && (l.kind === 'gravel' || l.kind === 'dirt' || l.kind === 'grass' || l.kind === 'sand' || l.kind === 'snow')) ? clamp(ac.gsRel / 15, 0, 1) * 0.5 : clamp(ac.gsRel / 60, 0, 1) * 0.08) : 0;
     const buffet = ac.aero.buffet * 0.6 + (ac.crashed ? 0 : 0);
     this.impulse = Math.max(0, this.impulse - dt * 3);
     this.shake = clamp(rough + buffet + this.impulse, 0, 1.5);

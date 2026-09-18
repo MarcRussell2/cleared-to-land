@@ -25,9 +25,11 @@ import * as THREE from 'three';
 import { clamp, noise2 } from '../config.js';
 import { mergeGeos } from '../geom.js';
 import { PALETTE, FINISH } from './palette.js';
-import { runwaySurface } from './textures.js';
+import { runwaySurface, frozenRunwaySurface } from './textures.js';
 import { LightSet } from './lights.js';
 import { WORLD_QUALITY } from './quality.js';
+// The new maps' site props (beach, terminal, shacks: world/airport.js calls it for a runway with `props`).
+export { buildSiteProps } from './world-biomes.js';
 
 // Bake static meshes by material and shadow policy; parked LODs stay separate.
 function batchStatic(objects) {
@@ -59,10 +61,11 @@ function namedMaterial(name, color, finish = FINISH.building) {
 // follow the runway's slope exactly); this is what it is painted with.
 export function runwayMaterial(rw) {
   const mat = new THREE.MeshStandardMaterial({
-    map: runwaySurface(rw), ...FINISH.runway,
+    map: rw.surface === 'ice' || rw.surface === 'snow' ? frozenRunwaySurface(rw) : runwaySurface(rw), ...FINISH.runway,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
   });
   mat.name = 'aerodrome/runway';
+  if (rw.surface === 'ice') mat.roughness = 0.42;   // the new maps' lake ice: a sheen the sun can catch
   // Grain under the wheels: a tiling aggregate texture at a 3 m repeat, faded out
   // beyond 250 m so the painted surface carries the runway from the approach and
   // the grain carries it in the flare. Uniforms prefixed `ap`.

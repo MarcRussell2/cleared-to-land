@@ -74,6 +74,8 @@ import { mergeGeos } from '../geom.js';
 import { PALETTE, FINISH } from './palette.js';
 import { parcel } from './world-ground.js';
 import { WORLD_QUALITY } from './quality.js';
+// The new maps' styles (island, desert, arctic) have forests of their own: world-biomes.js.
+import { BIOME_STYLES, biomeForest } from './world-biomes.js';
 
 const SPECIES = ['spruce', 'pine', 'oak', 'poplar'];
 const CHUNK = 2400;
@@ -263,6 +265,7 @@ function hedgeGeometry() {
 // Per-chunk reservoir ranks are independent of treeScale AND maxTrees, avoiding
 // the old cap-induced sweep of dense trees from just one side of the landscape.
 export function buildForest(field, opts = {}) {
+  if (BIOME_STYLES.has(field.style)) return biomeForest(field, opts);
   const objects = [];
   const treeScale = clamp(opts.treeScale ?? 1, 0, 1);
   // Mountain valleys are wooded wall to wall and their far trees are cheap cards.

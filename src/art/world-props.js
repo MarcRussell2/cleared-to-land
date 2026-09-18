@@ -33,9 +33,12 @@ import * as THREE from 'three';
 import { makeRng } from '../config.js';
 import { PALETTE, FINISH } from './palette.js';
 import { WORLD_QUALITY } from './quality.js';
+// The new maps' desert and arctic have boulders of their own: world-biomes.js.
+import { BIOME_STYLES, biomeRocks } from './world-biomes.js';
 
 // Boulders along the river of a mountain valley.
 export function buildRocks(field) {
+  if (BIOME_STYLES.has(field.style)) return biomeRocks(field);
   const rng = makeRng(field.seed * 7 + 3);
   const n = 700;
   const geo = new THREE.DodecahedronGeometry(1.4, 0);
