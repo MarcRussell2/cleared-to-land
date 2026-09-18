@@ -146,9 +146,10 @@ export class Effects {
         const p = _p.copy(l.pos).applyQuaternion(ac.quat).add(ac.pos);
         p.y -= l.radius * 0.9;
         const v = _v.copy(ac.vel).multiplyScalar(0.15); v.y += 1.5;
-        if (l.kind === 'gravel' || l.kind === 'dirt' || l.kind === 'sand' || l.kind === 'grass') {
-          if (ac.gsRel > 6) this.dust.burst(p, v, 1 + Math.floor(ac.gsRel / 20), { spread: 0.4, velSpread: 1.5, life: 2.5, size0: 0.6 * (1 + skid), size1: 4 * (1 + skid) });
-        } else if (skid > 0.05 && ac.gsRel > 4) {
+        if (l.kind === 'gravel' || l.kind === 'dirt' || l.kind === 'sand' || l.kind === 'grass' || l.kind === 'snow') {
+          // (packed snow, the new maps: the same kick-up, white, from the spray pool, which falls back down)
+          if (ac.gsRel > 6) (l.kind === 'snow' ? this.spray : this.dust).burst(p, v, 1 + Math.floor(ac.gsRel / 20), { spread: 0.4, velSpread: 1.5, life: 2.5, size0: 0.6 * (1 + skid), size1: 4 * (1 + skid) });
+        } else if (skid > 0.05 && ac.gsRel > 4 && l.kind !== 'ice') {   // a tyre sliding on lake ice does not smoke
           this.smoke.burst(p, v, skid > 0.5 ? 3 : 1, { spread: 0.3, velSpread: 1.2, life: 2.2, size0: 0.35 * (0.8 + skid), size1: 2.6 * (0.8 + skid) });
         }
         // touchdown puff
