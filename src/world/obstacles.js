@@ -231,7 +231,8 @@ const BUILD = {
     const X = { x: -dz / len, z: dx / len };
     const psi = Math.atan2(X.z, X.x);
     const name = s.name || 'the power lines', pname = hv ? 'a pylon' : 'a power pole';
-    const attach = hv ? [[0, H], [-6.5, H - 5.5], [6.5, H - 5.5], [-8, H - 12], [8, H - 12]] : [[-1.1, H - 0.35], [0, H + 0.15], [1.1, H - 0.35]];
+    // where the wires hang from: the earth wire on the peak, the conductors under 2.2 m insulator strings at the arm tips
+    const attach = hv ? [[0, H], [-6.5, H - 5.5 - 2.2], [6.5, H - 5.5 - 2.2], [-8, H - 12 - 2.2], [8, H - 12 - 2.2]] : [[-1.1, H - 0.35], [0, H + 0.15], [1.1, H - 0.35]];
     const tops = [];
     for (let i = 0; i <= n; i++) {
       const x = a.x + dx * i / n, z = a.z + dz * i / n, y = P.height(x, z);
@@ -291,7 +292,7 @@ const BUILD = {
   ship(P, s) { (s.type === 'tall' ? tallShip : containerShip)(P, s); },
   quay(P, s) {
     const F = P.frame(s.u, s.v, s.rot, P.water != null ? P.water : null);
-    const top = s.top != null ? s.top : 3, bottom = -(s.depth || 12);
+    const top = s.top != null ? s.top : s.deck != null ? s.deck : 3, bottom = -(s.depth || 12);
     P.box(F, 0, (top + bottom) / 2, 0, s.w, top - bottom, s.d, { kind: 'quay', look: 'concrete', color: 'quay', name: s.name || 'the quay', group: P.c.groups++, ground: true });
     for (let x = -s.w / 2; x <= s.w / 2; x += 40) for (let z = -s.d / 2; z <= s.d / 2; z += 40) { const p = F.at(x, 0, z); P.keep(p[0], p[2], 30); }
   },
@@ -718,7 +719,7 @@ export class ObstacleField {
           const r = k < np ? probes[k].r : gear[k - np].r;
           const j = k * 3;
           const ax = this.w0[j], ay = this.w0[j + 1], az = this.w0[j + 2], bx = this.w1[j], by = this.w1[j + 1], bz = this.w1[j + 2];
-          if (by > 5e4) continue;   // a retracted wheel
+          if (ay > 5e4 || by > 5e4) continue;   // a retracted wheel (at either end of the step)
           if (!hit && segSegDist2(ax, ay, az, bx, by, bz, p.sx, p.sy, p.sz, p.sx, p.sy, p.sz) <= (p.sr + r) * (p.sr + r) && sweptHit(p, ax, ay, az, bx, by, bz, r)) {
             hit = p; this.lastHit = { name: p.name, part: k < np ? probes[k].part : gear[k - np].part };
           }

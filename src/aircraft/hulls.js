@@ -105,6 +105,7 @@ function condor() {
   run(o, [0, 0.3, 12.2], [0, 0.9, 18.9], 1.75, 0.6, 'tail cone');
   run(o, [0, 2.8, 12.6], [0, 8.4, 17.1], 0.9, 0.62, 'fin leading edge');
   run(o, [0, 3.2, 16.4], [0, 8.4, 18.6], 0.9, 0.62, 'fin trailing edge');
+  run(o, [0, 3.0, 14.6], [0, 8.4, 17.85], 0.85, 0.6, 'fin');
   run(o, [0, 2.2, 10.2], [0, 3.0, 16.4], 0.75, 0.75, 'dorsal fin');
   run(o, [0, 1.8, 17.3], [0, 8.3, 19.35], 0.62, 0.55, 'rudder');
   both((s) => {
@@ -112,8 +113,9 @@ function condor() {
     // leading edge at 12% chord, trailing edge at 84%, section by section between the planform's breaks; then the
     // flap line, which moves with the flaps (the flap is ~27% of the chord, rotating down 40 deg about its hinge)
     const at = (x, f, dy = 0.12) => [s * x, wy(x) + dy, le(x) + f * chord(x)];
-    // (four lines where the chord is over 4 m, three to x = 13, two at the tip)
-    for (const [xa, xb, ra, rb, lines] of [[2.2, 4.65, 0.8, 0.78, 4], [4.65, 9.5, 0.72, 0.6, 4], [9.5, 13.0, 0.58, 0.5, 3], [13.0, tip - 0.1, 0.5, 0.45, 2]]) {
+    // (four lines where the chord is over 4 m, three from x = 9.5 to the tip: no point of the skin more than 0.4 m
+    // outside a probe, checked by tools/test-obstacles.mjs)
+    for (const [xa, xb, ra, rb, lines] of [[2.2, 4.65, 0.8, 0.78, 4], [4.65, 9.5, 0.72, 0.6, 4], [9.5, 13.0, 0.58, 0.5, 3], [13.0, tip - 0.1, 0.5, 0.45, 3]]) {
       for (let k = 0; k < lines; k++) {
         const f = 0.1 + 0.78 * k / (lines - 1), dy = 0.1 + 0.1 * Math.sin(Math.PI * f);
         run(o, at(xa, f, dy), at(xb, f, dy), ra, rb, k === 0 ? 'wing leading edge' : k === lines - 1 ? 'wing trailing edge' : 'wing');
@@ -125,6 +127,8 @@ function condor() {
         return { fy: -c * Math.sin(40 * DEG), fz: -c * (1 - Math.cos(40 * DEG)) };
       });
     }
+    // the inboard flap's drooped root, hanging under the trailing edge beside the fuselage
+    run(o, [s * 1.9, -1.8, 4.6], [s * 5.8, -1.4, 5.5], 0.6, 0.55, 'flap', { fy: -1.2, fz: -0.35 });
     // the canoe fairings over the flap tracks, hanging under the trailing edge
     for (const x of [4.8, 9.4]) { const h = q(x) + 0.49 * chord(x) + 0.45; run(o, [s * x, wy(x) - 0.29, h - 1.3], [s * x, wy(x) - 0.29, h + 1.4], 0.38, 0.38, 'flap track fairing'); }
     // blended winglet: from the tip up and aft to its top
@@ -152,6 +156,7 @@ function hornet() {
     run(o, [s * 1.5, -0.2, -0.9], [s * 6.0, -0.2, 1.05], 0.55, 0.45, 'wing leading edge');
     run(o, [s * 1.5, -0.2, 2.9], [s * 6.0, -0.2, 3.1], 0.55, 0.45, 'wing trailing edge');
     run(o, [s * 1.4, -0.2, 1.1], [s * 5.9, -0.2, 2.1], 0.55, 0.45, 'wing');
+    run(o, [s * 1.45, -0.15, 0.1], [s * 5.95, -0.2, 1.55], 0.55, 0.45, 'wing');
     run(o, [s * 1.15, 0.2, -5.4], [s * 1.4, 0.0, -1.2], 0.55, 0.55, 'leading-edge extension');
     run(o, [s * 1.2, -1.0, -3.7], [s * 1.2, -1.0, 3.0], 0.55, 0.55, 'intake');
     run(o, [s * 1.2, -0.3, 3.3], [s * 3.65, -0.3, 3.3], 0.42, 0.42, 'flap', { fy: -0.6, fz: -0.2 });

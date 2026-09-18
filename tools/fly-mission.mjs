@@ -136,7 +136,7 @@ export async function simulate(id, opts = {}) {
     }
     if (opts.track && n % (opts.track | 0 || 25) === 0) {
       const dx = ac.pos.x - threshold.x, dz = ac.pos.z - threshold.z;
-      track.push({ t: +t.toFixed(1), u: +(dx * dir.x + dz * dir.z).toFixed(0), v: +(dx * right.x + dz * right.z).toFixed(1), h: +(ac.pos.y - rw.elevation).toFixed(1), ra: +ac.radioAlt.toFixed(1), kt: +(ac.ias / KT).toFixed(0), bank: +(ac.euler.roll * RAD).toFixed(0), thr: +ac.input.throttle.toFixed(2), phase: pilot && pilot.phase ? pilot.phase : '' });
+      track.push({ t: +t.toFixed(1), u: +(dx * dir.x + dz * dir.z).toFixed(0), v: +(dx * right.x + dz * right.z).toFixed(1), h: +(ac.pos.y - rw.elevation).toFixed(1), ra: +ac.radioAlt.toFixed(1), kt: +(ac.ias / KT).toFixed(0), bank: +(ac.euler.roll * RAD).toFixed(0), thr: +ac.input.throttle.toFixed(2), pitch: +(ac.euler.pitch * RAD).toFixed(1), aoa: +(ac.aero.alpha * RAD).toFixed(1), vs: +ac.vs.toFixed(1), phase: pilot && pilot.phase ? pilot.phase : '', ...(pilot && pilot.dbg && opts.debug ? { hDes: +(pilot.dbg.hDes - rw.elevation).toFixed(1), vsDes: +pilot.dbg.vsDes.toFixed(1), pCmd: +(pilot.dbg.pitchCmd * RAD).toFixed(1) } : {}) });
     }
     if (ac.crashed) { endT += dt; if (endT > 3.5) break; }
     else if (ac.stopped) { endT += dt; if (endT > 2) break; }
@@ -167,8 +167,9 @@ async function flyInPage(id, o) {
   const dir = (process.env.CTL_MISSION_DIR || 'C:/tmp/ctl-m-obstacles').replace(/\\/g, '/');
   mkdirSync(dir, { recursive: true });
   const [W, H] = (o.size || '1600x900').split('x').map(Number);
+  const profile = `${dir}/edge-fly-${port}`;
   const edge = spawn('C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', ['--headless=new', '--hide-scrollbars', '--allow-file-access-from-files', '--force-device-scale-factor=1',
-    `--window-size=${W},${H}`, '--autoplay-policy=no-user-gesture-required', `--remote-debugging-port=${port}`, `--user-data-dir=${dir}/edge-fly-${port}`, 'about:blank'], { stdio: 'ignore' });
+    `--window-size=${W},${H}`, '--autoplay-policy=no-user-gesture-required', `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, 'about:blank'], { stdio: 'ignore' });
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const logs = [];
   try {
@@ -240,8 +241,17 @@ async function flyInPage(id, o) {
         pilot: g.ap ? g.ap.constructor.name + (g.ap.phase ? '/' + g.ap.phase : '') : 'none', status: g.statusLine() }; })()`);
     return { id, seed: o.seed || 307, mode: 'page', ...res, stills, console: logs.slice(0, 30) };
   } finally {
-    try { execFileSync('taskkill', ['/PID', String(edge.pid), '/T', '/F'], { stdio: 'ignore' }); } catch (e) { /* already gone */ }
+    killEdge(edge.pid, profile);
   }
+}
+
+// Stop the headless Edge this run started, and nothing else: msedge.exe hands its work to a child and the launcher
+// can exit, so the tree is found again by its own profile directory (unique to this run's port) as well as by PID.
+function killEdge(pid, profile) {
+  try { execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' }); } catch (e) { /* already gone */ }
+  const dir = profile.replace(/\//g, '\\');
+  const ps = `Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -like '*${profile}*' -or $_.CommandLine -like '*${dir}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
+  try { execFileSync('powershell', ['-NoProfile', '-Command', ps], { stdio: 'ignore' }); } catch (e) { /* nothing left */ }
 }
 
 // ------------------------------------------------------------------ command line

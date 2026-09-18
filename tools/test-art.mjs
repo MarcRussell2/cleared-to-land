@@ -81,7 +81,7 @@ for (const n of ['groundDetail', 'runwaySurface', 'carrierDeck']) isFn(textures,
 
 // --- terrain-look.js ------------------------------------------------------------
 const terrainLook = await import('../src/art/terrain-look.js');
-for (const n of ['groundColor', 'buildGround', 'buildForest', 'buildRocks', 'buildRoad', 'buildVillage', 'buildObstacleTrees']) {
+for (const n of ['groundColor', 'buildGround', 'buildForest', 'buildRocks', 'buildRoad', 'buildVillage', 'buildObstacleTrees', 'buildCourse']) {
   isFn(terrainLook, n, 'terrain-look.js');
 }
 ok(terrainLook.OBSTACLE_TREE && typeof terrainLook.OBSTACLE_TREE.radius === 'number' && typeof terrainLook.OBSTACLE_TREE.height === 'number',
@@ -252,7 +252,8 @@ for (const f of ['terrain-look.js', 'airport-look.js', 'carrier-look.js']) {
 
   // House rules for every module that draws the world.
   const WORLD_FILES = ['sky.js', 'world-atmosphere.js', 'world-water.js', 'world-ground.js', 'world-vegetation.js', 'world-props.js',
-    'terrain-look.js', 'airport-look.js', 'carrier-look.js', 'textures.js', 'lights.js', 'palette.js', 'quality.js'];
+    'terrain-look.js', 'airport-look.js', 'carrier-look.js', 'textures.js', 'lights.js', 'palette.js', 'quality.js',
+    'city-look.js'];
   for (const f of WORLD_FILES) {
     const code = src(`art/${f}`);
     ok(!FORBIDDEN.test(code), `art/${f} must not import from physics/, systems/ or ui/`);
@@ -269,7 +270,7 @@ for (const f of ['terrain-look.js', 'airport-look.js', 'carrier-look.js']) {
     }
   }
   // The world must never reach the art bench through anything but the two doors.
-  for (const f of ['world/terrain.js', 'world/airport.js', 'world/carrier.js']) {
+  for (const f of ['world/terrain.js', 'world/airport.js', 'world/carrier.js', 'world/obstacles.js']) {
     const code = src(f);
     ok(!/from\s+'\.\.\/art\/world-/.test(code), `${f} must import the look through terrain-look.js / sky.js, not the world-* modules directly`);
   }
