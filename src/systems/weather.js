@@ -157,7 +157,7 @@ export class Weather {
     this.strikeT = -1e9; this.strikePulses = [0, 0, 0]; this.strikeGap = 0.1;
     this.nextJolt = 0; this.gLP = 1;
     // windshear detection (F-factor from the shear alone, not the gust noise)
-    this.wxPrev = null; this.dWx = 0; this.fShear = 0; this.fHold = 0; this.shearSaid = -1e9;
+    this.wxPrev = null; this.dWx = 0; this.fShear = 0; this.fHold = 0; this.shearSaid = -1e9; this.shearLastT = -1e9;
     this._mean = new Vector3();
     // the sea
     this.seaTarget = s.seaState != null ? s.seaState : c ? c.seaState : 0;
@@ -365,6 +365,7 @@ export class Weather {
     this.F = this.fShear;
     const low = !ac.onGround && ac.radioAlt < 1500 * FT && !ac.crashed;
     st.windshear = low && this.fShear > 0.06;
+    if (st.windshear) this.shearLastT = t;   // when the airplane was last in the shear (a mission hint reads it)
     this.fHold = low && this.fShear > 0.1 ? this.fHold + dt : 0;
     // one warning per encounter: it re-arms after five seconds of calm air
     this.fCalm = this.fShear < 0.03 ? (this.fCalm || 0) + dt : 0;

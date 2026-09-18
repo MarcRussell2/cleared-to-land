@@ -92,25 +92,32 @@ class EscapePilot {
   constructor(ac, world, sc, weather) { this.ac = ac; this.world = world; this.sc = sc; this.wx = weather; this.ap = new Autoland(ac, world, sc); this.mode = 'approach'; this.calm = 0; this.escapes = 0; }
   update(dt) {
     const ac = this.ac, inp = ac.input, st = this.wx.state;
-    if (this.mode === 'approach' && st.windshear && !ac.onGround) { this.mode = 'escape'; this.escapes++; this.saved = { pitchRef: this.ap.pitchRef, thr0: this.ap.thr0 }; }
+    if (this.mode === 'approach' && st.windshear && !ac.onGround) { this.mode = 'escape'; this.escapes++; this.saved = { pitchRef: this.ap.pitchRef, thr0: this.ap.thr0 }; this.iP = 0; }
     if (this.mode === 'escape') {
       this.calm = st.windshear || this.wx.F > 0.02 ? 0 : this.calm + dt;
       inp.throttle = 1;
       const warnMargin = ac.aero.alphaStall - 1.5 * DEG - ac.aero.alpha;
-      const target = warnMargin > 0 ? 15 * DEG : ac.euler.pitch - 2 * DEG;
-      inp.pitch = Math.max(-1, Math.min(1, 4.5 * (Math.min(target, 15 * DEG) - ac.euler.pitch) - 2.5 * ac.omega.x));
+      // up toward 15 degrees while it sinks; once it climbs, only as much as stops the sink (no zoom out the far side)
+      const want = ac.vs > 0 ? Math.max(4 * DEG, 15 * DEG - ac.vs * 1.6 * DEG) : 15 * DEG;
+      const target = warnMargin > 0 ? want : ac.euler.pitch - 2 * DEG;
+      // hold the attitude the way the assist law would (an integral takes out the trim the approach left behind)
+      const err = Math.min(target, 15 * DEG) - ac.euler.pitch;
+      this.iP = Math.max(-0.6, Math.min(0.6, this.iP + err * dt * 2.5));
+      inp.pitch = Math.max(-1, Math.min(1, 4.5 * err + this.iP - 2.5 * ac.omega.x));
       inp.roll = Math.max(-1, Math.min(1, -2.0 * ac.euler.roll + 0.8 * ac.omega.z));
       inp.yaw = Math.max(-1, Math.min(1, 1.5 * ac.aero.beta));
-      if (this.calm > 2) { this.mode = 'recapture'; this.ap = new Autoland(ac, this.world, this.sc); this.ap.pitchRef = this.saved.pitchRef; this.ap.thr0 = this.saved.thr0; }
+      // out the far side: the sink is gone and the speed is back (or the shear has been calm a while)
+      const vref = (this.sc.scoring && this.sc.scoring.vref || ac.def.speeds.Vref) * KT;
+      if (this.calm > 2 || (this.wx.F < 0.05 && ac.vs > 2 && ac.ias > vref)) { this.mode = 'recapture'; this.ap = new Autoland(ac, this.world, this.sc); this.ap.pitchRef = this.saved.pitchRef; this.ap.thr0 = this.saved.thr0; }
       return;
     }
-    // Out the far side, high: Autoland's lateral and speed, but a steady 1,500 fpm down to the glidepath (not a
-    // dive), then Autoland all the way. A pilot who ends up too high here goes around; this one has the room.
+    // Out the far side, high: Autoland's lateral and speed, but a steady descent (800-1,800 fpm, steeper the higher it
+    // is) down to the glidepath, then Autoland from the glidepath or from 450 ft, whichever comes first.
     this.ap.update(dt);
     if (this.mode === 'recapture') {
       const g = this.ap.geometry(), err = ac.pos.y - g.hDes;
-      if (err < 8) { this.mode = 'approach'; return; }
-      const vsErr = -7.5 - ac.vs;
+      if (err < 8 || ac.radioAlt < 450 * FT) { this.mode = 'approach'; return; }   // on the glidepath, or low: Autoland settles and flares
+      const vsErr = -Math.min(9, 4 + 0.03 * err) - ac.vs;
       inp.pitch = Math.max(-1, Math.min(1, 4.5 * (this.saved.pitchRef + 0.03 * vsErr - ac.euler.pitch) - 2.5 * ac.omega.x));
     }
   }
@@ -202,13 +209,15 @@ class LsoPilot {
   }
 }
 
-// The pilot who does nothing about it: Autoland until 5.7 km out, then the trimmed attitude and power are frozen
-// (wings kept level) until 60 m, where Autoland takes it back for the flare. What the burst does unopposed.
+// The pilot who does nothing about it: Autoland for the first three seconds (to settle the spawn), then the trimmed
+// attitude and power are frozen (wings kept level) until 60 m, where Autoland takes it back for the flare. What the
+// burst does unopposed.
 class HoldPilot {
   constructor(ac, world, sc) { this.ac = ac; this.ap = new Autoland(ac, world, sc); this.frozen = null; this.mode = 'approach'; }
   update(dt) {
     const ac = this.ac, inp = ac.input;
-    if (!this.frozen && -ac.pos.z < 5700) this.frozen = { pitch: ac.euler.pitch, thr: inp.throttle };
+    this.t = (this.t || 0) + dt;
+    if (!this.frozen && this.t > 3) this.frozen = { pitch: ac.euler.pitch, thr: inp.throttle };
     if (this.frozen && ac.radioAlt > 60) {
       this.mode = 'hold';
       inp.throttle = this.frozen.thr;
@@ -386,11 +395,13 @@ say('weather model');
   const w = makeWorld(SITES.harbor, base);
   const wind = new Wind({ dir: 0, speed: 0, seed: 1 }); wind.groundY = 8;
   const wx = new Weather(base.weather, { seed: 5, wind, world: w, scenario: base });
-  const ac = { pos: new THREE.Vector3(0, 330, 5450), vel: new THREE.Vector3(0, -3.8, -72), ias: 73, radioAlt: 380, onGround: false, crashed: false, gload: 1, stats: {} };
-  wx.update(0.04, 1.5, ac); wx.update(0.04, 30, ac);   // fired at 6300 m and grown
-  ok(!!wx.burst && Math.abs(wx.burst.z - 3800) < 1 && Math.abs(wx.burst.x - 120) < 1, 'the burst sits where the mission put it (u -3800, v +120)');
+  const mb = base.weather.events.find((e) => e.type === 'microburst');
+  const ac = { pos: new THREE.Vector3(0, 330, -mb.u + 1500), vel: new THREE.Vector3(0, -3.8, -72), ias: 73, radioAlt: 380, onGround: false, crashed: false, gload: 1, stats: {} };
+  wx.update(0.04, 1.5, ac); wx.update(0.04, 30, ac);   // fired and grown
+  ok(!!wx.burst && Math.abs(wx.burst.z + mb.u) < 1 && Math.abs(wx.burst.x - mb.v) < 1, `the burst sits where the mission put it (u ${mb.u}, v +${mb.v}, ${(-mb.u / 1852).toFixed(1)} NM final)`);
+  ok(-mb.u >= 2 * 1852 && -mb.u <= 3 * 1852, 'the microburst is on a 2-3 NM final');
   const alongPath = (u) => { const y = 8 + (400 - u) * Math.tan(3 * DEG); return wx.addWind(new THREE.Vector3(0, y, -u), 30, new THREE.Vector3()); };
-  const head = alongPath(-4600), core = alongPath(-3800), tail = alongPath(-3000);
+  const head = alongPath(mb.u - 800), core = alongPath(mb.u), tail = alongPath(mb.u + 800);
   ok(head.z > 4 && core.y < -7 && tail.z < -4, `on the glidepath (flying toward -z): headwind ${(head.z / KT).toFixed(0)} kt, then sink ${(-core.y).toFixed(1)} m/s, then tailwind ${(-tail.z / KT).toFixed(0)} kt`);
   ok(wx.burst.lossKt >= 30 && wx.burst.lossKt <= 55, `the tower's microburst alert gives a ${wx.burst.lossKt} kt loss`);
 }
@@ -463,7 +474,7 @@ for (const m of WEATHER_MISSIONS) {
         ok(rs.filter((r) => r.wire).length >= Math.ceil(rs.length * 0.25), `${m.id} (LSO pilot): traps in ${rate(rs, (r) => r.wire)} seeds (at least a quarter; the rest are bolters, which go around)`);
       } else ok(rs.some((r) => r.wire), `${m.id} (Autoland): traps in ${rate(rs, (r) => r.wire)} seeds, crashes in ${rate(rs, (r) => r.crashed)}`);
     } else if (pilot === 'hold') {
-      ok(rs.every((r) => r.crashed || (r.td && r.td.u < 0)), `${m.id} (frozen attitude and power): the burst puts it into the ground short of the runway in every seed (${rs.map((r) => r.minGs + ' m').join(', ')} below the glidepath)`);
+      ok(rs.every((r) => (r.crashed || !r.td || r.td.u < 0) && r.minGs < -80), `${m.id} (frozen attitude and power): the burst drives it far below the glidepath and it never lands on the runway (${rs.map((r) => r.minGs + ' m ' + (r.crashed ? 'crash' : r.td ? 'short' : 'no landing')).join(', ')})`);
     } else {
       ok(rs.every((r) => !r.crashed && r.td && r.td.u > -2 && r.td.u < SITES[base.site].runways[0].length), `${m.id} (${pilot}): every seed touches down on the runway without breaking (${rs.map((r) => r.td ? r.td.fpm + ' fpm' : '-').join(', ')})`);
       ok(rs.every((r) => r.wet), `${m.id}: the runway is wet`);
@@ -482,6 +493,98 @@ for (const m of WEATHER_MISSIONS) {
   const th = results['thunder/autoland'];
   ok(th.every((r) => r.bumps > 0 && r.weather.state.strike > 0), `thunder: the bumps jolt the camera (${th.map((r) => r.bumps).join(', ')}) and the lightning strikes`);
   ok(results['night-storm/autoland'].every((r) => Math.abs(r.weather.carrier.seaState - 1.2) < 1e-9), 'night-storm: the sea is at 1.2');
+}
+
+// 8. The briefings and hints: tips name keys only where src/touch.js rewrites them for a phone; hints never throw.
+{
+  const { touchify } = await import('../src/touch.js');
+  const KEYISH = /\((?:[A-Z]|Space|Q\/E|T\/Y)\)|\bpress [A-Z]\b|\bhold [A-Z]\b|\b[A-Z] for\b|\b[A-Z] twice\b/;
+  const bad = [];
+  for (const m of WEATHER_MISSIONS) for (const tip of m.tips) if (KEYISH.test(touchify(tip))) bad.push(`${m.id}: ${touchify(tip)}`);
+  ok(!bad.length, `every key a storm tip names has a touch wording${bad.length ? ': ' + bad.join(' | ') : ''}`);
+  let threw = null;
+  for (const m of WEATHER_MISSIONS) {
+    if (typeof m.hint !== 'function') continue;
+    const base = SCENARIOS.find((s) => s.id === m.id);
+    const sc = resolveScenario(base, makeRng(5), { approach: 'short' });
+    const w = makeWorld(SITES[sc.site], sc);
+    const wind = new Wind({ dir: 0, speed: 10, seed: 5 }); wind.groundY = w.runway ? w.runway.elevation : 0;
+    const weather = new Weather(sc.weather, { seed: 5, wind, world: w, scenario: sc });
+    const ac = { pos: new THREE.Vector3(0, 200, 3000), vel: new THREE.Vector3(0, -3, -70), ias: 70, radioAlt: 190, onGround: false, crashed: false, gload: 1, stats: {}, aero: { warning: false }, trap: {} };
+    try { for (let t = 0; t < 60; t += 0.5) { weather.update(0.5, t, ac); m.hint({ mission: { weather }, ac, ra: 600, d: 3000, t }); } } catch (e) { threw = `${m.id}: ${e.message}`; }
+  }
+  ok(!threw, `the storm missions' hints run against a live weather without throwing${threw ? ' (' + threw + ')' : ''}`);
+}
+
+// 9. The look (src/art/weather-look.js), in plain Node: what it builds for each kind of weather, the art bench's
+// rules (named materials, at* uniforms only as the sky's own objects, the sky's cloud sheets hidden under a deck),
+// that update() drives the light from the sky's values without drifting or toggling a light, the whiteout, the
+// budget, determinism, and dispose(). The GPU half (does it compile, does it look right) is the stills' job.
+{
+  const { SkySystem } = await import('../src/art/sky.js');
+  const { WeatherLook } = await import('../src/art/weather-look.js');
+  const { clearExtinction } = await import('../src/art/world-atmosphere.js');
+  const build = (spec, time = 14) => {
+    const scene = new THREE.Scene();
+    const renderer = { toneMapping: 0, toneMappingExposure: 1, domElement: { height: 900 } };
+    const sky = new SkySystem(scene, renderer, { time, visibility: 5000, azimuth: 1, elevation: 0, cloudCover: 0.3, shadowSize: 4096 });
+    const look = new WeatherLook(scene, { spec: resolveWeatherSpec(spec), sky });
+    const camera = new THREE.PerspectiveCamera(55, 16 / 9, 0.3, 60000);
+    return { scene, renderer, sky, look, camera };
+  };
+  const state = (over = {}) => {
+    const wind = new Wind({ dir: 0, speed: 0, seed: 1 });
+    const wx = new Weather({ preset: 'storm', lightning: 0.5, ...over }, { seed: 3, wind, world: { runway: null, carrier: null }, scenario: { vis: 5000 } });
+    return wx;
+  };
+  const env = (b, camY = 100, mode = 'chase') => { b.camera.position.set(0, camY, 2000); return { camera: b.camera, t: 10, sky: b.sky, renderer: b.renderer, ac: { vel: new THREE.Vector3(0, -3, -70), ias: 70 }, cameraMode: mode }; };
+
+  const storm = build({ preset: 'storm', rain: 0.8, darkness: 0.5, ceiling: 300, lightning: 0.5, cells: 3 });
+  const names = storm.look.objects.map((o) => o.material.name).sort();
+  ok(names.join() === ['weather/bolt', 'weather/deck', 'weather/glass', 'weather/rain', 'weather/shafts'].join(), `a storm builds rain, a deck, rain shafts, a bolt and windscreen drops, all named (${names.join(', ')})`);
+  ok(storm.sky.clouds.length === 2 && storm.sky.clouds.every((c) => !c.mesh.visible), 'the storm deck replaces the sky\'s two cloud sheets (hidden), so there is never a third layer');
+  let ownAt = [];
+  for (const o of storm.look.objects) for (const k of Object.keys(o.material.uniforms)) {
+    if (/^at[A-Z]/.test(k) && o.material.uniforms[k] !== storm.sky.uniforms[k]) ownAt.push(o.material.name + '.' + k);
+    if (!/^(at[A-Z]|wx[A-Z])/.test(k)) ownAt.push(o.material.name + '.' + k + ' (not wx*)');
+  }
+  ok(!ownAt.length, `the look's uniforms are wx* of its own or the sky's own at* objects${ownAt.length ? ': ' + ownAt.join(', ') : ''}`);
+  const tris = storm.look.objects.reduce((n, o) => n + (o.geometry.isInstancedBufferGeometry ? o.geometry.instanceCount * 2 : o.geometry.index.count / 3), 0);
+  ok(storm.look.objects.length <= 5 && tris <= 60000 && storm.look.objects.every((o) => o.frustumCulled && o.geometry.boundingSphere), `the high tier's budget: ${storm.look.objects.length} draws, ${tris} triangles, every mesh culled against a real bounding sphere`);
+  // light: the flash rises and falls back to exactly the storm's level; lights never change visibility
+  const wx = state({ darkness: 0.5, ceiling: 300 });
+  const vis0 = [storm.sky.sun.visible, storm.sky.moon.visible, storm.sky.hemi.visible].join();
+  const e = env(storm);
+  storm.look.update(1 / 25, wx.state, e);
+  const calm = [storm.sky.sun.intensity, storm.sky.hemi.intensity, storm.renderer.toneMappingExposure];
+  wx.state.flash = 1; storm.look.update(1 / 25, wx.state, e);
+  const lit = [storm.sky.sun.intensity, storm.sky.hemi.intensity, storm.renderer.toneMappingExposure];
+  wx.state.flash = 0; for (let i = 0; i < 50; i++) storm.look.update(1 / 25, wx.state, e);
+  const after = [storm.sky.sun.intensity, storm.sky.hemi.intensity, storm.renderer.toneMappingExposure];
+  ok(lit[1] > calm[1] && lit[2] > calm[2] && after.every((v, i) => v === calm[i]), `a flash lifts the hemisphere light and the exposure and they come back exactly (hemi ${calm[1].toFixed(3)} -> ${lit[1].toFixed(3)} -> ${after[1].toFixed(3)})`);
+  ok(calm[0] < storm.look.base.sun * 0.5 && calm[0] > 0.002 && calm[2] < storm.look.base.exposure, `under the deck the sun is mostly gone but never off (${calm[0].toFixed(3)} of ${storm.look.base.sun.toFixed(3)}), and the exposure is down`);
+  ok([storm.sky.sun.visible, storm.sky.moon.visible, storm.sky.hemi.visible].join() === vis0, 'update() never toggles a light\'s visibility (that would recompile every program)');
+  // the whiteout: inside the cloud the shared extinction is the cloud's; below the ragged base it is the air's
+  storm.look.update(0, wx.state, env(storm, wx.state.ceilingY + 60));
+  const inCloud = storm.sky.uniforms.atExtinction.value;
+  storm.look.update(0, wx.state, env(storm, wx.state.ceilingY - 120));
+  const below = storm.sky.uniforms.atExtinction.value;
+  ok(Math.abs(inCloud - 3.912 / 140) < 1e-9 && Math.abs(below / clearExtinction(wx.state.vis) - 1) < 0.35, `inside the cloud the view closes to 140 m (${(3.912 / inCloud).toFixed(0)} m); 120 m under the base it is the air's again (${(3.912 / below).toFixed(0)} m)`);
+  storm.look.update(0, wx.state, env(storm, 100, 'cockpit'));
+  const glass = storm.look.glass.mesh.visible;
+  storm.look.update(0, wx.state, env(storm, 100, 'chase'));
+  ok(glass && !storm.look.glass.mesh.visible, 'the windscreen drops show in the cockpit view only');
+  // other kinds of weather
+  const snow = build({ preset: 'snow' }), dust = build({ preset: 'dust' }), clear = build({ preset: 'clear' });
+  ok(snow.look.objects.some((o) => o.name === 'weather/snow') && dust.look.objects.some((o) => o.name === 'weather/dust') && !dust.look.glass, 'snow builds flakes (and drops on the glass), dust builds a brown-out and no glass');
+  ok(clear.look.objects.length === 0 && clear.sky.clouds.every((c) => c.mesh.visible), 'a clear spec builds nothing and leaves the sky alone');
+  // determinism: two builds of the same spec are the same drops
+  const again = build({ preset: 'storm', rain: 0.8, darkness: 0.5, ceiling: 300, lightning: 0.5, cells: 3 });
+  const seeds = (b) => b.look.precip.mesh.geometry.attributes.aSeed.array;
+  ok(seeds(storm).every((v, i) => v === seeds(again)[i]), 'the same spec builds the same rain, drop for drop');
+  // dispose
+  storm.look.dispose();
+  ok(!storm.scene.children.some((o) => /^weather\//.test(o.name)), 'dispose() takes every weather mesh out of the scene');
 }
 
 console.log(fails ? `\n${fails} weather check(s) FAILED (${passes} passed)` : `\nall ${passes} weather checks passed`);

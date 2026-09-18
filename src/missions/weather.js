@@ -29,37 +29,45 @@ export const WEATHER_MISSIONS = [
       events: [{ type: 'squall', at: { type: 'dist', value: 1000 }, shift: 60, speed: 20, gust: 30, rain: 0.95, darkness: 0.15, ramp: 5 }],
     },
     failures: [], scoring: { type: 'runway', vref: 67 },
-    hint: ({ mission, ra }) => (sinceFired(mission, 'squall') < 12 && ra > 10 ? 'Gust front: the wind swung to your right. Re-crab into it, hold 68 kt, small corrections.' : null),
+    // the game's own hints say 62 kt; in this wind it is 68 (the stall warning and the flare stay the game's)
+    hint: ({ mission, ra, ac }) => {
+      if (ac.onGround || ac.aero.warning) return null;
+      if (sinceFired(mission, 'squall') < 12 && ra > 10) return 'Gust front: the wind swung to your right. Re-crab into it, hold 68 kt, small corrections.';
+      if (ra > 100) return 'Green circle on the numbers, 68 kt in this wind, PAPI two white two red. Pitch for speed, throttle for the descent.';
+      if (ra > 15) return 'Short final: 68 kt through the gusts, small corrections, nose on the centerline.';
+      return null;
+    },
   },
   {
     id: 'microburst', n: 22, title: 'Microburst', group: 'storms', difficulty: 4, tags: T('weather', 'storm', 'heavy'),
     aircraft: 'condor', site: 'harbor', time: 15.5, vis: 9000,
-    desc: 'A thunderstorm is sitting on your final, two miles out, and it is about to drop a microburst. First the airspeed jumps 20 knots, then the floor falls out, then the wind turns around and takes it all back. Fly through it or go around; there is no third option.',
+    desc: 'A thunderstorm is parked on your final two and a half miles out, and it is about to drop a microburst on it. A few knots of free airspeed, then the floor falls out at 3,000 feet a minute and the wind swings round behind you. Fly through it or go around; there is no third option.',
     tips: [
-      'A 20-knot gain with no change in thrust is the warning, not a gift. Do not pull the power off for it.',
-      'WINDSHEAR: thrust to the stops and pitch up toward 15 degrees, into the stick shaker if you have to. Hold the attitude; do not chase the airspeed, do not touch flaps or gear.',
-      'Out the far side, ease back down to the glideslope and Vref. Or go around before the cell and come back: it rains itself out in about two minutes.',
+      'Airspeed you did not ask for, under a rain shaft, is the warning, not a gift. Do not pull the power off for it.',
+      'WINDSHEAR: thrust to the stops and pitch up toward 15 degrees until the sink stops, into the stick shaker if you have to. Do not chase the airspeed, do not touch flaps or gear.',
+      'Once it climbs, lower the nose, bring the power back and ease down onto the glideslope. Or go around before the cell and come back: it rains itself out in about two minutes.',
     ],
-    wind: { rel: 10, speed: 10, gust: 16, turb: 0.25 }, weight: 'normal', spawn: { dist: 5600, flap: 0.75, fixed: true },
+    wind: { rel: 10, speed: 10, gust: 16, turb: 0.25 }, weight: 'normal', spawn: { dist: 7000, flap: 0.75, fixed: true },
     weather: {
       preset: 'storm', rain: 0.35, darkness: 0.4, ceiling: 520, lightning: 0.35, cells: 3, wet: true,
-      events: [{ type: 'microburst', at: { type: 'dist', value: 5500 }, u: -3800, v: 120, strength: 1, outflow: 24, radius: 650, grow: 8, life: 100 }],
+      events: [{ type: 'microburst', at: { type: 'dist', value: 6900 }, u: -4600, v: 120, strength: 1.25, outflow: 24, radius: 650, grow: 8, life: 100 }],
     },
     failures: [], scoring: { type: 'runway' },
     hint: ({ mission, d }) => {
       const w = mission && mission.weather; if (!w || !w.burst) return null;
-      if (w.state.windshear) return 'WINDSHEAR: full thrust, pitch up toward 15 degrees and hold it. Do not chase the airspeed.';
+      if (w.state.windshear) return 'WINDSHEAR: full thrust, pitch up toward 15 degrees until the sink stops. Do not chase the airspeed.';
+      if (w.shearCount && w.t - w.shearLastT > 1 && w.t - w.shearLastT < 14 && d > 600) return 'Through it. Power back, lower the nose and ease down onto the glideslope, or go around.';
       const toCore = d - (-w.burst.u);
-      if (toCore > 0 && toCore < 2600 && w.burstAmp(w.t) > 0.5) return 'Rain shaft ahead: the airspeed will jump first. Keep the power up; the loss comes next.';
+      if (toCore > 0 && toCore < 2600 && w.burstAmp(w.t) > 0.5) return 'Rain shaft ahead: a few free knots come first. Keep the power up; the sink comes next.';
       return null;
     },
   },
   {
     id: 'storm-trap', n: 23, title: 'Storm Trap', group: 'storms', difficulty: 3, tags: T('carrier', 'weather', 'storm'),
     aircraft: 'hornet', site: 'carrier', time: 13.5, vis: 5000,
-    desc: 'Daytime, though you would not know it: a thunderstorm over the ship, an 800-foot cloud base, rain, and 13 knots gusting 21 over a deck that rises and falls two metres. The ball moves, the wind moves, the deck moves. Catch a wire anyway.',
+    desc: 'Daytime, though you would not know it: a thunderstorm over the ship, an 800-foot cloud base, rain, and a wind gusting 21 knots on top of the ship\'s own 25. The deck rises and falls two metres, and the ball and the wind move with it. Catch a wire anyway.',
     tips: [
-      'Press H for the hook, G for gear, F twice for full flaps. Hold 8 degrees AoA; the gusts will try to take it off you.',
+      'Hook, gear and full flaps are already down: check HOOK DOWN on the HUD. Hold 8 degrees AoA; the gusts will try to take it off you.',
       'Fly the ball\'s average: the deck heaves and the ball bounces with it. Chase every bounce and you will over-correct into the ramp.',
       'Small, quick throttle corrections. A red ball or the wave-off lights: full power, climb straight ahead, come around again.',
     ],
@@ -85,6 +93,11 @@ export const WEATHER_MISSIONS = [
       events: [{ type: 'turbBurst', at: { type: 'dist', value: 1300 }, turb: 0.25, dur: 6 }],
     },
     failures: [], scoring: { type: 'carrier' },
+    hint: ({ mission, ac }) => {
+      const w = mission && mission.weather;
+      if (!w || ac.onGround || ac.trap.engaged || ac.trap.trapped) return null;
+      return w.t - w.strikeT < 3 ? 'Lightning. Keep flying the last ball you saw; your eyes will come back.' : null;
+    },
   },
   {
     id: 'thunder', n: 25, title: 'Thunderstorm', group: 'storms', difficulty: 2, tags: T('weather', 'storm', 'heavy'),

@@ -364,7 +364,9 @@ export class WeatherLook {
           ${outputGLSL}
         }`,
     });
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(50000, 50000), mat);
+    const plane = new THREE.PlaneGeometry(50000, 50000);
+    plane.computeBoundingSphere();
+    const mesh = new THREE.Mesh(plane, mat);
     mesh.name = 'weather/deck';
     mesh.rotation.x = -Math.PI / 2;
     mesh.castShadow = mesh.receiveShadow = false;
