@@ -411,31 +411,37 @@ export function biomeRocks(field) {
 }
 
 // ------------------------------------------------------------------ site props
-function propMaterial(name, colour, finish = FINISH.painted, extra = {}) {
-  const m = new THREE.MeshStandardMaterial({ color: colour, ...finish, ...extra });
-  m.name = 'biome/' + name;
+// One material for everything a site adds to the aerodrome (docs/PERF.md: at most 20 materials an
+// aerodrome, and Paradise Bay's standard buildings already use 16): the colour of every prop is in its
+// vertex colours, times an instance colour on the instanced ones (always set, so they share one program),
+// and the finish is a painted one. Double-sided for the umbrellas' canopies.
+function propMaterial() {
+  const m = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, ...FINISH.painted, side: THREE.DoubleSide });
+  m.name = 'biome/site-props';
   return m;
 }
+// a geometry in one colour (linear [r,g,b] or a hex), as coloured() does for a single part
+const solidColour = (geo, c) => coloured([{ geo, colour: Array.isArray(c) ? c : lin(c) }]);
 
 // Everything a site's props need, handed per call: a list of objects, a list of obstacles, the
-// place() and ground helpers, and an instancer for the small repeated things.
+// place() and ground helpers, an instancer for the small repeated things, and a box merger.
 function propKit(rw, place, groundAt) {
-  const objects = [], obstacles = [], tmp = new THREE.Vector3();
+  const objects = [], obstacles = [], tmp = new THREE.Vector3(), mat = propMaterial();
   const at = (u, v, onGround = true) => { place(u, v, tmp); if (onGround && groundAt) tmp.y = groundAt(tmp.x, tmp.z); return tmp; };
   const solid = (u, v, r, h, name) => { const p = at(u, v); obstacles.push({ x: p.x, z: p.z, r, y: p.y + h, kind: 'structure', name }); };
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
-  // instances: [{u, v, rot, y, s: [sx, sy, sz], colour}] of one geometry and material
-  const instanced = (name, geo, mat, list, shadow = false) => {
+  const col = new THREE.Color();
+  // instances: [{u, v, rot, y, s: [sx, sy, sz], colour}] of one vertex-coloured geometry
+  const instanced = (name, geo, list, shadow = false) => {
     if (!list.length) return null;
     const mesh = new THREE.InstancedMesh(geo, mat, list.length);
-    const col = new THREE.Color();
     list.forEach((it, i) => {
       const p = at(it.u, it.v);
       q.setFromAxisAngle(up, -rw.heading + (it.rot || 0));
       sc.set(...(it.s || [1, 1, 1]));
       m4.compose(p.clone().setY(p.y + (it.y || 0)), q, sc);
       mesh.setMatrixAt(i, m4);
-      if (it.colour != null) mesh.setColorAt(i, col.set(it.colour));
+      mesh.setColorAt(i, col.set(it.colour ?? 0xffffff));
     });
     mesh.name = 'biome/' + name;
     mesh.castShadow = shadow; mesh.receiveShadow = true;
@@ -443,21 +449,19 @@ function propKit(rw, place, groundAt) {
     objects.push(mesh);
     return mesh;
   };
-  // a static box merged by material: {u, v, x, y, z, w, h, d, rot} in the runway frame, on the ground
-  const boxes = new Map();
-  const box = (mat, u, v, x, y, z, w, h, d, rot = 0) => {
+  // static boxes, all merged into one draw: (colour, u, v, x, y, z, w, h, d, rot) in the runway frame, on
+  // the ground at (u, v); `colour` a hex or a linear [r, g, b]
+  const boxes = [];
+  const box = (colour, u, v, x, y, z, w, h, d, rot = 0) => {
     const p = at(u, v);
     const g = new THREE.BoxGeometry(w, h, d);
     g.translate(x, y + h / 2, z); g.rotateY(-rw.heading + rot); g.translate(p.x, p.y, p.z);
-    if (!boxes.has(mat)) boxes.set(mat, []);
-    boxes.get(mat).push(g);
+    boxes.push({ geo: g, colour: Array.isArray(colour) ? colour : lin(colour) });
   };
   const finish = () => {
-    for (const [mat, geos] of boxes) {
-      const g = mergeGeos(geos); g.computeBoundingSphere();
-      for (const x of geos) x.dispose();
-      const mesh = new THREE.Mesh(g, mat);
-      mesh.name = mat.name; mesh.castShadow = true; mesh.receiveShadow = true;
+    if (boxes.length) {
+      const mesh = new THREE.Mesh(coloured(boxes), mat);
+      mesh.name = 'biome/site-buildings'; mesh.castShadow = true; mesh.receiveShadow = true;
       objects.push(mesh);
     }
     return { objects, obstacles };
@@ -479,26 +483,26 @@ function beach(kit, spots, seed) {
     const rot = (rng() - 0.5) * 0.5;
     umbrellas.push({ u, v, rot, colour: I.umbrellas[Math.floor(rng() * I.umbrellas.length)] });
     poles.push({ u, v });
-    for (const side of [-1, 1]) loungers.push({ u: u + 0.4 * rng(), v: v + side * 0.95, rot: rot + (rng() - 0.5) * 0.3 + Math.PI / 2 * 0 });
+    for (const side of [-1, 1]) loungers.push({ u: u + 0.4 * rng(), v: v + side * 0.95, rot: rot + (rng() - 0.5) * 0.3 });
   }
-  kit.instanced('umbrellas', canopy, propMaterial('umbrella-canopy', 0xffffff, FINISH.fabric, { side: THREE.DoubleSide }), umbrellas, true);
-  kit.instanced('umbrella-poles', pole, propMaterial('umbrella-pole', I.pole), poles);
-  kit.instanced('loungers', lounger, propMaterial('lounger', I.lounger), loungers);
+  kit.instanced('umbrellas', solidColour(canopy, [1, 1, 1]), umbrellas, true);
+  kit.instanced('umbrella-poles', solidColour(pole, I.pole), poles);
+  kit.instanced('loungers', solidColour(lounger, I.lounger), loungers);
 }
 
-// Parked or moving-looking cars: a body and a glass cabin, instance-coloured; each one is solid.
+// Parked or moving-looking cars: a body under a dark glass cabin (one geometry), instance-coloured
+// (the cabin's vertex colour is dark enough that any paint leaves it glass); each one is solid.
 function cars(kit, list, seed) {
   const I = BIOMES.island, rng = makeRng(seed);
   const body = new THREE.BoxGeometry(1.8, 0.8, 4.3); body.translate(0, 0.55, 0);
   const cabin = new THREE.BoxGeometry(1.6, 0.6, 2.2); cabin.translate(0, 1.25, -0.2);
-  const bodies = [], cabins = [];
+  const geo = coloured([{ geo: body, colour: [1, 1, 1] }, { geo: cabin, colour: [0.012, 0.016, 0.022] }]);
+  const bodies = [];
   for (const [u, v, rot] of list) {
     bodies.push({ u, v, rot, colour: I.cars[Math.floor(rng() * I.cars.length)] });
-    cabins.push({ u, v, rot });
     kit.solid(u, v, 2.3, 1.6, 'a car');
   }
-  kit.instanced('cars', body, propMaterial('car-body', 0xffffff, { roughness: 0.4, metalness: 0.2 }), bodies, true);
-  kit.instanced('car-cabins', cabin, propMaterial('car-glass', 0x1d2530, FINISH.glass), cabins);
+  kit.instanced('cars', geo, bodies, true);
 }
 
 export function buildSiteProps(rw, place, kind, groundAt) {
@@ -515,27 +519,22 @@ export function buildSiteProps(rw, place, kind, groundAt) {
     beach(kit, spots, 912);
     // the coast road's traffic (solid), and the airport fence behind it with the famous sign
     cars(kit, [[-36, -420, Math.PI / 2], [-32, -210, -Math.PI / 2], [-36, -95, Math.PI / 2], [-32, 75, -Math.PI / 2 + 0.03], [-36, 260, Math.PI / 2], [-32, 505, -Math.PI / 2], [-36, 780, Math.PI / 2]], 913);
-    const fence = propMaterial('beach-fence', I.fence, FINISH.metal);
-    for (let v = -150; v <= 150; v += 3) kit.box(fence, -22, v, 0, 0, 0, 0.08, 2.4, 0.08);
-    kit.box(fence, -22, 0, 0, 2.3, 0, 0.05, 0.08, 300);
-    kit.box(fence, -22, 0, 0, 1.2, 0, 0.04, 0.06, 300);
-    const sign = propMaterial('blast-sign', I.sign, FINISH.paint);
-    kit.box(sign, -26, 34, 0, 1.8, 0, 0.12, 1.4, 3.2);
-    for (const dv of [-1.3, 1.3]) kit.box(fence, -26, 34 + dv, 0, 0, 0, 0.1, 1.9, 0.1);
+    for (let v = -150; v <= 150; v += 3) kit.box(I.fence, -22, v, 0, 0, 0, 0.08, 2.4, 0.08);
+    kit.box(I.fence, -22, 0, 0, 2.3, 0, 0.05, 0.08, 300);
+    kit.box(I.fence, -22, 0, 0, 1.2, 0, 0.04, 0.06, 300);
+    kit.box(I.sign, -26, 34, 0, 1.8, 0, 0.12, 1.4, 3.2);
+    for (const dv of [-1.3, 1.3]) kit.box(I.fence, -26, 34 + dv, 0, 0, 0, 0.1, 1.9, 0.1);
     // beach hotels either side of the approach, pastel walls, terracotta roofs, a glazed band per floor
     hotels(kit, [[10, -470, 46, 20, 19], [40, -700, 34, 22, 25], [15, 520, 52, 22, 22], [70, 760, 30, 18, 16]]);
   } else if (kind === 'kestrel') {
     // the little terminal and hangar beside the strip, white walls under terracotta
-    const walls = propMaterial('terminal-walls', 0xe8e2d6, FINISH.building);
-    const roof = propMaterial('terminal-roof', I.roof, FINISH.houseRoof);
-    const glass = propMaterial('terminal-glass', 0x223344, FINISH.glass);
+    const walls = 0xe8e2d6, glass = 0x223344;
     kit.box(walls, 390, 64, 0, 0, 0, 12, 6, 34); kit.solid(390, 64, 17, 8, 'the terminal');
-    kit.box(roof, 390, 64, 0, 6, 0, 13, 1.2, 35);
+    kit.box(I.roof, 390, 64, 0, 6, 0, 13, 1.2, 35);
     kit.box(glass, 390, 64, -6.05, 1, 0, 0.1, 2.4, 26);
     kit.box(walls, 530, 58, 0, 0, 0, 16, 7, 20); kit.solid(530, 58, 12, 8, 'the hangar');
-    kit.box(roof, 530, 58, 0, 7, 0, 17, 0.8, 21);
-    const apron = propMaterial('apron', 0x55585c, FINISH.shoulder);
-    kit.box(apron, 440, 31, 0, -0.52, 0, 38, 0.6, 180);
+    kit.box(I.roof, 530, 58, 0, 7, 0, 17, 0.8, 21);
+    kit.box(0x55585c, 440, 31, 0, -0.52, 0, 38, 0.6, 180);   // the apron
     // cars on the road through the saddle: fly over them, not into them
     cars(kit, [[-252, -92, Math.PI / 2], [-248, -18, -Math.PI / 2], [-252, 47, Math.PI / 2], [-248, 160, -Math.PI / 2]], 921);
     // and the beach past the far end
@@ -543,50 +542,32 @@ export function buildSiteProps(rw, place, kind, groundAt) {
     for (let v = -330; v <= 330; v += 42) if (Math.abs(v) > 60) spots.push([695 + 6 * rng(), v + 10 * (rng() - 0.5)]);
     beach(kit, spots, 923);
   } else if (kind === 'frostbite') {
-    // ice-fishing shacks out on the lake, each a different paint, each solid
+    // ice-fishing shacks out on the lake, each a different paint under a dark roof, each solid
     const A = BIOMES.arctic, rng = makeRng(931);
     const hut = new THREE.BoxGeometry(2.4, 2.2, 3.0); hut.translate(0, 1.1, 0);
     const lid = new THREE.CylinderGeometry(0.1, 1.75, 0.7, 4); lid.rotateY(Math.PI / 4); lid.scale(1, 1, 1.25); lid.translate(0, 2.55, 0);
-    const huts = [], lids = [];
+    // the roof's vertex colour is dark, so the instance's paint only tints it
+    const geo = coloured([{ geo: hut, colour: [1, 1, 1] }, { geo: lid, colour: lin(A.shackRoof).map((c) => c * 0.5) }]);
+    const huts = [];
     for (const [u, v] of [[330, 105], [372, 128], [790, -118], [-420, 170], [-520, 140], [1100, 160], [1480, -140]]) {
       huts.push({ u, v, rot: rng() * 3, colour: A.shacks[Math.floor(rng() * A.shacks.length)] });
-      lids.push({ u, v, rot: huts[huts.length - 1].rot });
       kit.solid(u, v, 2.3, 2.9, 'an ice-fishing shack');
     }
-    kit.instanced('shacks', hut, propMaterial('shack-walls', 0xffffff, FINISH.painted), huts, true);
-    kit.instanced('shack-roofs', lid, propMaterial('shack-roof', A.shackRoof, FINISH.roof), lids, true);
+    kit.instanced('shacks', geo, huts, true);
   }
   return kit.finish();
 }
 
 // Beach hotels: [u, v, width along the beach, depth, height] in the runway frame. Walls in one
-// pastel each (vertex colour), a dark glazed band per floor, a terracotta roof; each one solid.
+// pastel each, a dark glazed band per floor, a terracotta roof; each one solid. Boxes of the kit.
 function hotels(kit, list) {
   const I = BIOMES.island, W = I.walls, rng = makeRng(941);
-  const walls = propMaterial('hotel-walls', 0xffffff, FINISH.building, { vertexColors: true });
-  const glass = propMaterial('hotel-glass', 0x1e2a33, FINISH.glass);
-  const roof = propMaterial('hotel-roof', I.roof, FINISH.houseRoof);
-  const geos = [];
   const c = new THREE.Color();
   for (const [u, v, w, d, h] of list) {
-    const p = kit.at(u, v);
-    const g = new THREE.BoxGeometry(w, h, d);
-    g.translate(0, h / 2, 0); g.rotateY(-kit.heading); g.translate(p.x, p.y, p.z);
     c.setHSL(W.h + rng() * W.hVary, W.s + rng() * W.sVary, W.l + rng() * W.lVary);
-    const col = new Float32Array(g.attributes.position.count * 3);
-    for (let i = 0; i < col.length; i += 3) { col[i] = c.r; col[i + 1] = c.g; col[i + 2] = c.b; }
-    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    geos.push(g);
-    for (let f = 1; f * 3.1 < h - 1; f++) kit.box(glass, u, v, 0, f * 3.1 - 1.4, 0, w - 2, 1.2, d + 0.2);
-    kit.box(roof, u, v, 0, h, 0, w + 0.6, 0.6, d + 0.6);
+    kit.box([c.r, c.g, c.b], u, v, 0, 0, 0, w, h, d);
+    for (let f = 1; f * 3.1 < h - 1; f++) kit.box(0x1e2a33, u, v, 0, f * 3.1 - 1.4, 0, w - 2, 1.2, d + 0.2);
+    kit.box(I.roof, u, v, 0, h, 0, w + 0.6, 0.6, d + 0.6);
     kit.solid(u, v, Math.hypot(w, d) / 2, h + 1, 'a hotel');
   }
-  const merged = mergeGeos(geos);
-  let o = 0; const col = new Float32Array(merged.attributes.position.count * 3);
-  for (const g of geos) { const n = g.index ? g.index.count : g.attributes.position.count; const src = g.attributes.color; const ni = g.index; for (let i = 0; i < n; i++, o++) { const j = ni ? ni.getX(i) : i; col[o * 3] = src.getX(j); col[o * 3 + 1] = src.getY(j); col[o * 3 + 2] = src.getZ(j); } g.dispose(); }
-  merged.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  merged.computeBoundingSphere();
-  const mesh = new THREE.Mesh(merged, walls);
-  mesh.name = 'biome/hotels'; mesh.castShadow = true; mesh.receiveShadow = true;
-  kit.objects.push(mesh);
 }

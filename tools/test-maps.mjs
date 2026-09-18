@@ -219,6 +219,10 @@ section('the look');
       ok(m.n > 0 && m.bad === 0, `${id} (${detail}): every forest material is named`);
       let frust = 0; for (const o of f.objects) o.traverse((x) => { if (x.frustumCulled === false) frust++; });
       ok(frust === 0, `${id} (${detail}): nothing in the forest is drawn without culling`);
+      // docs/PERF.md: a tree is at most 110 triangles
+      let fat = 0; for (const o of f.objects) o.traverse((x) => { if (x.isInstancedMesh) { const g = x.geometry, t = (g.index ? g.index.count : g.attributes.position.count) / 3; if (t > 110) fat = Math.max(fat, t); } });
+      ok(fat === 0, `${id} (${detail}): every tree is 110 triangles or fewer${fat ? ' (one is ' + fat + ')' : ''}`);
+      ok(f.count <= 24000, `${id} (${detail}): the forest is capped (${f.count} <= 24000)`);
     }
     ok(biomes.biomeForest(T.redmesa, { treeScale: 1, detail }).count === 0, `redmesa (${detail}): no trees in the desert`);
     for (const id of ['redmesa', 'frostbite']) {
@@ -231,8 +235,12 @@ section('the look');
     const rw = resolvedRunway(SITES[id]);
     const place = (u, v, out) => out.copy(rw.threshold).addScaledVector(rw.dir, u).addScaledVector(rw.right, v).setY(rw.elevation);
     const p = biomes.buildSiteProps(rw, place, rw.props, (x, z) => T[id].height(x, z));
-    const m = named(p.objects);
-    ok(m.bad === 0 && p.objects.length <= 16, `${id}: site props are ${p.objects.length} draws, every material named`);
+    const m = named(p.objects), mats = new Set();
+    for (const o of p.objects) o.traverse((x) => { if (x.material) mats.add(x.material); });
+    ok(m.bad === 0 && p.objects.length <= 6, `${id}: site props are ${p.objects.length} draws, every material named`);
+    ok(mats.size === 1, `${id}: site props share one material (${mats.size}; the aerodrome's budget is 20)`);
+    let noColour = 0; for (const o of p.objects) if (!o.geometry.attributes.color) noColour++;
+    ok(noColour === 0, `${id}: every prop geometry carries the vertex colours its material reads`);
     ok(p.obstacles.every((o) => o.kind === 'structure' && o.r > 0 && o.y > rw.elevation - 5 && o.name), `${id}: ${p.obstacles.length} solid props, each a named structure`);
   }
 }
