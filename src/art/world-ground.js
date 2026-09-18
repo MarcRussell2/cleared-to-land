@@ -51,6 +51,7 @@ import { smoothstep, lerp, makeRng, noise2 } from '../config.js';
 import { PALETTE, FINISH, BIOMES } from './palette.js';
 import { groundDetail } from './textures.js';
 import { WORLD_QUALITY } from './quality.js';
+import { islandStand, arcticWood } from './world-biomes.js';   // the new maps' woodland masks (trees and ground share them)
 
 // Staggered parcels, shared by the ground shader and the hedge placement.
 // Rotation avoids alignment with the terrain's fixed triangulation.
@@ -111,12 +112,14 @@ function biomeColor(field, h, slope, x, z, out) {
   if(field.style==='island') {
     const B=BIOMES.island, d=h-(field.waterLevel??0);
     const m1=noise2(x/95,z/95,field.seed+45), m2=noise2(x/37,z/37,field.seed+46);
-    out.setRGB(B.lush[0]+B.lushNoise[0]*n,B.lush[1]+B.lushNoise[1]*n,B.lush[2]+B.lushNoise[2]*n);
-    // drier up the hills and on the lee of the broad pattern; burnt grass in patches, the dry forest's
-    // shade where the woods are, red earth where the slopes erode, rock on the steep faces and knolls
-    mix(B.scrub,smoothstep(8,70,d)*(0.45+0.45*broad));
-    mix(B.dryGrass,smoothstep(0.05,0.65,m1+0.3*broad)*smoothstep(5,35,d)*0.6);
-    mix(B.woodFloor,smoothstep(-0.05,0.35,field.forestNoise(x,z))*smoothstep(3,12,d)*0.7);
+    // A Leeward island: dry olive scrub is the base; greener in the moist lowland and the hollows the broad
+    // pattern picks out, burnt tan in patches (more of it up the hills), the dry forest's own shade under its
+    // stands (the same mask the trees grow on, world-biomes.js islandStand), red earth where the slopes erode,
+    // rock on the steep faces and knolls
+    out.setRGB(B.scrub[0]+B.lushNoise[0]*n,B.scrub[1]+B.lushNoise[1]*n,B.scrub[2]+B.lushNoise[2]*n);
+    mix(B.lush,(1-smoothstep(5,45,d))*smoothstep(-0.3,0.2,-broad)*0.7);
+    mix(B.dryGrass,smoothstep(0.0,0.55,m1+0.35*broad)*smoothstep(4,30,d)*(0.45+0.3*smoothstep(30,120,d)));
+    mix(B.woodFloor,islandStand(field,x,z)*smoothstep(3,10,d)*0.85);
     mix(B.soil,smoothstep(0.10,0.28,slope)*(0.35+0.35*m2)*smoothstep(4,15,d));
     mix(B.rock,Math.max(smoothstep(0.30,0.55,slope),smoothstep(0.55,0.85,m2)*smoothstep(25,70,d)*0.55));
     // the beach: dry coral sand above the swash, wet below it, the sandy seabed under the shallows
@@ -138,17 +141,18 @@ function biomeColor(field, h, slope, x, z, out) {
     mix(B.varnish,smoothstep(0.45,0.8,slope)*smoothstep(0.1,0.6,noise2(x/90,z/90,field.seed+51))*0.45);
     mix(B.caprock,smoothstep(40,90,rel)*flat*(0.75+0.25*broad));
   } else {
-    const B=BIOMES.arctic;
+    const B=BIOMES.arctic, shore=field.lakeShore?field.lakeShore(x,z):1e3;
     out.setRGB(B.snow[0]+0.02*n,B.snow[1]+0.02*n,B.snow[2]+0.015*n);
     mix(B.drift,smoothstep(-0.1,0.6,noise2(x/140,z/140,field.seed+52))*0.55);
-    if(field.lakeShore) {
-      const lake=1-smoothstep(-25,0,field.lakeShore(x,z));
-      // wind-cleared ice in streaks along the wind, darker where it is clear and thick
-      const scour=smoothstep(0.05,0.45,noise2(x/260+z/900,z/180,field.seed+53));
+    // the lake: snow-covered ice, wind-cleared in streaks along the wind, darker where it is clear and thick
+    const lake=1-smoothstep(-25,0,shore);
+    if(lake>0) {
+      const scour=smoothstep(-0.05,0.4,noise2(x/260+z/900,z/180,field.seed+53));
       mix(B.ice,lake*scour*0.8);
-      mix(B.iceDark,lake*scour*smoothstep(0.3,0.7,noise2(x/90,z/90,field.seed+54))*0.5);
+      mix(B.iceDark,lake*scour*smoothstep(0.25,0.65,noise2(x/90,z/90,field.seed+54))*0.55);
     }
-    mix(B.underTrees,smoothstep(0.25,0.45,field.forestNoise(x,z))*(1-smoothstep(120,260,h-field.elevation))*0.6);
+    // the spruce woods' floor (the same mask the trees grow on, world-biomes.js arcticWood), up to the treeline
+    mix(B.underTrees,arcticWood(field,x,z,shore)*smoothstep(10,40,shore)*(1-smoothstep(150,260,h-field.elevation))*0.8);
     mix(B.scree,smoothstep(0.22,0.4,slope)*0.6);
     mix(B.rock,smoothstep(0.34,0.62,slope));
   }
@@ -186,7 +190,16 @@ export function buildGround(field, opts = {}) {
     // The new maps' ground draws its near detail at a strength of their own (grass blades
     // on snow and sand read as litter at full strength): a separate program, the others unchanged.
     const biome=!!BIOMES[field.style];
-    mat.customProgramCacheKey=()=> (farOnly?'ctl-ground-v3-far':'ctl-ground-v3')+(biome?'-biome':'');
+    // The desert's cliffs are layered sandstone, and a cliff is one or two rows of a 20 m mesh: its vertex
+    // colours cannot carry the layers, so steep facets get their bands here, by height (three warped sines:
+    // beds of uneven thickness with thin partings), paler and redder in turn. Desert only; its own program.
+    const strata=field.style==='desert'?`
+        vec3 grFacet=normalize(cross(dFdx(grWorld),dFdy(grWorld)));
+        float grSteep=smoothstep(0.45,0.8,1.0-abs(grFacet.y));
+        float grBand=clamp(0.5+0.32*sin(grWorld.y*0.45+grWide*6.0)+0.22*sin(grWorld.y*1.3+1.7)+0.14*sin(grWorld.y*3.1+grWide*9.0),0.0,1.0);
+        diffuseColor.rgb*=mix(vec3(1.0),mix(vec3(0.83,0.79,0.77),vec3(1.12,1.09,1.04),grBand),grSteep);
+      `:'';
+    mat.customProgramCacheKey=()=> (farOnly?'ctl-ground-v3-far':'ctl-ground-v3')+(biome?'-biome':'')+(strata?'-strata':'');
     mat.onBeforeCompile=shader=>{
       shader.uniforms.grParcels={value:parcels};shader.uniforms.grDetail={value:detail};
       shader.uniforms.grEarth={value:new THREE.Color(...P.ploughed)};
@@ -203,6 +216,7 @@ export function buildGround(field, opts = {}) {
       shader.fragmentShader=shader.fragmentShader.replace('#include <color_fragment>',farOnly?`#include <color_fragment>
         float grWide=texture2D(grDetail,mat2(0.8,-0.6,0.6,0.8)*grWorld.xz/90.0).r;
         diffuseColor.rgb*=grTint*(1.0+(grWide-0.5)*0.18);
+        ${strata}
       `:`#include <color_fragment>
         vec2 grXZ=grWorld.xz;
         float grDistance=length(cameraPosition-grWorld);
@@ -235,6 +249,7 @@ export function buildGround(field, opts = {}) {
         diffuseColor.rgb=mix(diffuseColor.rgb,grCrop,clamp(grFarm,0.0,1.0));
         }
         diffuseColor.rgb*=grTint*(1.0+(grWide-0.5)*0.18+(grFine-0.5)*0.65*grNear);
+        ${strata}
       `).replace('(grFine-0.5)*0.65*grNear',biome?'(grFine-0.5)*0.32*grNear':'(grFine-0.5)*0.65*grNear')
         .replace('#include <normal_fragment_maps>',farOnly?'#include <normal_fragment_maps>':`#include <normal_fragment_maps>
         // Perturb the lighting normal, so real sun direction drives the relief.

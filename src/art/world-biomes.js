@@ -32,8 +32,8 @@
 // shader collapses the instances outside its range (level 0 within 350 m on high, level 1 to
 // 1500 m, camera-facing cards beyond), level meshes sit in 300 m / 1200 m cells under a THREE.LOD
 // that stops drawing a cell wholly out of range, and the cards are one InstancedMesh per species
-// that the terrain splits into chunks. Triangles per instance: palm 232/40/2, scrub 202/46/2,
-// spruce 196/46/2. Caps: 16k trees on an island or round the lake, times the tier's treeScale.
+// that the terrain splits into chunks. Triangles per instance: palm 108/52/2, scrub 108/46/2,
+// spruce 83/27/2. Cap: 24k trees on an island or round the lake, times the tier's treeScale.
 import * as THREE from 'three';
 import { clamp, smoothstep, lerp, makeRng, noise2 } from '../config.js';
 import { mergeGeos } from '../geom.js';
@@ -42,6 +42,15 @@ import { WORLD_QUALITY } from './quality.js';
 
 // The terrain styles this file dresses (src/world/terrain.js).
 export const BIOME_STYLES = new Set(['island', 'desert', 'arctic']);
+
+// Where the woods are, 0..1: the island's stands of dry forest, and the spruce woodland round the frozen lake
+// (thickest along the shore, thin up the hills). The trees below grow on these and the ground under them
+// (world-ground.js biomeColor) darkens on the same masks, so a stand sits on its own shade and reads as a mass
+// from a distance instead of as a scatter of dots. `shore` is field.lakeShore(x, z), already to hand.
+export function islandStand(field, x, z) { return smoothstep(0.02, 0.24, field.forestNoise(x, z)); }
+export function arcticWood(field, x, z, shore) {
+  return smoothstep(-0.15, 0.2, field.forestNoise(x, z)) * (0.25 + 0.75 * (1 - smoothstep(500, 1700, shore)));
+}
 
 // ------------------------------------------------------------------ geometry helpers
 // Merge parts {geo, colour} into one geometry with a per-vertex colour (linear [r,g,b] or a
@@ -67,24 +76,23 @@ function coloured(parts) {
 const lin = (hex) => { const c = new THREE.Color(hex); return [c.r, c.g, c.b]; };
 const hsl = (o, k = 0.5) => { const c = new THREE.Color().setHSL(o.h, o.s, o.l + (o.lVary || 0) * (k - 0.5)); return [c.r, c.g, c.b]; };
 
-// A palm, 12 m tall at scale 1, leaning a little down +x: a curved, tapering trunk with ring
-// scars, and a crown of fronds, each folded along its midrib and drooping in an arc; the lowest
-// fronds are the old brown ones. Level 1 keeps the silhouette with a third of the triangles.
+// A palm, 12 m tall at scale 1, leaning a little down +x: a curved, tapering trunk and a crown of
+// seven fronds, each folded along its midrib and drooping in an arc; the lowest two are the old
+// brown ones. 108 triangles (the forest budget is 110 a tree); level 1 keeps the silhouette in 52.
 function palmGeometry(level) {
   const parts = [];
   const trunkC = lin(BIOMES.island.palmTrunk);
-  const segs = level ? 3 : 6, sides = level ? 4 : 6, H = 11.2;
+  const segs = level ? 2 : 3, sides = level ? 3 : 4, H = 11.2;
   const trunk = new THREE.CylinderGeometry(0.17, 0.26, H, sides, segs, true);
   const p = trunk.attributes.position;
   for (let i = 0; i < p.count; i++) {
     const t = (p.getY(i) + H / 2) / H;
-    const ring = level ? 1 : 1 + 0.06 * Math.sin(t * 60);
-    p.setXYZ(i, p.getX(i) * ring + 1.1 * t * t, p.getY(i) + H / 2, p.getZ(i) * ring);
+    p.setXYZ(i, p.getX(i) + 1.1 * t * t, p.getY(i) + H / 2, p.getZ(i));
   }
   trunk.computeVertexNormals();
   parts.push({ geo: trunk, colour: trunkC });
   const top = new THREE.Vector3(1.1, H, 0);
-  const fronds = level ? 5 : 9, steps = level ? 2 : 5;
+  const fronds = level ? 5 : 7, steps = level ? 2 : 3;
   const green = hsl(BIOMES.island.palmFrond, 0.55), dry = BIOMES.island.palmDry;
   for (let f = 0; f < fronds; f++) {
     const a = f * 2.39996 + 0.3, old = !level && f >= fronds - 2;
@@ -111,31 +119,36 @@ function palmGeometry(level) {
   return coloured(parts);
 }
 
-// Dry tropical woodland: a short trunk under a broad crown of four lumpy lobes, 6 m tall at scale 1.
-// The foliage normals point out of the crown as a whole, so it lights as one soft mass, darker
-// underneath, rather than as facets.
+// Dry tropical woodland (sea grape, gumbo-limbo, manchineel), 6 m tall at scale 1: a short trunk under a
+// broad, low, irregular crown of five lobes (two on level 1) that is wider than it is tall and starts a metre
+// and a half off the ground, so a stand closes into one bumpy canopy instead of a field of separate trees.
+// The foliage normals point out of the crown as a whole, so it lights as one soft mass, a little darker
+// underneath, rather than as facets. 108 triangles (the forest budget is 110 a tree), 46 on level 1.
+const SCRUB_LOBES = [
+  // x, y, z, and the radii
+  [[0, 3.9, 0, 2.0, 1.5, 2.0], [1.5, 3.2, 0.4, 1.7, 1.3, 1.6], [-1.3, 3.4, 0.9, 1.6, 1.35, 1.7], [-0.5, 3.1, -1.5, 1.8, 1.25, 1.5], [0.9, 4.4, -0.6, 1.4, 1.1, 1.4]],
+  [[0, 3.6, 0, 2.6, 1.8, 2.4], [0.9, 3.0, 0.5, 2.0, 1.4, 1.9]],
+];
 function scrubGeometry(level) {
   const parts = [];
-  const trunk = new THREE.CylinderGeometry(0.1, 0.2, 2.8, level ? 3 : 5);
-  trunk.translate(0, 1.4, 0);
+  const trunk = new THREE.CylinderGeometry(0.09, 0.2, 2.3, level ? 3 : 4, 1, true);
+  trunk.translate(0, 1.15, 0);
   parts.push({ geo: trunk, colour: lin(BIOMES.island.palmTrunk) });
-  const base = hsl(BIOMES.island.scrubTree, 0.5), centre = new THREE.Vector3(0, 4.3, 0), v = new THREE.Vector3();
-  const lobes = level ? 2 : 4;
-  for (let j = 0; j < lobes; j++) {
-    const g = level ? new THREE.IcosahedronGeometry(1, 0) : new THREE.SphereGeometry(1, 6, 4);
+  const base = hsl(BIOMES.island.scrubTree, 0.5), centre = new THREE.Vector3(0, 3.4, 0), v = new THREE.Vector3();
+  SCRUB_LOBES[level ? 1 : 0].forEach(([lx, ly, lz, rx, ry, rz], j) => {
+    const g = new THREE.IcosahedronGeometry(1, 0);
     const p = g.attributes.position;
     for (let i = 0; i < p.count; i++) {
       const x = p.getX(i), y = p.getY(i), z = p.getZ(i), k = 1 + 0.2 * Math.sin(x * 5.1 + y * 3.7 + z * 4.3 + j * 1.3);
       p.setXYZ(i, x * k, y * k, z * k);
     }
-    const a = j * 2.4;
-    g.scale(level ? 2.5 : 1.8, level ? 2.1 : 1.7, level ? 2.3 : 1.7);
-    g.translate(j ? Math.cos(a) * (level ? 0.6 : 1.2) : 0, 4.0 + (j === 0 ? 0.7 : (j % 2) * 0.5), j ? Math.sin(a) * (level ? 0.6 : 1.0) : 0);
+    g.scale(rx, ry, rz);
+    g.translate(lx, ly, lz);
     g.computeVertexNormals();
     const nrm = g.attributes.normal;
     for (let i = 0; i < p.count; i++) { v.set(p.getX(i), p.getY(i), p.getZ(i)).sub(centre).normalize(); nrm.setXYZ(i, v.x, v.y, v.z); }
-    parts.push({ geo: g, colour: (x, y, z, nx, ny) => { const k = 0.5 + 0.5 * smoothstep(-0.7, 0.8, ny); return [base[0] * k, base[1] * k, base[2] * k]; } });
-  }
+    parts.push({ geo: g, colour: (x, y, z, nx, ny) => { const k = 0.62 + 0.38 * smoothstep(-0.8, 0.9, ny); return [base[0] * k, base[1] * k, base[2] * k]; } });
+  });
   return coloured(parts);
 }
 
@@ -228,7 +241,7 @@ function rangeMaterial(name, extra, near, far, card = false) {
 // ------------------------------------------------------------------ the forests
 const SPECIES = {
   palm: { geo: palmGeometry, model: 12, card: 9, double: true, wide: 1 },
-  scrub: { geo: scrubGeometry, model: 6, card: 9, double: false, wide: 1.3 },
+  scrub: { geo: scrubGeometry, model: 6, card: 9, double: false, wide: 1.5 },
   spruce: { geo: spruceGeometry, model: 14, card: 4.5, double: false, wide: 1 },
 };
 
@@ -240,8 +253,8 @@ export function biomeForest(field, opts = {}) {
   const high = detail === 'high', low = detail === 'low';
   const island = field.style === 'island';
   const area = Math.min(field.treeArea, 5400), rng = makeRng(field.seed * 131 + 17);
-  const cell = island ? 15 : 22, water = field.waterLevel ?? -1e9;
-  const cap = Math.floor((opts.maxTrees ?? (island ? 16000 : 16000)));
+  const cell = island ? 15 : 18, water = field.waterLevel ?? -1e9;
+  const cap = Math.floor(opts.maxTrees ?? 24000);
   const normal = new THREE.Vector3();
   const trees = [];
   // an island's trees only grow on the island: walk its bounding box, not the whole site
@@ -251,33 +264,35 @@ export function biomeForest(field, opts = {}) {
   for (let x = x0; x < x1; x += cell) for (let z = z0; z < z1; z += cell) {
     const px = x + rng() * cell, pz = z + rng() * cell;
     const chance = rng(), size = rng(), angle = rng() * Math.PI * 2, tier = rng(), rank = rng();
-    if (chance > 0.9) continue;                                 // cheap early rejection: nothing is denser
+    if (chance > 0.92) continue;                                // cheap early rejection: nothing is denser
     let species = null, height = 0, h;
     if (island) {
-      // Palms crowd the back of every beach and dot the lowland; the dry forest takes the rest where the
-      // woodland noise says so (the ground darkens there too), with a few trees in the open. The coast
-      // distance and the noise are cheap, so they decide before the height is sampled.
+      // Palms crowd the back of every beach and dot the lowland; the dry forest grows in stands (islandStand)
+      // with only a rare tree in the open scrub between them. The coast distance and the mask are cheap, so
+      // they decide before the height is sampled.
       const dc = field.coastDistance ? field.coastDistance(px, pz) : 100;
       if (dc < 5) continue;
       const palm = 0.68 * smoothstep(6, 18, dc) * (1 - smoothstep(50, 140, dc)) + 0.012 * (1 - smoothstep(100, 500, dc));
       if (chance < palm) species = 'palm';
       else {
-        const scrub = field.treeDensity * (0.03 + 0.97 * smoothstep(0.08, 0.3, field.forestNoise(px, pz))) * smoothstep(20, 60, dc);
-        if (chance < palm + scrub * 0.9) species = 'scrub'; else continue;
+        const scrub = Math.min(0.8, field.treeDensity * (0.012 + 1.15 * islandStand(field, px, pz))) * smoothstep(20, 60, dc);
+        if (chance < palm + scrub) species = 'scrub'; else continue;
       }
       h = field.height(px, pz);
       const d = h - water;
       if (d < 1.4 || (species === 'palm' && d > 25)) continue;
-      height = species === 'palm' ? lerp(8, 15, size) : lerp(4, 8.5, size);
+      height = species === 'palm' ? lerp(8, 15, size) : lerp(4.5, 9, size);
     } else {
-      // black spruce in stands where the woodland noise says so, thinning out up the hills; never on the ice
-      if (field.lakeShore && field.lakeShore(px, pz) < 18) continue;
-      const wood = field.treeDensity * (0.08 + 0.92 * smoothstep(0.0, 0.4, field.forestNoise(px, pz)));
+      // Black spruce, an open woodland: thickest along the shore, in stands where the woodland noise says so,
+      // thinning out up the hills to the treeline; never on the ice (arcticWood)
+      const shore = field.lakeShore ? field.lakeShore(px, pz) : 1e3;
+      if (shore < 16) continue;
+      const wood = field.treeDensity * (0.05 + 0.85 * arcticWood(field, px, pz, shore));
       if (chance > wood) continue;
       h = field.height(px, pz);
       const rel = h - field.elevation;
       if (chance > wood * (1 - smoothstep(170, 260, rel))) continue;
-      species = 'spruce'; height = lerp(7, 16, size) * lerp(1, 0.6, smoothstep(120, 240, rel));
+      species = 'spruce'; height = lerp(8, 17, size) * lerp(1, 0.6, smoothstep(120, 240, rel));
     }
     if (field.nearFlat(px, pz, 16)) continue;
     if (field.normal(px, pz, normal).y < (island ? 0.72 : 0.78)) continue;
@@ -298,7 +313,11 @@ export function biomeForest(field, opts = {}) {
       rotation.setFromEuler(euler); matrix.compose(position, rotation, scale);
       mesh.setMatrixAt(i, matrix);
       const k = 0.85 + 0.3 * t.rank;
-      mesh.setColorAt(i, colour.setRGB(k * (0.97 + 0.06 * t.lean), k, k * (1.02 - 0.04 * t.lean)));
+      if (t.species === 'scrub') {
+        // the dry forest is not one green: olive, grey-green and a fresher green, tree by tree
+        const u = (t.angle * 7.31) % 1;
+        mesh.setColorAt(i, colour.setRGB(k * (0.9 + 0.22 * u), k, k * (0.88 + 0.18 * (1 - u))));
+      } else mesh.setColorAt(i, colour.setRGB(k * (0.97 + 0.06 * t.lean), k, k * (1.02 - 0.04 * t.lean)));
     });
     mesh.castShadow = !card && !low && mat.userData.shadow; mesh.receiveShadow = false;
     mesh.computeBoundingSphere();

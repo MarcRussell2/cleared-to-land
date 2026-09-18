@@ -100,7 +100,7 @@ export const NEW_SITES = {
   paradise: {
     id: 'paradise', name: 'Paradise Bay Intl', kind: 'airport',
     terrain: {
-      style: 'island', seed: 157, size: 28000, res: 330, elevation: 4, waterLevel: 0, trees: 0.75, treeArea: 5400,
+      style: 'island', seed: 157, size: 28000, res: 330, elevation: 4, waterLevel: 0, trees: 0.6, treeArea: 3600,
       rwFrame: frame(PARADISE_RW),
       runwayFlats: [runwayFlat(PARADISE_RW, { before: 15, after: 200, width: 330, m0: 25, m1: 400, mv: 350, trees: 150 })],
       island: {
@@ -119,9 +119,11 @@ export const NEW_SITES = {
       rwFrame: frame(FROST_RW),
       runwayFlats: [runwayFlat(FROST_RW, { before: 200, after: 150, width: 60, m0: 200, m1: 200, mv: 150, trees: 40 })],
       arctic: {
-        lake: { u: 200, halfLength: 3600, halfWidth: 850, wobble: 0.16 },
-        islets: [{ u: -1900, v: 480, r: 150, h: 18 }, { u: 1900, v: -520, r: 200, h: 26 }, { u: -3000, v: -380, r: 110, h: 12 }],
-        hills: 340, lows: [{ u0: -9000, u1: -3000, half: 450, fade: 900, max: 215 }],
+        // a long, narrow lake: the spruce on its shores stands 450 m either side of the runway, the only dark
+        // thing to see in a whiteout
+        lake: { u: 300, halfLength: 3300, halfWidth: 480, wobble: 0.14 },
+        islets: [{ u: -1700, v: 230, r: 90, h: 12 }, { u: 1850, v: -250, r: 120, h: 18 }, { u: -2600, v: -200, r: 70, h: 9 }],
+        hills: 340, lows: [{ u0: -9000, u1: -2800, half: 420, fade: 900, max: 215 }],
       },
     },
     runways: [FROST_RW],

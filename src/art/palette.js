@@ -218,12 +218,12 @@ export const BIOMES = {
     sand: [0.60, 0.56, 0.45],          // coral sand: whiter than a temperate beach
     wetSand: [0.34, 0.32, 0.26],
     seabed: [0.42, 0.44, 0.36],
-    lush: [0.042, 0.105, 0.024],       // the wet lowland: dark, saturated
-    lushNoise: [0.012, 0.022, 0.008],
-    scrub: [0.085, 0.10, 0.042],       // the dry hills: olive scrub
-    dryGrass: [0.19, 0.17, 0.085],     // sun-burnt patches
+    lush: [0.046, 0.090, 0.026],       // the moist hollows and the lowland: greener, never lawn
+    lushNoise: [0.010, 0.015, 0.006],
+    scrub: [0.068, 0.076, 0.036],      // the island's base: dry olive-grey scrub (a Leeward island, not a jungle)
+    dryGrass: [0.165, 0.145, 0.075],   // sun-burnt patches
     soil: [0.20, 0.115, 0.06],         // red-brown earth where the slopes erode
-    woodFloor: [0.028, 0.055, 0.02],   // under the dry forest
+    woodFloor: [0.024, 0.036, 0.017],  // the dry forest's shade, which is what makes its stands read as masses
     rock: [0.25, 0.22, 0.18],
     // The water body over the shallows (world-water.js), multiplied by the daylight as the deep colour is:
     // sand seen through a metre of water, the turquoise over the shelf, the darker reef and weed patches.
@@ -260,11 +260,11 @@ export const BIOMES = {
   arctic: {
     snow: [0.70, 0.72, 0.76],          // a little under the mountains' 0.85: a whole valley of it
     drift: [0.58, 0.63, 0.70],         // wind-packed snow, bluer
-    ice: [0.30, 0.40, 0.47],           // lake ice the wind has cleared
-    iceDark: [0.17, 0.25, 0.30],
+    ice: [0.27, 0.37, 0.44],           // lake ice the wind has cleared
+    iceDark: [0.12, 0.19, 0.24],       // clear black ice, thick and old
     rock: [0.085, 0.085, 0.09],        // bare rock on the steep faces
     scree: [0.30, 0.31, 0.33],
-    underTrees: [0.55, 0.58, 0.62],    // snow in the shade of a wood
+    underTrees: [0.46, 0.50, 0.55],    // snow in the shade of a wood, and the needles and twigs on it
     spruce: { h: 0.40, hVary: 0.03, s: 0.30, l: 0.032, lVary: 0.012 },
     snowOnTree: [0.70, 0.73, 0.78],
     boulder: 0x4a4b4f,

@@ -38,7 +38,9 @@
 // setShallows(field) once, before the first frame; the water bakes the depth under it into a small
 // texture (384 px over the island and its shelf) and, behind the WV_SHALLOWS define, colours the body
 // over the shallows turquoise - sand-pale at the waterline, darker over reef, fading into the deep
-// colour off the shelf. One more fetch there, none anywhere else; every other water is unchanged.
+// colour off the shelf - and calms the swell, the chop and the whitecaps inside the reef, so the
+// colour shows through instead of the sky's reflection. One more fetch there, none anywhere else;
+// every other water is unchanged.
 import * as THREE from 'three';
 import { clamp, smoothstep, DEG, makeRng, noise2 } from '../config.js';
 import { PALETTE, BIOMES } from './palette.js';
@@ -110,19 +112,25 @@ export function makeWater(size, level, sun) {
       vec2 wvSlope(vec2 uv) { return texture2D(wvSlopes, uv).rg - 0.5; }
       #ifdef WV_SHALLOWS
       uniform sampler2D wvShallowMap; uniform vec4 wvShallowBox; uniform vec3 wvShallow, wvLagoon, wvReef;
-      float wvCalm = 1.0;   // fewer whitecaps inside the reef
-      // the island's shallows: r = depth (0 at the waterline, 1 at 30 m or more), g = reef and weed
-      vec3 wvShallowBody(vec3 deep, vec2 p, float day) {
+      // the island's shallows: r = depth (0 at the waterline, 1 at 30 m or more), g = reef and weed; open sea
+      // outside the baked square
+      vec2 wvShallowAt(vec2 p) {
         vec2 uv = (p - wvShallowBox.xy) * wvShallowBox.zw;
-        if (uv.x <= 0.0 || uv.y <= 0.0 || uv.x >= 1.0 || uv.y >= 1.0) return deep;
-        vec2 s = texture2D(wvShallowMap, uv).rg;
-        wvCalm = 0.15 + 0.85 * smoothstep(0.1, 0.7, s.r);
-        vec3 c = mix(mix(wvShallow, wvLagoon, smoothstep(0.02, 0.3, s.r)), wvReef, s.g);
-        return mix(c * day, deep, smoothstep(0.25, 0.85, s.r));
+        if (uv.x <= 0.0 || uv.y <= 0.0 || uv.x >= 1.0 || uv.y >= 1.0) return vec2(1.0, 0.0);
+        return texture2D(wvShallowMap, uv).rg;
+      }
+      vec3 wvShallowBody(vec3 deep, vec2 s, float day) {
+        vec3 c = mix(mix(wvShallow, wvLagoon, smoothstep(0.02, 0.3, s.x)), wvReef, s.y);
+        return mix(c * day, deep, smoothstep(0.25, 0.85, s.x));
       }
       #endif
       void main() {
         vec2 p = vWorld.xz;
+        #ifdef WV_SHALLOWS
+        // inside the reef the sea is calmer: a lower swell and chop, fewer whitecaps
+        vec2 wvS = wvShallowAt(p);
+        float wvCalm = 0.15 + 0.85 * smoothstep(0.1, 0.7, wvS.x);
+        #endif
         vec3 toCam = cameraPosition - vWorld;
         float dist = length(toCam);
         vec3 v = toCam / max(dist, 0.001);
@@ -138,6 +146,9 @@ export function makeWater(size, level, sun) {
         vec2 chop = ((wvSlope(r1 * p / 15.0 + swellMap * 2.1 + wvTime * vec2(-0.028, 0.041)) * r1) * 0.40
           + (wvSlope(r2 * p / 23.7 - swellMap.yx * 1.7 + wvTime * vec2(0.021, 0.033)) * r2) * 0.35) * (0.4 + wvSea) * chopFade;
         vec2 ripple = (wvSlope(r2 * p / 2.6 + wvTime * vec2(0.11, -0.085)) * r2) * 0.18 * rippleFade;
+        #ifdef WV_SHALLOWS
+        swell *= 0.35 + 0.65 * wvCalm; chop *= 0.45 + 0.55 * wvCalm;
+        #endif
         vec2 slope = swell + chop + ripple;
         vec3 n = normalize(vec3(-slope.x, 1.0, -slope.y));
         vec3 r = reflect(-v, n);
@@ -147,7 +158,7 @@ export function makeWater(size, level, sun) {
         // The body: deep blue-green by day, near black at night, lighter on the crests.
         vec3 body = wvDeep * mix(0.025, 0.72, atDay);
         #ifdef WV_SHALLOWS
-        body = wvShallowBody(body, p, mix(0.025, 0.72, atDay));
+        body = wvShallowBody(body, wvS, mix(0.025, 0.72, atDay));
         #endif
         vec3 col = mix(body, sky, fres);
         // Sun glitter on the perturbed normal; the lobe widens and dims with the pixel
