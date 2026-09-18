@@ -3,13 +3,14 @@
 // Five missions on the four new maps (src/missions/sites.js), menu group 'maps' ("Far places"), n 39-43:
 //   hill-hop    Skylark, Kestrel Island: over the saddle, a 6.5-degree dive, stopped before the beach
 //   beach-buzz  Condor, Paradise Bay: fifteen metres over the sunbathers, then on the numbers and stop
-//   mesa-top    Trailblazer, Red Mesa: a 150 m cliff thirty metres before a 500 m strip, sink and chop
+//   mesa-top    Trailblazer, Red Mesa: a 150 m cliff thirty metres before a 500 m strip, shear and chop at the rim
 //   whiteout    Skylark, Frostbite Lake: snow, 900 m visibility, a crosswind on a runway of ice
 //   dust-wall   Skylark, Red Mesa: a haboob on final, the visibility falls to a kilometre, gusty crosswind
 // The weather's look and model come from the weather area (src/systems/weather.js, src/art/weather-look.js);
 // these carry the spec, and the visibility and wind that matter to the flying are the scenario's own vis
-// and wind, so the missions fly the same whatever the weather model adds on top. Each one is landed by the
-// stock Autoland in the headless check (docs in tools/test-maps.mjs and the branch's commit messages).
+// and wind (plus, for dust-wall, the rough air of the dust front, a turbBurst). Each one is landed by the stock
+// Autoland on its straight path (tools/test-maps.mjs checks that path clears the terrain, and only just; the
+// branch's commit messages carry the headless flights, with the weather model and without it).
 // eslint-disable-next-line no-unused-vars
 import { treeWall, rwToWorld } from './util.js';
 
@@ -23,13 +24,14 @@ export const MAPS_MISSIONS = [
     tips: [
       'The saddle is the only gap in the ridge: about 80 m wide, right on the centreline. The hills either side are 100 m high.',
       'Over the ridge: throttle to idle and push. The PAPI is set at 6.5 degrees; two white, two red still means on the path, it just looks like a dive.',
-      'The trade wind gusts through the col. Hold 62 kt to the flare, then brakes as soon as the nosewheel is down: the beach is 650 m away. Brakes: hold Space.',
+      'The trade wind gusts through the col. Hold 62 kt and flare early: at 6.5 degrees you come down at 700 ft a minute, twice the usual. Then brake hard, the beach is 650 m away. Brakes: hold Space.',
     ],
-    wind: { rel: 50, speed: 14, gust: 24, turb: 0.4 }, weight: 'normal',
+    wind: { rel: 40, speed: 12, gust: 20, turb: 0.4 }, weight: 'normal',
     spawn: { dist: 1600, flap: 1.0 }, failures: [], scoring: { type: 'runway' },
     hint: (c) => (c.ac.onGround || c.ac.crashed ? null
       : c.d > 420 ? 'Line up on the saddle: the gap in the ridge, dead ahead. Stay on the PAPI.'
       : c.d > 180 ? 'Over the col: idle, and push over. Two white, two red.'
+      : c.d > -60 ? 'Steep and fast down: start the flare early.'
       : null),
   },
   {
@@ -41,16 +43,19 @@ export const MAPS_MISSIONS = [
       'The aiming point is 200 m in. Flare at 30 ft, thrust to idle at the "retard" call, and do not float.',
       'Arm the spoilers (K) and set autobrake (L). Full reverse (hold R) after touchdown: heavy on 2,300 m.',
     ],
-    wind: { rel: 25, speed: 12, gust: 20, turb: 0.25 }, weight: 'heavy',
+    wind: { rel: 25, speed: 10, gust: 16, turb: 0.2 }, weight: 'heavy',
     spawn: { dist: 2200, flap: 0.75 }, failures: [], scoring: { type: 'runway' },
-    hint: (c) => (!c.ac.onGround && !c.ac.crashed && c.d < 700 && c.d > 40 ? 'Sunbathers below. Stay on the glideslope; the beach is supposed to look this close.' : null),
+    hint: (c) => (c.ac.onGround || c.ac.crashed ? null
+      : c.d < 160 && c.d > 20 ? 'Sunbathers below. Stay on the glideslope: it is supposed to look this close.'
+      : c.d < 900 ? 'Beach ahead. Hold the glideslope all the way; do not duck under it for the numbers.'
+      : null),
   },
   {
     id: 'mesa-top', n: 41, group: 'maps', difficulty: 4, title: 'Mesa Top', tags: T('map', 'bush', 'gusty'),
     aircraft: 'trailblazer', site: 'redmesa', time: 8.3, vis: 60000,
-    desc: 'A 500 m dirt strip on top of a 150 m sandstone cliff. The wind comes over the mesa and dies against its face, so the last stretch before the rim is sink and chop. Arrive high, cross the edge, and put it down.',
+    desc: 'A 500 m dirt strip on top of a 150 m sandstone cliff. The wind pours over the mesa and down its face, so the last hundred metres before the rim are shear and chop. Arrive on the path, cross the edge with a few metres to spare, and put it down.',
     tips: [
-      'Stay on the 4.5-degree path until the rim. Below it, the headwind dies against the cliff and the airplane sinks: you will not climb out of that in a Trailblazer.',
+      'Stay on the 4.5-degree path until the rim. Close to the mesa the headwind drops away and the airspeed goes with it: below the path you will not climb out of that in a Trailblazer.',
       'Full flap (F twice), 5 kt above the usual 48 for the gusts, and a hand on the throttle over the edge.',
       'Over the lip: idle, three-point it, brake gently. Touch down in the first 100 m and 500 m is plenty.',
     ],
@@ -67,7 +72,7 @@ export const MAPS_MISSIONS = [
     weather: { preset: 'snow', snow: 0.9 },
     desc: 'Snow blowing across a frozen lake, 900 metres of visibility, and a runway that is a ploughed strip of ice. The crosswind is only 10 knots; the problem is the grip, or the lack of it: whichever way the wheels touch down is the way the airplane keeps going.',
     tips: [
-      'You will see nothing until about half a mile out. Fly the PAPI and the edge lights; the cones come after.',
+      'You will see nothing until about half a mile out, then the black spruce on both shores. Until then fly the PAPI and the edge lights; the cones come last.',
       'Crab into the wind all the way down and kick it straight only in the flare. On ice, a wheel that touches down sideways keeps going sideways.',
       'Braking does almost nothing on ice. Land slow, hold the nose up to use the drag, and steer with rudder (Q/E), not the brakes.',
     ],
@@ -77,15 +82,22 @@ export const MAPS_MISSIONS = [
   {
     id: 'dust-wall', n: 43, group: 'maps', difficulty: 5, title: 'Dust Wall', tags: T('map', 'weather', 'crosswind', 'bush'),
     aircraft: 'skylark', site: 'redmesa', time: 17, vis: 6000,
-    weather: { preset: 'dust', dust: 0.8, events: [{ type: 'visDrop', at: { type: 'dist', value: 1500 }, vis: 1100 }] },
-    desc: 'A haboob is coming over the mesa, and so are you. Gusts to 25 knots across a 500 m strip on a cliff top, and when the dust wall arrives the visibility goes from six kilometres to one. Get lined up while you can still see.',
+    weather: { preset: 'dust', dust: 0.8, events: [
+      { type: 'visDrop', at: { type: 'dist', value: 1500 }, vis: 1100, ramp: 8 },
+      { type: 'turbBurst', at: { type: 'dist', value: 1500 }, turb: 0.3, dur: 12 },   // the front's rough air
+    ] },
+    desc: 'A haboob is coming over the mesa, and so are you. Gusts to 23 knots across a 500 m strip on a cliff top, and when the dust wall arrives the visibility goes from six kilometres to one. Get lined up while you can still see.',
     tips: [
       'The dust arrives on final and the mesa goes grey at about a mile. Before it does, line up and fix where the strip sits against the rim.',
       'Crab into the wind and carry 5 kt extra for the gusts. Cross the rim high rather than low: the cliff is 150 m straight down.',
       'In the flare, kick it straight with rudder (Q/E) and hold the upwind wing down. Keep flying it with the ailerons until it has stopped.',
     ],
-    wind: { rel: -55, speed: 16, gust: 25, turb: 0.5 }, weight: 'normal',
-    spawn: { dist: 1600, flap: 0.667 }, failures: [], scoring: { type: 'bush' },
+    wind: { rel: -50, speed: 15, gust: 23, turb: 0.5 }, weight: 'normal',
+    spawn: { dist: 2600, flap: 0.667 }, failures: [], scoring: { type: 'bush' },
+    hint: (c) => (c.ac.onGround || c.ac.crashed ? null
+      : c.d > 1500 ? 'The dust is coming. Line up now, while you can still see the strip against the rim.'
+      : c.d > 150 ? 'Crab into the wind. Cross the rim high: the cliff is 150 m straight down.'
+      : null),
   },
 ];
 
