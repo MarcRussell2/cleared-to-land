@@ -57,7 +57,8 @@ import { hullProbes } from '../aircraft/hulls.js';
 import * as look from '../art/terrain-look.js';
 
 const CELL = 48;          // broadphase grid cell, metres
-const NEAR = 25;          // near-miss bookkeeping reach beyond the hull, metres
+const NEAR = 15;          // near-miss bookkeeping reach beyond the hull, metres (the debrief quotes passes under 15 m)
+const CLUSTER = 4;        // probes are tested in clusters binned on a grid this size in the body frame, metres
 const GATE_REACH = 900;   // a gate plane crossed farther than this outside the frame is not "the gate"
 
 // ---------------------------------------------------------------- resolving a course
@@ -421,13 +422,21 @@ function towerCrane(P, s) {
   for (let x = -CJ; x <= J; x += 20) { const p = F.at(x, 0, 0); P.keep(p[0], p[2], 18); }
 }
 
-// A container ship alongside: hull (the look tapers the bow inside this box), deck stacks, the bridge
+// A hull along local X (bow at +X), height h centred at local y: the parallel body as one box and the bow as three
+// narrowing steps over its last 14%, each a box drawn exactly as it collides.
+function hullBoxes(P, F, L, B, h, y, meta) {
+  const bl = 0.14 * L;
+  P.box(F, -bl / 2, y, 0, L - bl, h, B, meta);
+  [0.78, 0.52, 0.26].forEach((w, k) => P.box(F, L / 2 - bl + (k + 0.5) * bl / 3, y, 0, bl / 3, h, B * w, { ...meta }));
+}
+
+// A container ship alongside: hull (the parallel body and a stepped bow), deck stacks, the bridge
 // superstructure aft with its radar mast, the funnel, the foremast.
 function containerShip(P, s) {
   const F = P.frame(s.u, s.v, s.rot, P.water != null ? P.water : P.fr.elev);
   const L = s.length || 220, B = s.beam || 32, g = P.c.groups++, name = s.name || 'the ship';
   const rng = makeRng((s.seed || 5) * 5381 + 7);
-  P.box(F, 0, 1.5, 0, L, 21, B, { kind: 'ship', look: 'hull', color: s.color || 'hullBlue', name, group: g, water: F.o[1] });
+  hullBoxes(P, F, L, B, 21, 1.5, { kind: 'ship', look: 'hull', color: s.color || 'hullBlue', name, group: g, water: F.o[1] });
   const bridgeX = -L / 2 + L * 0.17;
   // container bays forward of the bridge and one aft of it
   for (let x = bridgeX + 16; x < L / 2 - 22; x += 14.2) {
@@ -449,7 +458,7 @@ function tallShip(P, s) {
   const F = P.frame(s.u, s.v, s.rot, P.water != null ? P.water : P.fr.elev);
   const L = s.length || 72, B = s.beam || 11, g = P.c.groups++, name = s.name || 'the tall ship';
   const mastName = s.mastName || "the ship's masts";
-  P.box(F, 0, 1, 0, L, 9, B, { kind: 'ship', look: 'hull', color: s.color || 'hullWhite', name, group: g, water: F.o[1] });
+  hullBoxes(P, F, L, B, 9, 1, { kind: 'ship', look: 'hull', color: s.color || 'hullWhite', name, group: g, water: F.o[1] });
   const masts = [[L * 0.3, 44], [L * 0.02, 47], [-L * 0.26, 40]];
   for (const [x, h] of masts) {
     P.cyl(F, x, 0, 5, h, 0.45, 0.22, { kind: 'mast', look: 'wood', color: 'spar', name: mastName, group: g });
@@ -542,6 +551,50 @@ function segSegDist2(p0x, p0y, p0z, p1x, p1y, p1z, q0x, q0y, q0z, q1x, q1y, q1z)
   }
   const dx = rx + d1x * s - d2x * t, dy = ry + d1y * s - d2y * t, dz = rz + d1z * s - d2z * t;
   return dx * dx + dy * dy + dz * dz;
+}
+
+// Squared distance from point P to the segment AB.
+function pointSegDist2(px, py, pz, ax, ay, az, bx, by, bz) {
+  const dx = bx - ax, dy = by - ay, dz = bz - az, l2 = dx * dx + dy * dy + dz * dz;
+  let t = l2 > 1e-12 ? ((px - ax) * dx + (py - ay) * dy + (pz - az) * dz) / l2 : 0;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  const ex = ax + dx * t - px, ey = ay + dy * t - py, ez = az + dz * t - pz;
+  return ex * ex + ey * ey + ez * ez;
+}
+
+// A body-frame point (bx, by, bz) to the world at a pose, into out[j..j+2]: v' = p + v + 2w (q x v) + 2 q x (q x v).
+function rotate(out, j, bx, by, bz, px, py, pz, qx, qy, qz, qw) {
+  const tx = 2 * (qy * bz - qz * by), ty = 2 * (qz * bx - qx * bz), tz = 2 * (qx * by - qy * bx);
+  out[j] = px + bx + qw * tx + (qy * tz - qz * ty);
+  out[j + 1] = py + by + qw * ty + (qz * tx - qx * tz);
+  out[j + 2] = pz + bz + qw * tz + (qx * ty - qy * tx);
+}
+
+// The hull's probes binned into clusters on a CLUSTER-metre grid in the body frame (the wheels in clusters of their
+// own): { x, y, z, r, k: [probe indices], gear }, r covering every probe of the cluster with the flaps anywhere.
+function clusterProbes(hull) {
+  const bins = new Map(), np = hull.probes.length;
+  const add = (k, p, gear) => {
+    const key = (gear ? 'g' : 'p') + Math.floor(p.x / CLUSTER) + ',' + Math.floor(p.y / CLUSTER) + ',' + Math.floor(p.z / CLUSTER);
+    let b = bins.get(key); if (!b) { b = { k: [], gear }; bins.set(key, b); }
+    b.k.push(k);
+  };
+  hull.probes.forEach((p, k) => add(k, p, false));
+  hull.gear.forEach((p, g) => add(np + g, p, true));
+  const at = (k) => (k < np ? hull.probes[k] : hull.gear[k - np]);
+  const out = [];
+  for (const b of bins.values()) {
+    let x = 0, y = 0, z = 0;
+    for (const k of b.k) { const p = at(k); x += p.x; y += p.y + (p.fy || 0) / 2; z += p.z + (p.fz || 0) / 2; }
+    x /= b.k.length; y /= b.k.length; z /= b.k.length;
+    let r = 0;
+    for (const k of b.k) {
+      const p = at(k);
+      r = Math.max(r, Math.hypot(p.x - x, p.y - y, p.z - z) + p.r, Math.hypot(p.x - x, p.y + (p.fy || 0) - y, p.z + (p.fz || 0) - z) + p.r);
+    }
+    out.push({ x, y, z, r, k: b.k, gear: b.gear });
+  }
+  return out;
 }
 
 // Does a sphere of radius r swept from A to B touch the prim?
@@ -656,6 +709,8 @@ export class ObstacleField {
     this.hull = hullProbes(ac.def);
     const n = this.hull.probes.length + this.hull.gear.length;
     this.w0 = new Float32Array(n * 3); this.w1 = new Float32Array(n * 3);
+    this.clusters = clusterProbes(this.hull);
+    this.c0 = new Float32Array(this.clusters.length * 3); this.c1 = new Float32Array(this.clusters.length * 3);
     this.remember(ac);
     for (const g of this.gates) { g.state = 'pending'; g.at = null; }
     this.events.length = 0; this.closestD = Infinity; this.closestName = ''; this.lastHit = null; this.minD.fill(1e9);
@@ -688,7 +743,8 @@ export class ObstacleField {
     if (!this.hull) this.reset(ac);
     const a = this.prev, b = ac.pos, R = this.hull.radius;
     this.gatesStep(a.x, a.y, a.z, b.x, b.y, b.z);
-    // broadphase: prims in the cells the swept hull (plus the near-miss reach) touches
+    // broadphase: prims in the cells the swept hull (plus the near-miss reach) touches, whose bounding sphere comes
+    // within that reach of the CG's path
     const reach = R + NEAR;
     const x0 = Math.floor((Math.min(a.x, b.x) - reach) / CELL), x1 = Math.floor((Math.max(a.x, b.x) + reach) / CELL);
     const z0 = Math.floor((Math.min(a.z, b.z) - reach) / CELL), z1 = Math.floor((Math.max(a.z, b.z) + reach) / CELL);
@@ -701,29 +757,50 @@ export class ObstacleField {
         if (this.stamp[i] === st) continue;
         this.stamp[i] = st;
         const p = this.prims[i];
-        // the prim's bounding sphere against the CG's path grown by the hull and the near-miss reach
-        if (segSegDist2(a.x, a.y, a.z, b.x, b.y, b.z, p.sx, p.sy, p.sz, p.sx, p.sy, p.sz) <= (reach + p.sr) * (reach + p.sr)) cand.push(i);
+        if (pointSegDist2(p.sx, p.sy, p.sz, a.x, a.y, a.z, b.x, b.y, b.z) <= (reach + p.sr) * (reach + p.sr)) cand.push(i);
       }
     }
     let hit = null;
     if (cand.length) {
+      // narrow phase: every probe placed at the previous pose and this one, and the clusters' centres likewise; a
+      // prim is tested against a cluster's probes only where their swept sphere comes near it
       const gearOn = !ac.def.gearRetract || ac.ctl.gear > 0.3, prevGear = !ac.def.gearRetract || a.gear > 0.3;
-      this.place(this.w0, a.x, a.y, a.z, a.qx, a.qy, a.qz, a.qw, a.flap, prevGear);
       const q = ac.quat;
+      this.place(this.w0, a.x, a.y, a.z, a.qx, a.qy, a.qz, a.qw, a.flap, prevGear);
       this.place(this.w1, b.x, b.y, b.z, q.x, q.y, q.z, q.w, ac.ctl.flap, gearOn);
-      const probes = this.hull.probes, gear = this.hull.gear, np = probes.length, n = np + gear.length;
+      const cls = this.clusters, c0 = this.c0, c1 = this.c1;
+      for (let c = 0, j = 0; c < cls.length; c++, j += 3) {
+        rotate(c0, j, cls[c].x, cls[c].y, cls[c].z, a.x, a.y, a.z, a.qx, a.qy, a.qz, a.qw);
+        rotate(c1, j, cls[c].x, cls[c].y, cls[c].z, b.x, b.y, b.z, q.x, q.y, q.z, q.w);
+      }
+      const probes = this.hull.probes, gear = this.hull.gear, np = probes.length;
+      const w0 = this.w0, w1 = this.w1;
       for (const i of cand) {
         const p = this.prims[i];
         let dmin = 1e9;
-        for (let k = 0; k < n; k++) {
-          const r = k < np ? probes[k].r : gear[k - np].r;
-          const j = k * 3;
-          const ax = this.w0[j], ay = this.w0[j + 1], az = this.w0[j + 2], bx = this.w1[j], by = this.w1[j + 1], bz = this.w1[j + 2];
-          if (ay > 5e4 || by > 5e4) continue;   // a retracted wheel (at either end of the step)
-          if (!hit && segSegDist2(ax, ay, az, bx, by, bz, p.sx, p.sy, p.sz, p.sx, p.sy, p.sz) <= (p.sr + r) * (p.sr + r) && sweptHit(p, ax, ay, az, bx, by, bz, r)) {
-            hit = p; this.lastHit = { name: p.name, part: k < np ? probes[k].part : gear[k - np].part };
+        for (let c = 0; c < cls.length; c++) {
+          const C = cls[c], j = c * 3;
+          if (C.gear && !(gearOn && prevGear)) continue;   // the wheels only count while they are down at both ends of the step
+          // how close can any probe of this cluster have come? Two lower bounds, the tighter one wins: the prim's
+          // bounding sphere against the cluster's swept sphere, and the prim's own signed distance at the cluster's
+          // centre less the cluster's radius and how far it moved (the one that works for a 240 m hull or a quay)
+          const mx = c1[j] - c0[j], my = c1[j + 1] - c0[j + 1], mz = c1[j + 2] - c0[j + 2];
+          let lo = Math.sqrt(pointSegDist2(p.sx, p.sy, p.sz, c0[j], c0[j + 1], c0[j + 2], c1[j], c1[j + 1], c1[j + 2])) - C.r - p.sr;
+          if (lo <= NEAR) lo = Math.max(lo, primDistance(p, c1[j], c1[j + 1], c1[j + 2]) - 1.05 * C.r - 1.1 * Math.sqrt(mx * mx + my * my + mz * mz));   // (1.05, 1.1: a frustum's distance is not quite 1-Lipschitz)
+          const wantHit = !hit && lo <= 0, wantNear = !p.ground && lo < NEAR && lo < dmin;
+          if (!wantHit && !wantNear) continue;
+          for (const k of C.k) {
+            const r = k < np ? probes[k].r : gear[k - np].r, jj = k * 3;
+            const ax = w0[jj], ay = w0[jj + 1], az = w0[jj + 2], bx = w1[jj], by = w1[jj + 1], bz = w1[jj + 2];
+            const d = primDistance(p, bx, by, bz) - r;   // this probe's clearance at this pose
+            if (wantHit && !hit) {
+              const ex = bx - ax, ey = by - ay, ez = bz - az;
+              if (d <= 1.1 * Math.sqrt(ex * ex + ey * ey + ez * ez) + 0.02 && sweptHit(p, ax, ay, az, bx, by, bz, r)) {
+                hit = p; this.lastHit = { name: p.name, part: k < np ? probes[k].part : gear[k - np].part };
+              }
+            }
+            if (wantNear && d < dmin) dmin = d;
           }
-          if (!p.ground) { const d = primDistance(p, bx, by, bz) - r; if (d < dmin) dmin = d; }
         }
         if (!p.ground && dmin < this.minD[i]) {
           const was = this.minD[i];

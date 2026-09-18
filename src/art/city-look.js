@@ -24,9 +24,11 @@
 // material and program (course/solids) except the trees, plus one LightSet at night: 6 draws for a whole
 // course, a few more in the shadow pass. The per-instance attributes decide the finish:
 //   ctBox   vec4  size in metres (x, y, z) and the style: 0 plain, 1 office facade, 2 container stack,
-//                 3 gate stripes, 4 ship's hull (the bow tapers inside the box), 5 painted lattice, 6 house /
+//                 3 gate stripes, 4 ship's hull (drawn as its box, like everything: the world steps the bow), 5 painted lattice, 6 house /
 //                 superstructure (small windows), 7 wood, 8 wire, 9 steel member (8 and 9 are the thin ones)
 //   ctSeed  float per-instance variation (windows, container colours); for a hull, its waterline above the keel
+//   (the shader's local coordinates run from the box's lower corner, in metres: windows, tiers and the waterline
+//   are measured from the base)
 //   ctTaper float top radius / bottom radius of a frustum (1 for everything else)
 // House rules (src/art/AGENTS.md): every material named; uniforms prefixed `ct` (never `at`, which is the
 // atmosphere's); no material cached at module level (built per call, per scene); customProgramCacheKey with
@@ -87,10 +89,9 @@ varying vec3 ctLocal;
 varying vec3 ctNrm;
 varying vec2 ctInfo;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-ctLocal = position * ctBox.xyz;
+ctLocal = (position + 0.5) * ctBox.xyz;   // metres from the box's lower corner (windows and tiers start at the base)
 ctNrm = normal;
 ctInfo = vec2(ctBox.w, ctSeed);
-if (ctBox.w > 3.5 && ctBox.w < 4.5 && position.x > 0.0) transformed.z *= 0.12;   // a hull's bow, inside its box
 transformed.xz *= mix(1.0, ctTaper, clamp(position.y + 0.5, 0.0, 1.0));
 #ifdef USE_INSTANCING
 if (ctBox.w > 7.5) {
@@ -118,7 +119,7 @@ vec3 ctEmit = vec3(0.0);
     // facade: storeys and window bays; roofs darker with a lighter parapet
     float fh = style == 1.0 ? 3.6 : 2.8, bw = style == 1.0 ? 3.2 : 2.4;
     float s = abs(n.x) > 0.5 ? p.z : p.x;
-    vec2 cell = vec2(s / bw, (p.y + 400.0) / fh);
+    vec2 cell = vec2(s / bw, p.y / fh);
     vec2 f = fract(cell);
     float win = step(0.14, f.x) * step(f.x, 0.86) * step(0.30, f.y) * step(f.y, 0.86);
     if (style == 6.0) win *= step(0.62, f.y + 0.2);
@@ -127,19 +128,25 @@ vec3 ctEmit = vec3(0.0);
     if (side) {
       diffuseColor.rgb = mix(diffuseColor.rgb, mix(diffuseColor.rgb, glass, 0.55), 1.0 - aa);
       diffuseColor.rgb = mix(diffuseColor.rgb, glass, win * aa);
-      ctGloss = win * aa;
+      ctGloss = mix(0.45, win, aa);   // (far away, where the windows are finer than a pixel, the facade keeps half the sheen)
       float lit = step(0.6, ctHash(floor(cell) * 1.37 + seed * 3.1));
       vec3 lamp = mix(vec3(1.0, 0.72, 0.42), vec3(0.75, 0.82, 0.9), step(0.8, ctHash(floor(cell) + 7.7)));
-      ctEmit = lamp * (0.55 * win * lit * ctNight) + lamp * (0.12 * (1.0 - aa) * ctNight);
+      // at night a lit window glows; where the windows get finer than a pixel the facade fades to their average
+      // glow instead of sparkling
+      ctEmit = lamp * ctNight * mix(0.09, 0.45 * win * lit, aa);
     } else if (n.y > 0.5) {
       diffuseColor.rgb *= 0.62;
     }
   } else if (style == 2.0) {
-    // container stacks: every tier a box of its own colour, ribbed along its length, dark seams between tiers
-    float tier = floor((p.y + 400.0) / 2.6);
-    diffuseColor.rgb = ctPal[int(mod(floor(ctHash(vec2(tier, seed)) * 8.0), 8.0))];
-    float rib = abs(n.z) > 0.5 ? 0.86 + 0.14 * step(0.5, fract(p.x / 0.3)) : 0.92;
-    float seam = step(0.06, fract((p.y + 400.0) / 2.6));
+    // container stacks: every container (a 2.6 m tier by a 2.44 m row) its own colour, ribbed along its length,
+    // dark seams between them; the ribs and seams fade out where they get finer than a pixel (no moire at range)
+    vec2 q = vec2(p.y / 2.6, p.z / 2.44);
+    diffuseColor.rgb = ctPal[int(mod(floor(ctHash(floor(q) + seed) * 8.0), 8.0))];
+    float fr = clamp(1.0 - 2.0 * fwidth(p.x / 0.3), 0.0, 1.0);
+    float rib = abs(n.z) > 0.5 ? mix(0.93, 0.86 + 0.14 * step(0.5, fract(p.x / 0.3)), fr) : 0.92;
+    vec2 fq = fract(q), wq = fwidth(q);
+    float seam = min(smoothstep(0.0, 0.05 + wq.x, fq.x), abs(n.x) > 0.5 ? smoothstep(0.0, 0.04 + wq.y, fq.y) : 1.0);
+    seam = mix(0.85, seam, clamp(1.0 - 2.5 * max(wq.x, wq.y), 0.0, 1.0));
     diffuseColor.rgb *= rib * mix(0.35, 1.0, seam);
   } else if (style == 3.0) {
     // gate frames: orange and white bands along the bar, lit a little so they read at dusk
@@ -166,15 +173,21 @@ vec3 ctEmit = vec3(0.0);
     diffuseColor.rgb *= 0.85 + 0.15 * fract(sin(p.y * 3.1 + seed) * 43.7);
   } else if (style < 0.5) {
     // plain concrete and paint: weathered darker near the ground, lighter on top
-    diffuseColor.rgb *= n.y > 0.5 ? 1.08 : 0.9 + 0.1 * smoothstep(-6.0, 6.0, p.y);
+    diffuseColor.rgb *= n.y > 0.5 ? 1.08 : 0.9 + 0.1 * smoothstep(0.0, 12.0, p.y);
   }
 }`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
 roughnessFactor = mix(roughnessFactor, 0.18, ctGloss);`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-totalEmissiveRadiance += ctEmit;`);
+totalEmissiveRadiance += ctEmit;
+// by day the glass gives back a little of the sky, most at a glancing angle (a modest stand-in for a reflection:
+// the facade reads as glass, not as holes); the fog is applied after this, like to everything else
+if (ctGloss > 0.0) {
+  float ctF = pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 3.0);
+  totalEmissiveRadiance += ctGloss * (1.0 - ctNight) * mix(0.06, 0.55, ctF) * vec3(0.30, 0.36, 0.44);
+}`);
   };
-  m.customProgramCacheKey = () => 'ctl-course-solids-v1';
+  m.customProgramCacheKey = () => 'ctl-course-solids-v5';
   return m;
 }
 
@@ -244,8 +257,8 @@ export function buildCourse(prims, gates, opts = {}) {
     M.makeBasis(Xv, Yv, Zv).scale(sc.set(2 * p.hx, 2 * p.hy, 2 * p.hz)).setPosition(p.cx, p.cy, p.cz);
     c.setRGB(...colorOf(p, i));
     const style = STYLE[p.look] != null ? STYLE[p.look] : 0;
-    // a hull's seed is its waterline in its own frame (the shader paints below it)
-    return { size: [2 * p.hx, 2 * p.hy, 2 * p.hz], style, seed: style === 4 ? (p.water || 0) - p.cy : rng() * 100, prim: i };
+    // a hull's seed is its waterline above the keel (the shader paints below it)
+    return { size: [2 * p.hx, 2 * p.hy, 2 * p.hz], style, seed: style === 4 ? (p.water || 0) - (p.cy - p.hy) : rng() * 100, prim: i };
   }, true);
 
   // ---- cylinders and frustums: masts, poles, chimneys, the ships' masts

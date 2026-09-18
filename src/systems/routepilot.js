@@ -32,7 +32,10 @@
 //             turned into a pitch attitude (flight path + the slowly filtered angle of attack x cos(bank)) plus a
 //             proportional and integral term on the flight-path error;
 //   speed     throttle PI plus a flight-path feed-forward (it takes thrust to climb), speedbrakes on the Condor
-//             when it is fast at idle, stall protection as in Autoland.
+//             when it is fast at idle, stall protection as in Autoland. The trim is left where the spawn set it,
+//             as Autoland leaves it (with a jammed elevator both pitch with the trim alone). Trimming the force out
+//             on the way was tried: the landings Autoland then flew came out no better and sometimes worse, because
+//             its flare is tuned around the stock approach's untrimmed elevator.
 // A route flown from mid-way (the autopilot switched on late) starts at the first waypoint still ahead.
 // Deterministic: no randomness at all.
 import { KT, DEG, clamp, wrapPi } from '../config.js';
@@ -214,7 +217,13 @@ export class RoutePilot {
     if (ac.aero.alpha > ac.aero.alphaStall - 3 * DEG) pitchCmd = Math.min(pitchCmd, ac.euler.pitch - 2 * DEG);
     if (ac.ias < this.vref * KT * 0.93) thr = Math.max(thr, 0.8);
     inp.throttle = thr;
-    inp.pitch = clamp(T.kp * (pitchCmd - ac.euler.pitch) - T.kd * ac.omega.x, -1, 1);
+    if (ac.failures.has('elevatorJam')) {
+      // pitch with the trim alone, as Autoland does
+      inp.pitch = 0;
+      inp.trim = clamp(inp.trim + 0.4 * (pitchCmd - ac.euler.pitch) * dt - 0.2 * ac.omega.x * dt, -1, 1);
+    } else {
+      inp.pitch = clamp(T.kp * (pitchCmd - ac.euler.pitch) - T.kd * ac.omega.x, -1, 1);
+    }
     this.dbg = { hDes, vsDes, pitchCmd, gDes };
   }
 }

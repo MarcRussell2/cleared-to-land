@@ -19,7 +19,10 @@
 //   --max N           frames before giving up (default 12000, i.e. 8 minutes of sim time at 1/25 s)
 //   --shot DIR        stills: DIR/<id>-<k>.png at each --at condition (browser mode)
 //   --at EXPR         a still when EXPR becomes true; EXPR sees g, ac, u, v (runway frame), ra (ft), t;
-//                     repeatable; "EXPR@camera" picks the camera (chase, cockpit, tower, flyby, wing)
+//                     repeatable; "EXPR@camera" picks the camera (chase, cockpit, tower, flyby, wing), and
+//                     "EXPR@view:u,v,h>u,v,h" places a fixed camera in the runway frame (h above the threshold
+//                     elevation) looking at a point, for a portrait of an obstacle
+//   --set JSON        merged into the mission before it starts, e.g. '{"time":21.5}' for the night look
 //   --port N          Edge remote-debugging port (default 9811; this worktree's agents use 9800-9849)
 //   --quality Q       high | medium | low (default high)
 //   --size WxH        window size for stills (default 1600x900)
@@ -50,7 +53,7 @@ export async function simulate(id, opts = {}) {
   const seed = opts.seed || 307, dt = opts.dt || 1 / 25, maxFrames = opts.max || 12000;
   const base0 = SCENARIOS.find((s) => s.id === id);
   if (!base0) throw new Error('no mission ' + id);
-  const base = { ...base0 };
+  const base = { ...base0, ...(opts.set || {}) };
   if (opts.route) base.route = opts.route;
   if (opts.pilot === 'autoland') delete base.route;
   const sc = resolveScenario(base, makeRng(seed), { approach: opts.approach || 'short' });
@@ -136,7 +139,7 @@ export async function simulate(id, opts = {}) {
     }
     if (opts.track && n % (opts.track | 0 || 25) === 0) {
       const dx = ac.pos.x - threshold.x, dz = ac.pos.z - threshold.z;
-      track.push({ t: +t.toFixed(1), u: +(dx * dir.x + dz * dir.z).toFixed(0), v: +(dx * right.x + dz * right.z).toFixed(1), h: +(ac.pos.y - rw.elevation).toFixed(1), ra: +ac.radioAlt.toFixed(1), kt: +(ac.ias / KT).toFixed(0), bank: +(ac.euler.roll * RAD).toFixed(0), thr: +ac.input.throttle.toFixed(2), pitch: +(ac.euler.pitch * RAD).toFixed(1), aoa: +(ac.aero.alpha * RAD).toFixed(1), vs: +ac.vs.toFixed(1), phase: pilot && pilot.phase ? pilot.phase : '', ...(pilot && pilot.dbg && opts.debug ? { hDes: +(pilot.dbg.hDes - rw.elevation).toFixed(1), vsDes: +pilot.dbg.vsDes.toFixed(1), pCmd: +(pilot.dbg.pitchCmd * RAD).toFixed(1) } : {}) });
+      track.push({ t: +t.toFixed(1), u: +(dx * dir.x + dz * dir.z).toFixed(0), v: +(dx * right.x + dz * right.z).toFixed(1), h: +(ac.pos.y - rw.elevation).toFixed(1), ra: +ac.radioAlt.toFixed(1), kt: +(ac.ias / KT).toFixed(0), bank: +(ac.euler.roll * RAD).toFixed(0), thr: +ac.input.throttle.toFixed(2), pitch: +(ac.euler.pitch * RAD).toFixed(1), aoa: +(ac.aero.alpha * RAD).toFixed(1), vs: +ac.vs.toFixed(1), el: +ac.input.pitch.toFixed(3), trim: +ac.input.trim.toFixed(3), phase: pilot && pilot.phase ? pilot.phase : '', ...(pilot && pilot.dbg && opts.debug ? { hDes: +(pilot.dbg.hDes - rw.elevation).toFixed(1), vsDes: +pilot.dbg.vsDes.toFixed(1), pCmd: +(pilot.dbg.pitchCmd * RAD).toFixed(1) } : {}) });
     }
     if (ac.crashed) { endT += dt; if (endT > 3.5) break; }
     else if (ac.stopped) { endT += dt; if (endT > 2) break; }
@@ -197,7 +200,7 @@ async function flyInPage(id, o) {
     await ev(`(() => { const g = window.game; g.loop = function(){};
       const o = g.menus.showDebrief.bind(g.menus); g.menus.showDebrief = (r, sc, st) => { window.__result = r; o(r, sc, st); };
       const base = G.SCENARIOS.find((s) => s.id === ${JSON.stringify(id)}); if (!base) throw new Error('no mission ${id}');
-      const sc = { ...base }; const R = ${route}; if (R) sc.route = R; if (${JSON.stringify(o.pilot || '')} === 'autoland') delete sc.route;
+      const sc = { ...base, ...${JSON.stringify(o.set || {})} }; const R = ${route}; if (R) sc.route = R; if (${JSON.stringify(o.pilot || '')} === 'autoland') delete sc.route;
       window.__result = null; g.startScenario(sc); g.compiling = false;
       if (${JSON.stringify(o.pilot || '')} !== 'none') g.setAutopilot(true);
       const rw = g.world.runway;
@@ -219,14 +222,19 @@ async function flyInPage(id, o) {
         next.done = true;
         if (o.shot) {
           mkdirSync(o.shot, { recursive: true });
-          if (next.cam) await ev(`window.game.rig.setMode(${JSON.stringify(next.cam)}); for (let i = 0; i < 25; i++) window.game.rig.update(1/25, window.game.ac, window.game.world); true`);
+          if (next.cam && next.cam.startsWith('view:')) {
+            const [pp, ll] = next.cam.slice(5).split('>').map((q) => q.split(',').map(Number));
+            await ev(`(() => { const g = window.game, rw = g.world.runway, W = (a) => [rw.threshold.x + rw.dir.x * a[0] + rw.right.x * a[1], rw.elevation + a[2], rw.threshold.z + rw.dir.z * a[0] + rw.right.z * a[1]];
+              g.rig.setMode('debug'); g.rig.debugOffset = null; const p = W(${JSON.stringify(pp)}), l = W(${JSON.stringify(ll)});
+              g.camera.position.set(p[0], p[1], p[2]); g.camera.up.set(0, 1, 0); g.camera.lookAt(l[0], l[1], l[2]); g.camera.updateMatrixWorld(); g.world.sky.update(g.camera.position, 0); return true; })()`);
+          } else if (next.cam) await ev(`window.game.rig.setMode(${JSON.stringify(next.cam)}); for (let i = 0; i < 25; i++) window.game.rig.update(1/25, window.game.ac, window.game.world); true`);
           await ev('window.game.render(); true');
           const shot = await send('Page.captureScreenshot', { format: 'png' });
-          const file = `${o.shot}/${id}-${next.k}${next.cam ? '-' + next.cam : ''}.png`;
+          const file = `${o.shot}/${id}${o.tag ? '-' + o.tag : ''}-${next.k}${next.cam ? '-' + next.cam.replace(/^view:.*/, 'view') : ''}.png`;
           writeFileSync(file, Buffer.from(shot.result.data, 'base64'));
           const info = await ev(`(() => { const g = window.game, i = g.renderer.info.render, uv = window.__uv(); return { calls: i.calls, tris: i.triangles, programs: g.renderer.info.programs.length, u: Math.round(uv[0]), v: +uv[1].toFixed(1), h: +(g.ac.pos.y - g.world.runway.elevation).toFixed(1) }; })()`);
           stills.push({ file, ...info });
-          if (next.cam) await ev(`window.game.rig.setMode('chase'); true`);
+          if (next.cam) await ev(`window.game.rig.setMode('chase'); window.game.world.sky.update(window.game.ac.pos, 0); true`);
         }
         continue;
       }
@@ -249,16 +257,24 @@ async function flyInPage(id, o) {
 // can exit, so the tree is found again by its own profile directory (unique to this run's port) as well as by PID.
 function killEdge(pid, profile) {
   try { execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' }); } catch (e) { /* already gone */ }
-  const dir = profile.replace(/\//g, '\\');
-  const ps = `Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" | Where-Object { $_.CommandLine -like '*${profile}*' -or $_.CommandLine -like '*${dir}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
-  try { execFileSync('powershell', ['-NoProfile', '-Command', ps], { stdio: 'ignore' }); } catch (e) { /* nothing left */ }
+  // PowerShell lists them (the profile goes in through the environment: no quoting to get wrong), taskkill stops them
+  // (Stop-Process is refused on these); a few passes, as children can outlive a parent by a moment
+  const ps = "$d = $env:CTL_EDGE_PROFILE; $w = $d.Replace('/', '\\'); " +
+    "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\" | Where-Object { $_.CommandLine -and ($_.CommandLine.Contains($d) -or $_.CommandLine.Contains($w)) } | ForEach-Object { $_.ProcessId }";
+  for (let pass = 0; pass < 4; pass++) {
+    let pids = [];
+    try { pids = String(execFileSync('powershell', ['-NoProfile', '-Command', ps], { stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, CTL_EDGE_PROFILE: profile } })).split(/\s+/).filter((x) => /^\d+$/.test(x)); } catch (e) { break; }
+    if (!pids.length) break;
+    for (const p of pids) { try { execFileSync('taskkill', ['/PID', p, '/T', '/F'], { stdio: 'ignore' }); } catch (e) { /* gone */ } }
+    execFileSync('powershell', ['-NoProfile', '-Command', 'Start-Sleep -Milliseconds 400'], { stdio: 'ignore' });
+  }
 }
 
 // ------------------------------------------------------------------ command line
 async function main() {
   const args = process.argv.slice(2);
   const id = args[0];
-  if (!id || id.startsWith('--')) { console.log('usage: node tools/fly-mission.mjs <mission id> [--node] [--seed N] [--pilot route|autoland|none] [--route JSON] [--shot DIR --at EXPR[@camera]...] [--port N]'); process.exit(2); }
+  if (!id || id.startsWith('--')) { console.log('usage: node tools/fly-mission.mjs <mission id> [--node] [--seed N] [--pilot route|autoland|none] [--route JSON] [--shot DIR --at EXPR[@camera]...] [--set JSON] [--tag NAME] [--port N]'); process.exit(2); }
   const o = { at: [] };
   for (let i = 1; i < args.length; i++) {
     const a = args[i];
@@ -273,6 +289,8 @@ async function main() {
     else if (a === '--port') o.port = +args[++i];
     else if (a === '--quality') o.quality = args[++i];
     else if (a === '--size') o.size = args[++i];
+    else if (a === '--set') o.set = JSON.parse(args[++i]);
+    else if (a === '--tag') o.tag = args[++i];
     else if (a === '--track') o.track = +args[++i];
   }
   if (!o.node && existsSync(`${ROOT}/web/index.html`)) {

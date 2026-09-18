@@ -65,9 +65,9 @@ const powerLines = {
   ],
   hint: (c) => {
     if (c.ac.onGround) return null;
-    if (c.u < -680) {
+    if (c.u < -620) {
       const agl = c.ra * 0.3048;
-      if (agl < 38) return `Power lines in ${Math.round((-600 - c.u) / 10) * 10} m: climb above the pylon tops, 150 ft, now.`;
+      if (agl < 38) return `Power lines in ${Math.round((-600 - c.u) / 10) * 10} m: climb to 150 ft, above the pylon tops, now.`;
       return 'Hold this height until you are over the wires and their orange marker balls.';
     }
     if (c.u < -260) return 'Over the wires. Now down to a normal final, and mind the pole line by the road.';
@@ -98,14 +98,16 @@ const theNotch = {
     { u: -100, v: -10, alt: 15, kt: 49 },
     { u: -40, v: 0, alt: 9.5, kt: 48 },
   ],
+  // The line to the notch: 12 m over the ground at the wall, and a 4-degree slope back from it.
   hint: (c) => {
     if (c.ac.onGround) return null;
-    if (c.u < -200) {
+    if (c.u < -185) {
       const off = c.v - NOTCH_V;
       if (Math.abs(off) > 6) return `Line up on the notch: ${Math.round(Math.abs(off))} m ${off > 0 ? 'left' : 'right'}. It is the gap with the orange gate.`;
-      const agl = c.ra * 0.3048;
-      if (c.u > -420 && agl > 26) return 'Too high for the notch: power back and get down to 15 m before the trees.';
-      return 'On the notch. Wings level, 50 kt, down to 15 m above the ground.';
+      const agl = c.ra * 0.3048, want = 12 + (NOTCH_U - 13 - c.u) * 0.07;
+      if (agl > want + 12) return 'High for the notch: power back and come down, 15 m over the ground at the trees.';
+      if (agl < want - 8) return 'Low: a little power. The ground rises toward the trees.';
+      return 'On the notch. Wings level, 50 kt, 15 m over the ground at the trees.';
     }
     if (c.u < -140) return 'Through! Hold it level.';
     if (c.u < 0) return 'Gentle S-turn right onto the gravel, power to idle.';
@@ -128,12 +130,12 @@ const harborCranes = {
   aircraft: 'condor', site: 'harbor', time: 17.2, vis: 25000,
   desc: 'The scenic approach to Harbor City: up the container port at crane height, through the harbor gates, past a ship being loaded. One crane has its boom down right across the lane, 50 metres over the water with its stays above it. Over, under or around it; then turn left and land on 3,200 m of runway.',
   tips: [
-    'Fly the lane up the harbor through both gates, 200 ft over the water, flaps 30, gear down, about 160 kt. Small bank angles: your wingtips are 17 m out.',
+    'Fly the lane up the harbor through both gates, 200 ft over the water, flaps 30, gear down, about 150 kt. Small bank angles: your wingtips are 17 m out.',
     'The lowered boom: over it means 300 ft or more, clear of its stays; under it means 100 ft or less, because your fin is 9 m tall. Under it is worth 10 points.',
     'After the exit gate, turn left and climb gently to 500 ft; the glideslope comes down to meet you about four kilometres out. Arm the spoilers (K) and set autobrake (L).',
   ],
   wind: { rel: 70, speed: 8, turb: 0.15 }, weight: 'normal',
-  spawn: { u: -8000, v: 1320, hdg: -12, alt: 60, gamma: 0, flap: 0.75, speedKt: 160, fixed: true },
+  spawn: { u: -8000, v: 1320, hdg: -12, alt: 60, gamma: 0, flap: 0.75, speedKt: 150, fixed: true },
   failures: [], scoring: { type: 'runway' },
   course: {
     obstacles: [
@@ -157,11 +159,11 @@ const harborCranes = {
   // RoutePilot: the lane at 60 m, down to 20 m over the water for the boom (the bonus), back up, then out of the
   // harbor with a left turn and a climb onto the glideslope.
   route: [
-    { u: -7200, v: 1120, alt: 55, kt: 160 },
-    { u: -6550, v: LANE, alt: 50, kt: 158 },
-    { u: -5700, v: LANE, alt: 22, kt: 155 },
-    { u: -5350, v: LANE, alt: 22, kt: 155 },
-    { u: -5100, v: LANE, alt: 40, kt: 155 },
+    { u: -7200, v: 1120, alt: 55, kt: 150 },
+    { u: -6550, v: LANE, alt: 50, kt: 150 },
+    { u: -5700, v: LANE, alt: 22, kt: 150 },
+    { u: -5350, v: LANE, alt: 22, kt: 150 },
+    { u: -5100, v: LANE, alt: 40, kt: 150 },
     { u: -4400, v: 700, alt: 110, kt: 150 },
     { u: -3700, v: 250, alt: 160, kt: 148 },
     { u: -3000, v: 0, alt: 182, kt: 145 },
