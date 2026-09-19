@@ -17,7 +17,7 @@ const O = JSON.parse(optsS);
 const S = process.env.CTL_SHOTS_DIR || 'C:/tmp/ctl-shots';
 const port = +portS;
 const edge = spawn('C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', [
-  '--headless=new', '--hide-scrollbars', '--allow-file-access-from-files', '--force-device-scale-factor=1',
+  '--headless=new', '--mute-audio', '--hide-scrollbars', '--allow-file-access-from-files', '--force-device-scale-factor=1',
   '--window-size=1600,900', '--autoplay-policy=no-user-gesture-required', `--remote-debugging-port=${port}`,
   `--user-data-dir=${S}/edge-profile-${port}`, `file:///${S}/${name}.html`], { stdio: 'ignore' });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

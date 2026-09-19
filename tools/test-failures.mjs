@@ -953,7 +953,7 @@ async function flyInPage(html, port = 9751, ids = null, seed = 307) {
     + 'const wrapPi = (a) => { a = a % (2 * Math.PI); if (a > Math.PI) a -= 2 * Math.PI; if (a < -Math.PI) a += 2 * Math.PI; return a; };'
     + 'const vrefFor = (ac, sc) => (sc && sc.scoring && sc.scoring.vref ? sc.scoring.vref : Math.round(ac.def.speeds.Vref * Math.sqrt(ac.mass / ac.def.mass)));';
   const profile = `${tmpdir()}/ctl-failures-edge-${port}`;
-  const edge = spawnProcess('C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', ['--headless=new', '--edge-skip-compat-layer-relaunch', '--hide-scrollbars', '--allow-file-access-from-files', '--window-size=960,540', `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, 'about:blank'], { stdio: 'ignore' });
+  const edge = spawnProcess('C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', ['--headless=new', '--mute-audio', '--edge-skip-compat-layer-relaunch', '--hide-scrollbars', '--allow-file-access-from-files', '--window-size=960,540', `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, 'about:blank'], { stdio: 'ignore' });
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const out = [];
   try {

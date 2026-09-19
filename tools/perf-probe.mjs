@@ -479,7 +479,7 @@ class Browser {
   async launch(port) {
     const o = this.opts;
     const args = [
-      ...(o.visible ? [] : ['--headless=new']),
+      '--mute-audio', ...(o.visible ? [] : ['--headless=new']),   // the game's engines and voice callouts must never play on the speakers
       '--hide-scrollbars', '--allow-file-access-from-files', '--force-device-scale-factor=1', '--no-first-run', '--no-default-browser-check',
       `--window-size=${o.w},${o.h}`, '--window-position=0,0', '--autoplay-policy=no-user-gesture-required',
       '--enable-precise-memory-info', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows',

@@ -129,7 +129,7 @@ function writePage(name, P) {
 
 async function capture(name, until, max, pngPath, port) {
   const edge = spawn('C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', [
-    '--headless=new', '--hide-scrollbars', '--allow-file-access-from-files', '--force-device-scale-factor=1',
+    '--headless=new', '--mute-audio', '--hide-scrollbars', '--allow-file-access-from-files', '--force-device-scale-factor=1',
     '--window-size=1920,1080', '--autoplay-policy=no-user-gesture-required', `--remote-debugging-port=${port}`,
     `--user-data-dir=${S}/edge-profile-${port}`, `file:///${S}/${name}.html`], { stdio: 'ignore' });
   try {
