@@ -1,4 +1,17 @@
 // Head-up display: tapes, attitude/flight-path indicator, AoA, engine, config, wind, ILS, meatball, messages.
+//
+// Failures (2026-09-17, src/systems/failureEffects.js) reach the HUD through two fields of the context:
+//   ctx.sensed   what an instrument reads when it is lying (sensed.ias, m/s: an iced pitot); null = honest
+//   ctx.display  what has failed, one object refilled by the failure runtime; null until something fails:
+//     dark         the electrics are dead: every instrument goes (the ILS and the ball too, the status line with its
+//                  distance, the radio altimeter's callouts), a torch-lit standby airspeed and altimeter stay
+//     noBall       the carrier's lens is dark: no ball on the HUD either
+//     caution      { level: 'caution'|'warning', text, blink }: the master caution (amber) or warning (red) light
+//     annun        [{ text, cls }]: annunciators under it (L ENG FIRE, STAB TRIM, IAS DISAGREE)
+//     cfg          [{ text, cls }]: extra lines in the config box (THR JAMMED 75%, TRIM MAN ND 1.2)
+//     engNote[i]   'FIRE' / 'SURGE' in place of engine i's reading; engOff[i] says OFF rather than FAIL
+//     iasFlag      a red IAS flag on the airspeed tape (the jet's two airspeeds disagree)
+// setExtraKeys() adds the failure drills (fire handle, trim cutout, fuel cutoff) to the key strip while they apply.
 import { KT, FT, FPM, DEG, RAD, clamp, wrap360 } from '../config.js';
 import { touchify } from '../touch.js';
 
@@ -89,7 +102,29 @@ export class HUD {
     // compact geometry (touch / small screens): setTape and the heading tape read these; see setCompact()
     this.tapeH = 210; this.hdgW = 300; this.compact = false; this.touch = false; this.adiShadow = true;
     this._engHtml = ''; this._cfgHtml = ''; this._gmHtml = ''; this._windHtml = '';
+    // ---- failures (see the header) ----
+    this.extraKeys = [];
+    this.iasFlag = el('div', 'flag', 'IAS'); this.asi.box.appendChild(this.iasFlag);
+    // the master caution / warning light and its annunciators, top left of centre
+    this.mc = el('div'); this.mc.id = 'mc';
+    this.mc.innerHTML = '<div class="light" id="mclight"></div><div class="annun" id="annun"></div>';
+    h.appendChild(this.mc);
+    this.mcLight = this.mc.querySelector('#mclight'); this.annun = this.mc.querySelector('#annun');
+    this._mc = 0;
+    // the standby airspeed and altimeter, lit by a torch, for when the electrics die (drawn at the readout rate)
+    this.stby = el('div'); this.stby.id = 'stby';
+    this.stbyCanvas = document.createElement('canvas'); this.stbyCanvas.width = 400; this.stbyCanvas.height = 200;
+    this.stby.appendChild(this.stbyCanvas); h.appendChild(this.stby);
+    this.stbyCtx = this.stbyCanvas.getContext('2d');
+    this._dark = false;
+    // (a cracked windshield is not the HUD's: src/cockpit.js lays it on the cockpit's own glass)
   }
+
+  // The failure drills on the key strip while they apply: [[label, [[keycap, action]]], ...] (failureEffects.js).
+  setExtraKeys(list) { this.extraKeys = list || []; this.keyMode = ''; }
+  // A new flight: nothing has failed, before its first frame (a dark HUD left from the last flight would otherwise
+  // swallow the new one's first callout). failureEffects.js calls it from its constructor.
+  clearFailureDisplay() { this.failures(null, null, 0, 0, true); }
 
   // Touch / small-screen layout: smaller tapes and ADI, the side columns kept clear for the thumbs (style.css #hud.compact).
   setCompact(on) {
@@ -121,10 +156,12 @@ export class HUD {
       if (def.autobrake) items.push(['autobrake', [['L', 'autobrake']]]);
       items.push(['trim', [['T', 'trimUp'], ['Y', 'trimDown']]]);
     }
+    const hot = items.length;
+    for (const x of this.extraKeys) items.push(x);   // the failure drills, in both phases (fuel cutoff is a ground drill too)
     items.push(['camera', [['1–5', 'camNext']]]);
     items.push(['orbit', [[',', 'orbitLeft'], ['.', 'orbitRight']]]);
     items.push(['pause', [['P', 'pause']]]);
-    this.keysEl.innerHTML = items.map(([label, caps]) => `<span class="k">${caps.map(([c, a]) => `<kbd data-a="${a}">${c}</kbd>`).join('')}<span>${label}</span></span>`).join('');
+    this.keysEl.innerHTML = items.map(([label, caps], i) => `<span class="k${i >= hot && i < hot + this.extraKeys.length ? ' hot' : ''}">${caps.map(([c, a]) => `<kbd data-a="${a}">${c}</kbd>`).join('')}<span>${label}</span></span>`).join('');
     this.keyItems = [...this.keysEl.querySelectorAll('kbd')];
     this.keyMode = mode;
   }
@@ -163,7 +200,9 @@ export class HUD {
   }
 
   message(text, cls = '', dur = 3) { this.msg.textContent = text; this.msg.className = cls; this.msgT = dur; }
-  callout(text, dur = 1.2) { this.calls.textContent = text; this.calls.classList.add('on'); this.callT = dur; }
+  // `advice`: a hint rather than an instrument's call. With the electrics dead (the HUD dark) only advice shows: the
+  // radio altimeter's "50", "20" are an instrument, and it has no power.
+  callout(text, dur = 1.2, advice = false) { if (this._dark && !advice) return; this.calls.textContent = text; this.calls.classList.add('on'); this.callT = dur; }
   setHint(text) { if (!this.showHints) { this.hint.textContent = ''; return; } if (text !== this.lastHint) { this.hint.textContent = (this.touch ? touchify(text) : text) || ''; this.lastHint = text; } }
   setFailures(list) { this.fails.innerHTML = list.map((f) => `<span class="f">${f}</span>`).join(''); }
   set visible(v) { this.root.classList.toggle('hidden', !v); }
@@ -174,7 +213,10 @@ export class HUD {
     this.textT += dt;
     const textDue = this.textT >= TEXT_PERIOD;
     if (textDue) this.textT = 0;
-    const ias = ac.ias / KT, alt = ac.alt / FT, vs = ac.vs / FPM;
+    const fd = ctx.display || null, sensed = ctx.sensed || null;
+    // an iced pitot: the tape shows what the instrument says, not what the airplane is doing
+    const ias = (sensed && sensed.ias != null ? sensed.ias : ac.ias) / KT, alt = ac.alt / FT, vs = ac.vs / FPM;
+    this.failures(ac, fd, ias, alt, textDue);
     const vsBug = def.speeds.Vs0 * Math.sqrt(ac.mass / def.mass) * (ac.ice ? 1.15 : 1) * (ac.ctl.flap < 0.5 ? def.speeds.Vs1 / def.speeds.Vs0 : 1);
     this.setTape(this.asi, ias, 10, 1.75, FMT_POS, ctx.vref || def.speeds.Vref, vsBug, textDue);
     this.setTape(this.alt, alt, 100, 0.21, FMT_NEG, null, null, textDue);
@@ -221,7 +263,11 @@ export class HUD {
       eng.forEach((e, i) => {
         const pct = e.type === 'jet' ? e.rpm * 100 : e.rpm * 2700 / 27;
         const rev = e.thrust < -100;
-        rows.push(`<div class="row"><span class="k">${e.type === 'jet' ? 'N1' : 'RPM'}${eng.length > 1 ? ' ' + (i + 1) : ''}</span><div class="bar"><i class="${rev ? 'rev' : ''}" style="width:${clamp(pct, 0, 100).toFixed(0)}%"></i></div><span class="v" style="${e.failed ? 'color:var(--bad)' : ''}">${e.failed ? 'FAIL' : rev ? 'REV' : e.type === 'jet' ? pct.toFixed(0) + '%' : (e.rpm * 2700).toFixed(0)}</span></div>`);
+        // a failure's word for this engine (FIRE, SURGE), or OFF for one shut down on purpose (handle, fuel cutoff)
+        const note = fd ? fd.engNote[i] : '', off = !!(fd && fd.engOff[i]);
+        const val = note || (off ? 'OFF' : e.failed ? 'FAIL' : rev ? 'REV' : e.type === 'jet' ? pct.toFixed(0) + '%' : (e.rpm * 2700).toFixed(0));
+        const col = note === 'FIRE' || (e.failed && !off) ? 'color:var(--bad)' : note || off ? 'color:var(--warn)' : '';
+        rows.push(`<div class="row${note === 'FIRE' ? ' fire' : ''}"><span class="k">${e.type === 'jet' ? 'N1' : 'RPM'}${eng.length > 1 ? ' ' + (i + 1) : ''}</span><div class="bar"><i class="${rev ? 'rev' : ''}" style="width:${clamp(pct, 0, 100).toFixed(0)}%"></i></div><span class="v" style="${col}">${val}</span></div>`);
       });
       setHTML(this.eng, rows.join(''));   // only touch the DOM when the text changes (phones)
       // config
@@ -237,6 +283,7 @@ export class HUD {
       items.push(`<div class="item ${inp.brake > 0.05 ? 'on' : 'off'}">BRAKES ${inp.brake > 0.05 ? Math.round(inp.brake * 100) + '%' : 'OFF'}</div>`);
       items.push(`<div class="item ${Math.abs(inp.trim) > 0.02 ? 'on' : 'off'}">TRIM ${inp.trim > 0 ? 'NU' : 'ND'} ${Math.abs(inp.trim * 10).toFixed(1)}</div>`);
       if (ac.trap.trapped) items.push(`<div class="item on">TRAPPED ${ac.trap.wire}-WIRE</div>`);
+      if (fd) for (const x of fd.cfg) items.push(`<div class="item ${x.cls}">${x.text}</div>`);   // THR JAMMED, TRIM MAN, GEAR UNSAFE
       setHTML(this.cfg, items.join(''));
       // wind
       if (ctx.wind) {
@@ -253,12 +300,12 @@ export class HUD {
       setText(this.timer, ctx.status || '');
     }
     // ILS / meatball
-    if (ctx.ils && ctx.ils.dist > 0) {
+    if (ctx.ils && ctx.ils.dist > 0 && !this._dark) {
       setStyle(this.gs, 'display', 'block'); setStyle(this.loc, 'display', 'block');
       setStyle(this.gsN, 'top', (50 - ctx.ils.gsDots * 9).toFixed(2) + '%');
       setStyle(this.locN, 'left', (50 + ctx.ils.locDots * 9).toFixed(2) + '%');
     } else { setStyle(this.gs, 'display', 'none'); setStyle(this.loc, 'display', 'none'); }
-    if (ctx.meatball && ctx.meatball.inRange) {
+    if (ctx.meatball && ctx.meatball.inRange && !(fd && (fd.noBall || fd.dark))) {
       this.ball.classList.add('on');
       setStyle(this.ballCell, 'top', (50 - ctx.meatball.cells * 7).toFixed(2) + '%');
       this.ballCell.classList.toggle('red', ctx.meatball.cells < -2);
@@ -288,7 +335,84 @@ export class HUD {
     // messages
     if (this.msgT > 0) { this.msgT -= dt; if (this.msgT <= 0) this.msg.textContent = ''; }
     if (this.callT > 0) { this.callT -= dt; if (this.callT <= 0) this.calls.classList.remove('on'); }
-    this.drawADI(ac, ctx);
+    if (!this._dark) this.drawADI(ac, ctx);   // (the attitude display is dark with the electrics)
+  }
+
+  // What has failed (see the header): the caution light and its annunciators, the flag on a lying airspeed tape, the
+  // dark HUD with its standby instruments. DOM writes only on change.
+  failures(ac, fd, ias, alt, textDue) {
+    const dark = !!(fd && fd.dark);
+    if (dark !== this._dark) { this._dark = dark; this.root.classList.toggle('dark', dark); }
+    setStyle(this.iasFlag, 'display', fd && fd.iasFlag && !dark ? 'block' : 'none');
+    // the master caution: flashing while its blink runs, then steady until the annunciators have all gone out.
+    // As a number (0 off, 1 caution, 2 warning; +2 blinking), so a frame makes no string; the DOM changes with it.
+    let mc = 0;
+    if (fd) {
+      const c = fd.caution, lit = c.blink > 0 || fd.annun.length;
+      if (c.level && lit) mc = (c.level === 'warning' ? 2 : 1) + (c.blink > 0 ? 2 : 0);
+    }
+    if (mc !== this._mc) {
+      this._mc = mc;
+      const warn = mc === 2 || mc === 4;
+      this.mcLight.className = mc ? `light ${warn ? 'warning' : 'caution'}${mc > 2 ? ' blink' : ''}` : 'light';
+      setHTML(this.mcLight, mc ? `<span class="m">MASTER</span><span>${warn ? 'WARNING' : 'CAUTION'}</span>` : '');   // (a phone shows the second word only)
+    }
+    if (textDue) setHTML(this.annun, fd ? fd.annun.map((a) => `<span class="${a.cls}">${a.text}</span>`).join('') : '');
+    if (dark && textDue) this.drawStandby(ac, ias, alt);
+  }
+
+  // The standby airspeed indicator and altimeter (a torch on two round steam gauges): what is left when the electrics
+  // die. Canvas 2D, redrawn at the readout rate.
+  drawStandby(ac, ias, alt) {
+    const g = this.stbyCtx, def = ac.def, W = 400, H = 200, R = 84;
+    g.clearRect(0, 0, W, H);
+    const top = Math.max(def.speeds.Vne || 160, 100);
+    const torch = this._torch || (this._torch = [100, 300].map((cx) => {
+      // the torch: a warm pool of light that falls off toward the rim (made once)
+      const lg = g.createRadialGradient(cx - 18, 82, 8, cx, 100, R + 14);
+      lg.addColorStop(0, 'rgba(255,236,196,0.30)'); lg.addColorStop(0.7, 'rgba(255,220,170,0.12)'); lg.addColorStop(1, 'rgba(255,220,170,0)');
+      return lg;
+    }));
+    const dial = (cx, draw) => {
+      g.fillStyle = torch[cx < 200 ? 0 : 1]; g.beginPath(); g.arc(cx, 100, R + 14, 0, Math.PI * 2); g.fill();
+      g.fillStyle = 'rgba(14,14,13,0.92)'; g.beginPath(); g.arc(cx, 100, R, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = 'rgba(190,180,160,0.55)'; g.lineWidth = 3; g.stroke();
+      g.save(); g.translate(cx, 100); draw(); g.restore();
+    };
+    const face = 'rgba(236,228,210,0.92)';
+    // airspeed: 0 at the bottom, clockwise, full scale at Vne; the white and green arcs
+    const aOf = (kt) => (-150 + 300 * clamp(kt / top, 0, 1)) * DEG;
+    dial(100, () => {
+      const arc = (a0, a1, col) => { g.strokeStyle = col; g.lineWidth = 6; g.beginPath(); g.arc(0, 0, R - 10, aOf(a0) - Math.PI / 2, aOf(a1) - Math.PI / 2); g.stroke(); };
+      arc(def.speeds.Vs0, def.speeds.Vfe || def.speeds.Vs1 * 1.8, 'rgba(230,230,225,0.8)');
+      arc(def.speeds.Vs1, (def.speeds.Vne || top) * 0.87, 'rgba(90,190,110,0.85)');
+      g.strokeStyle = face; g.fillStyle = face; g.lineWidth = 2; g.font = '15px Consolas, monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      const step = top > 250 ? 50 : 20;
+      for (let k = 0; k <= top; k += step / 2) {
+        const a = aOf(k), s = Math.sin(a), c = -Math.cos(a), big = k % step === 0;
+        g.beginPath(); g.moveTo(s * (R - 4), c * (R - 4)); g.lineTo(s * (R - (big ? 18 : 12)), c * (R - (big ? 18 : 12))); g.stroke();
+        if (big && k > 0) g.fillText(String(k), s * (R - 32), c * (R - 32));
+      }
+      g.font = '12px Consolas, monospace'; g.fillText('KNOTS', 0, 30);
+      const a = aOf(ias);
+      g.strokeStyle = '#f4f0e6'; g.lineWidth = 4; g.beginPath(); g.moveTo(-Math.sin(a) * 12, Math.cos(a) * 12); g.lineTo(Math.sin(a) * (R - 12), -Math.cos(a) * (R - 12)); g.stroke();
+      g.fillStyle = '#222'; g.beginPath(); g.arc(0, 0, 6, 0, Math.PI * 2); g.fill();
+    });
+    // altimeter: the long needle hundreds, the short one thousands, and a drum with the feet
+    dial(300, () => {
+      g.strokeStyle = face; g.fillStyle = face; g.lineWidth = 2; g.font = '16px Consolas, monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      for (let k = 0; k < 50; k++) {
+        const a = k / 50 * Math.PI * 2, s = Math.sin(a), c = -Math.cos(a), big = k % 5 === 0;
+        g.beginPath(); g.moveTo(s * (R - 4), c * (R - 4)); g.lineTo(s * (R - (big ? 16 : 9)), c * (R - (big ? 16 : 9))); g.stroke();
+        if (big) g.fillText(String(k / 5), s * (R - 30), c * (R - 30));
+      }
+      const ft = Math.max(-999, alt);
+      g.fillStyle = 'rgba(0,0,0,0.9)'; g.fillRect(-30, 20, 60, 22); g.fillStyle = face; g.font = '15px Consolas, monospace';
+      g.fillText(String(Math.round(ft / 10) * 10).padStart(4, ' '), 0, 32);
+      const hand = (a, len, w) => { g.lineWidth = w; g.beginPath(); g.moveTo(0, 0); g.lineTo(Math.sin(a) * len, -Math.cos(a) * len); g.stroke(); };
+      g.strokeStyle = '#f4f0e6'; hand((ft / 10000) * Math.PI * 2, R - 44, 6); hand(((ft % 1000) / 1000) * Math.PI * 2, R - 12, 3.5);
+      g.fillStyle = '#222'; g.beginPath(); g.arc(0, 0, 6, 0, Math.PI * 2); g.fill();
+    });
   }
 
   drawADI(ac, ctx) {

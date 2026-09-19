@@ -8,7 +8,7 @@
     "build": "node tools/build.mjs",
     "dev": "node tools/build.mjs --watch --serve",
     "web": "node tools/package-web.mjs",
-    "test": "node tools/test-physics.mjs && node tools/test-fcs.mjs && node tools/test-yaw.mjs && node tools/test-scoring.mjs && node tools/test-stall.mjs && node tools/test-flare.mjs && node tools/test-carrier.mjs && node tools/test-camera.mjs && node tools/test-art.mjs && node tools/test-weather.mjs",
+    "test": "node tools/test-physics.mjs && node tools/test-fcs.mjs && node tools/test-yaw.mjs && node tools/test-scoring.mjs && node tools/test-stall.mjs && node tools/test-flare.mjs && node tools/test-carrier.mjs && node tools/test-camera.mjs && node tools/test-art.mjs && node tools/test-weather.mjs && node tools/test-failures.mjs",
     "perf-probe": "node tools/perf-probe.mjs",
     "perf-budget": "node tools/perf-probe.mjs --budget"
   },

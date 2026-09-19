@@ -247,7 +247,7 @@ class AircraftModel {
         if (L.axis === 'x') L.pivot.rotation.x = a; else L.pivot.rotation.z = a;
       }
       if (L.strut) L.strut.position.y = L.y0 + Math.min(leg.comp, leg.maxTravel * 1.2) * (leg.collapsed ? 0.3 : 1);
-      for (const w of L.wheels) w.rotation.x = -leg.wheelAngle;
+      for (const w of L.wheels) { w.rotation.x = -leg.wheelAngle; if (leg.wheelOff) w.visible = false; }   // a wheel that came off (failureEffects.js oneMainStuck)
       if (L.pivot) L.pivot.visible = (leg.ext > 0.02 || !def.gearRetract) && !(this.gltfCfg && this.gltfCfg.hideGear);
     }
     // props
