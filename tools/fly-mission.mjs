@@ -26,6 +26,8 @@
 //   --port N          Edge remote-debugging port (default 9811; this worktree's agents use 9800-9849)
 //   --quality Q       high | medium | low (default high)
 //   --size WxH        window size for stills (default 1600x900)
+//   --render N        draw every Nth frame (after compiling the world as the game does at the start) and list every
+//                     shader program compiled after the first frame, with where: the mid-flight compiles
 //   --json            print only the result JSON
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -51,7 +53,8 @@ export async function simulate(id, opts = {}) {
   const { scoreLanding, vrefFor } = await import('../src/systems/scoring.js');
   const { noise2 } = await import('../src/config.js');
   const seed = opts.seed || 307, dt = opts.dt || 1 / 25, maxFrames = opts.max || 12000;
-  const base0 = SCENARIOS.find((s) => s.id === id);
+  // opts.scenario: a scenario object not in SCENARIOS (a test course; the city ladder's drafts)
+  const base0 = opts.scenario || SCENARIOS.find((s) => s.id === id);
   if (!base0) throw new Error('no mission ' + id);
   const base = { ...base0, ...(opts.set || {}) };
   if (opts.route) base.route = opts.route;
@@ -139,7 +142,7 @@ export async function simulate(id, opts = {}) {
     }
     if (opts.track && n % (opts.track | 0 || 25) === 0) {
       const dx = ac.pos.x - threshold.x, dz = ac.pos.z - threshold.z;
-      track.push({ t: +t.toFixed(1), u: +(dx * dir.x + dz * dir.z).toFixed(0), v: +(dx * right.x + dz * right.z).toFixed(1), h: +(ac.pos.y - rw.elevation).toFixed(1), ra: +ac.radioAlt.toFixed(1), kt: +(ac.ias / KT).toFixed(0), bank: +(ac.euler.roll * RAD).toFixed(0), thr: +ac.input.throttle.toFixed(2), pitch: +(ac.euler.pitch * RAD).toFixed(1), aoa: +(ac.aero.alpha * RAD).toFixed(1), vs: +ac.vs.toFixed(1), el: +ac.input.pitch.toFixed(3), trim: +ac.input.trim.toFixed(3), phase: pilot && pilot.phase ? pilot.phase : '', ...(pilot && pilot.dbg && opts.debug ? { hDes: +(pilot.dbg.hDes - rw.elevation).toFixed(1), vsDes: +pilot.dbg.vsDes.toFixed(1), pCmd: +(pilot.dbg.pitchCmd * RAD).toFixed(1) } : {}) });
+      track.push({ t: +t.toFixed(1), u: +(dx * dir.x + dz * dir.z).toFixed(0), v: +(dx * right.x + dz * right.z).toFixed(1), h: +(ac.pos.y - rw.elevation).toFixed(1), ra: +ac.radioAlt.toFixed(1), kt: +(ac.ias / KT).toFixed(0), bank: +(ac.euler.roll * RAD).toFixed(0), thr: +ac.input.throttle.toFixed(2), pitch: +(ac.euler.pitch * RAD).toFixed(1), aoa: +(ac.aero.alpha * RAD).toFixed(1), vs: +ac.vs.toFixed(1), gam: +(Math.atan2(ac.vs, Math.max(ac.gs, 1)) * RAD).toFixed(1), el: +ac.input.pitch.toFixed(3), trim: +ac.input.trim.toFixed(3), phase: pilot && pilot.phase ? pilot.phase : '', ...(pilot && pilot.dbg && opts.debug ? { hDes: +(pilot.dbg.hDes - rw.elevation).toFixed(1), vsDes: +pilot.dbg.vsDes.toFixed(1), pCmd: +(pilot.dbg.pitchCmd * RAD).toFixed(1) } : {}) });
     }
     if (ac.crashed) { endT += dt; if (endT > 3.5) break; }
     else if (ac.stopped) { endT += dt; if (endT > 2) break; }
@@ -205,6 +208,33 @@ async function flyInPage(id, o) {
       if (${JSON.stringify(o.pilot || '')} !== 'none') g.setAutopilot(true);
       const rw = g.world.runway;
       window.__uv = () => { const dx = g.ac.pos.x - rw.threshold.x, dz = g.ac.pos.z - rw.threshold.z; return [dx * rw.dir.x + dz * rw.dir.z, dx * rw.right.x + dz * rw.right.z]; };
+      // --render: compile the world as startCompile() does, draw one frame, and remember every program so far; any
+      // program that appears after that is a shader compiled mid-flight (a stall on a phone)
+      window.__newProgs = [];
+      // what a program is, from the #defines three put in front of its source (an unnamed one is usually a shadow
+      // pass's depth variant: instancing, double-sided, alpha-tested...)
+      window.__defines = (p) => {
+        try {
+          const gl = g.renderer.getContext(), src = gl.getAttachedShaders(p.program).map((x) => gl.getShaderSource(x)).join(' ');
+          return [...new Set((src.match(/#define [A-Z_0-9]+/g) || []).map((d) => d.slice(8)))].filter((d) => /^(USE_|DOUBLE_SIDED|FLIP_SIDED|ALPHA|DEPTH_PACKING|SHADOWMAP_TYPE)/.test(d) && !/^USE_(FOG|SHADOWMAP)$/.test(d)).join(' ');
+        } catch (e) { return '?'; }
+      };
+      window.__progs = null;
+      window.__checkProgs = () => {
+        const P = g.renderer.info.programs || [];
+        if (!window.__progs) { window.__progs = new Set(P.map((p) => p.cacheKey)); return; }
+        if (P.length === window.__progs.size) return;
+        for (const p of P) if (!window.__progs.has(p.cacheKey)) {
+          window.__progs.add(p.cacheKey);
+          const uv = window.__uv();
+          window.__newProgs.push({ t: +g.t.toFixed(1), u: Math.round(uv[0]), v: Math.round(uv[1]), name: p.name || '(unnamed)', defines: window.__defines(p) });
+        }
+      };
+      if (${o.render | 0}) {
+        g.world.sky.update(g.ac.pos, 0);
+        g.renderer.setRenderTarget(g.useComposer ? g.composer.writeBuffer : null); g.renderer.compile(g.scene, g.camera); g.renderer.setRenderTarget(null);
+        g.render(); window.__checkProgs();
+      }
       return true; })()`);
     const shots = (o.at || []).map((a, k) => { const [expr, cam] = a.split('@'); return { expr, cam, k, done: false }; });
     let frames = 0; const max = o.max || 12000;
@@ -215,6 +245,7 @@ async function flyInPage(id, o) {
       const r = await ev(`(() => { const g = window.game, f = new Function('g','ac','u','v','ra','t', 'return (' + ${JSON.stringify(cond)} + ')');
         for (let i = 0; i < 400; i++) { if (g.state !== 'flying') return { n: i, state: g.state, hit: false };
           g.frame(1/25); const ac = g.ac, uv = window.__uv();
+          if (${o.render | 0} && (i % ${Math.max(1, o.render | 0)}) === 0) { g.render(); window.__checkProgs(); }
           if (f(g, ac, uv[0], uv[1], ac.radioAlt / 0.3048, g.t)) return { n: i + 1, state: g.state, hit: true }; }
         return { n: 400, state: g.state, hit: false }; })()`);
       frames += r.n;
@@ -246,7 +277,8 @@ async function flyInPage(id, o) {
       return { frames: ${frames}, state: g.state, t: +g.t.toFixed(1), crashed: ac.crashed, reason: ac.crashReason || '', part: f && f.lastHit ? f.lastHit.part : null,
         points: r && r.points, grade: r && r.grade, headline: r && r.headline, lines: r ? r.lines.map((l) => l.k + ': ' + l.v) : null,
         gates: f ? f.gates.map((x) => x.name + ': ' + x.state) : [], closest: f && f.closestD < 1e8 ? f.closestD.toFixed(1) + ' m from ' + f.closestName : null,
-        pilot: g.ap ? g.ap.constructor.name + (g.ap.phase ? '/' + g.ap.phase : '') : 'none', status: g.statusLine() }; })()`);
+        pilot: g.ap ? g.ap.constructor.name + (g.ap.phase ? '/' + g.ap.phase : '') : 'none', status: g.statusLine(),
+        ...(${o.render | 0} ? { programs: g.renderer.info.programs.length, newPrograms: window.__newProgs } : {}) }; })()`);
     return { id, seed: o.seed || 307, mode: 'page', ...res, stills, console: logs.slice(0, 30) };
   } finally {
     killEdge(edge.pid, profile);
@@ -292,6 +324,7 @@ async function main() {
     else if (a === '--set') o.set = JSON.parse(args[++i]);
     else if (a === '--tag') o.tag = args[++i];
     else if (a === '--track') o.track = +args[++i];
+    else if (a === '--render') o.render = +args[++i];
   }
   if (!o.node && existsSync(`${ROOT}/web/index.html`)) {
     const age = (Date.now() - statSync(`${ROOT}/web/index.html`).mtimeMs) / 60000;

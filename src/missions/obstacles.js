@@ -101,7 +101,8 @@ const theNotch = {
   // The line to the notch: 12 m over the ground at the wall, and a 4-degree slope back from it.
   hint: (c) => {
     if (c.ac.onGround) return null;
-    if (c.u < -185) {
+    // (the wall's three rows stand from about u -184 to -146, crowns included)
+    if (c.u < -186) {
       const off = c.v - NOTCH_V;
       if (Math.abs(off) > 6) return `Line up on the notch: ${Math.round(Math.abs(off))} m ${off > 0 ? 'left' : 'right'}. It is the gap with the orange gate.`;
       const agl = c.ra * 0.3048, want = 12 + (NOTCH_U - 13 - c.u) * 0.07;
@@ -109,7 +110,8 @@ const theNotch = {
       if (agl < want - 8) return 'Low: a little power. The ground rises toward the trees.';
       return 'On the notch. Wings level, 50 kt, 15 m over the ground at the trees.';
     }
-    if (c.u < -140) return 'Through! Hold it level.';
+    if (c.u < -146) return 'In the notch. Wings level, hold it steady.';
+    if (c.u < -120) return 'Through! Hold it level.';
     if (c.u < 0) return 'Gentle S-turn right onto the gravel, power to idle.';
     return null;
   },

@@ -3,7 +3,7 @@
 //
 // Contract (the world side is src/world/obstacles.js; it reaches this file through src/art/terrain-look.js):
 //   buildCourse(prims, gates, { terrain, night, quality, seed, lights })  returns
-//       { objects: Object3D[], update(dt, t) }.
+//       { objects: Object3D[], update(dt, t, pos) }   (pos: the aircraft, for the shadow primers below).
 //   `prims` are the resolved world-space collision volumes (see the header of src/world/obstacles.js):
 //       { shape: 'box', cx,cy,cz, hx,hy,hz, X,Y,Z }   an oriented box (X, Y, Z its unit axes)
 //       { shape: 'cyl', x,z, y0,y1, r0,r1 }            a vertical cylinder or frustum
@@ -22,7 +22,12 @@
 //
 // Draw calls: one InstancedMesh per geometry - boxes, cylinders, tubes, marker balls, trees - sharing ONE
 // material and program (course/solids) except the trees, plus one LightSet at night: 6 draws for a whole
-// course, a few more in the shadow pass. The per-instance attributes decide the finish:
+// course, a few more in the shadow pass. Plus, for the first half second of a flight only, two 1 mm "shadow
+// primers" (instanced casters with and without instance colours) riding with the aircraft (userData.primer), so
+// the shadow pass compiles both instanced depth programs in the first frame, and not when the course or the
+// aerodrome first reaches the sun's shadow box mid-approach (the engine's up-front compile does not cover the
+// shadow pass); then they are hidden for good.
+// The per-instance attributes decide the finish:
 //   ctBox   vec4  size in metres (x, y, z) and the style: 0 plain, 1 office facade, 2 container stack,
 //                 3 gate stripes, 4 ship's hull (drawn as its box, like everything: the world steps the bow), 5 painted lattice, 6 house /
 //                 superstructure (small windows), 7 wood, 8 wire, 9 steel member (8 and 9 are the thin ones)
@@ -33,7 +38,8 @@
 // House rules (src/art/AGENTS.md): every material named; uniforms prefixed `ct` (never `at`, which is the
 // atmosphere's); no material cached at module level (built per call, per scene); customProgramCacheKey with
 // every onBeforeCompile; seeded randomness only (makeRng from the course seed); no point or spot lights; linear
-// colours; nothing allocated per frame - update() only rewrites the lights' colours when a blinker toggles.
+// colours; nothing allocated per frame - update() only rewrites the lights' colours when a blinker toggles (and
+// moves the two shadow primers during the first half second).
 import * as THREE from 'three';
 import { makeRng } from '../config.js';
 import { LightSet } from './lights.js';
@@ -311,6 +317,34 @@ export function buildCourse(prims, gates, opts = {}) {
     objects.push(trees);
   }
 
+  // ---- shadow primers. The shadow pass compiles a depth program for each kind of instanced caster (with or without
+  // instance colours) the first time one enters the sun's shadow box, and the engine compiles the world up front
+  // (compileAsync in main.js startCompile) without the shadow pass: a course that starts away from everything else
+  // instanced (the harbor's, over open water) had that compile 7 s into the flight. One 1 mm instance per kind rides
+  // with the aircraft for the first half second (update() moves it), so the program is compiled in the first frame
+  // with the rest of the world, and is then hidden for good. Each shares a course mesh's geometry and material and
+  // draws nothing anyone can see.
+  // Both kinds are primed whatever the course has: the aerodrome's and the forest's instanced casters (no instance
+  // colours) otherwise compile theirs when the runway reaches the shadow box, on short final (Harbor City: 2 s before
+  // touchdown). A course without trees pays one extra program for that (course/solids without instance colours),
+  // compiled up front with everything else.
+  const primers = [];
+  const casters = objects.filter((o) => o.isInstancedMesh && o.castShadow);
+  for (const colour of [true, false]) {
+    if (!casters.length) break;
+    const o = casters.find((c) => !!c.instanceColor === colour) || casters[0];
+    const p = new THREE.InstancedMesh(o.geometry, o.material, 1);
+    p.name = 'course/shadow-primer';
+    p.setMatrixAt(0, m4.makeScale(1e-3, 1e-3, 1e-3));
+    if (colour) p.setColorAt(0, col.setRGB(0, 0, 0));
+    p.castShadow = true; p.receiveShadow = o.receiveShadow;
+    p.userData.primer = true;
+    p.computeBoundingSphere();
+    primers.push(p);
+    objects.push(p);
+  }
+  let priming = primers.length > 0;
+
   // ---- obstacle lights: red, the tall ones blinking; white anchor and mast lights on ships; the gates' corners.
   // Night only: by day they would be dots nobody sees, and a draw nobody needs.
   let blink = null, set = null, on = true;
@@ -332,8 +366,13 @@ export function buildCourse(prims, gates, opts = {}) {
   }
   return {
     objects,
-    // Sim time in, the tall lights' 0.8 s on / 0.7 s off; the colour buffer is rewritten only when they toggle.
-    update(dt, t) {
+    // Sim time in, the tall lights' 0.8 s on / 0.7 s off; the colour buffer is rewritten only when they toggle. `pos`
+    // (the aircraft) places the shadow primers for the first half second of the flight.
+    update(dt, t, pos) {
+      if (priming) {
+        if (t < 0.5 && pos) for (const p of primers) p.position.copy(pos);
+        else { for (const p of primers) p.visible = false; priming = false; }
+      }
       if (!blink || !blink.length) return;
       const now = (t % 1.5) < 0.8;
       if (now === on) return;

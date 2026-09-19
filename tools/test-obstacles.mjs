@@ -16,7 +16,9 @@
 //   6. the mission data (ids, n, fields, tips, touch words) and that no original site or challenge builds a field;
 //   7. flights with the real physics (tools/fly-mission.mjs simulate(), the same code the page runs): each mission
 //      landed by RoutePilot on two seeds, deterministic, and a deliberately bad path crashing into what the mission
-//      is about (so the challenge is real), plus the over-the-top line through the notch failing its gate.
+//      is about (so the challenge is real), plus the over-the-top line through the notch failing its gate;
+//   8. RoutePilot over an obstacle on the glide path and then steeply down (7-10 degrees) to a landing, in the
+//      Condor, the Skylark and the Trailblazer, and the same courses flown straight in hitting the obstacle.
 import { installDomStub } from './dom-stub.mjs';
 installDomStub();
 const THREE = await import('three');
@@ -259,11 +261,19 @@ for (const sc of OBSTACLES_MISSIONS) {
     ok(built && Array.isArray(built.objects) && typeof built.update === 'function', `${sc.id}: buildCourse must return { objects, update }`);
     const drawn = new Int32Array(course.prims.length);
     let bad = 0, gateBars = 0, lights = 0;
+    const primers = [];
     const flag = (msg) => { bad++; if (bad < 6) console.log('      ' + sc.id + ': ' + msg); };
     for (const o of built.objects) {
       ok(!!o.name && (!o.material || !!o.material.name), `${sc.id}: every course object and material is named (${o.name})`);
       if (o.isPoints) { lights += o.geometry.drawRange.count === Infinity ? o.geometry.attributes.position.count : o.geometry.drawRange.count; continue; }
       if (!o.isInstancedMesh) { flag(`${o.name} is not instanced`); continue; }
+      if (o.userData.primer) {
+        // a shadow primer: one 1 mm instance on a solid's own geometry and material, casting, hidden after 0.5 s
+        o.getMatrixAt(0, m4); m4.decompose(P, Q, S);
+        ok(o.count === 1 && o.castShadow && S.x < 0.01 && built.objects.some((x) => x !== o && !x.userData.primer && x.geometry === o.geometry && x.material === o.material), `${sc.id}: ${o.name} is a 1 mm instance of a course mesh's own geometry and material`);
+        primers.push(o);
+        continue;
+      }
       ok(o.frustumCulled !== false && !!o.boundingSphere, `${sc.id}: ${o.name} keeps its bounds for culling`);
       const prim = o.userData.prim;
       ok(prim && prim.length === o.count, `${sc.id}: ${o.name} carries the prim index of every instance`);
@@ -305,13 +315,21 @@ for (const sc of OBSTACLES_MISSIONS) {
     ok(bad === 0, `${sc.id}: every drawn solid sits exactly on its collision volume (${bad} differ)`);
     ok(gateBars === course.gates.length * 4, `${sc.id}: four frame bars per gate (${gateBars})`);
     ok(lights === course.lights.length + course.gates.length * 4, `${sc.id}: the night lights are the course's obstacle lights and the gates' corners (${lights})`);
+    // two primers, an instanced caster with instance colours and one without (the aerodrome's and the forest's kind);
+    // they ride with the aircraft for the first half second, then hide for good
+    ok(primers.length === 2 && primers.filter((o) => !!o.instanceColor).length === 1, `${sc.id}: two shadow primers, with and without instance colours (${primers.length})`);
+    const acPos = new THREE.Vector3(123, 45, -678);
+    built.update(0.04, 0.04, acPos);
+    ok(primers.every((o) => o.visible && o.position.equals(acPos)), `${sc.id}: the shadow primers ride with the aircraft at the start`);
     // blinking rewrites the colour buffer only on a toggle
-    built.update(0.1, 0.1); built.update(0.1, 0.9); built.update(0.1, 1.6);
-    say(`${sc.id}: ${built.objects.length} draws, every one of ${course.prims.length} solids drawn on its own volume, ${gateBars} gate bars, ${lights} lights at night`);
+    built.update(0.1, 0.1, acPos); built.update(0.1, 0.9, acPos); built.update(0.1, 1.6, acPos);
+    ok(primers.every((o) => !o.visible), `${sc.id}: the shadow primers are hidden after half a second`);
+    say(`${sc.id}: ${built.objects.length - primers.length} draws (+${primers.length} shadow primers for 0.5 s), every one of ${course.prims.length} solids drawn on its own volume, ${gateBars} gate bars, ${lights} lights at night`);
     // by day: no lights object at all
     const day = look.buildCourse(course.prims, course.gates, { terrain, night: false, quality: 'high', seed: course.seed, lights: course.lights });
     ok(!day.objects.some((o) => o.isPoints), `${sc.id}: no light draw by day`);
-    ok(day.objects.length <= 8, `${sc.id}: at most 8 draws for the whole course (${day.objects.length})`);
+    const dayDraws = day.objects.filter((o) => !o.userData.primer).length;
+    ok(dayDraws <= 8, `${sc.id}: at most 8 draws for the whole course (${dayDraws})`);
   }
 }
 
@@ -459,6 +477,45 @@ for (const sc of OBSTACLES_MISSIONS) {
   ok(JSON.stringify({ ...again, frames: 0 }) === JSON.stringify({ ...first, frames: 0 }) && again.frames === first.frames, 'the same seed flies the same flight');
   // the gate order: the harbor route passes the entrance, the boom and the exit
   ok(/entrance: passed.*under the boom: passed.*exit: passed/.test(first.gates.join(' | ')), `harbor-cranes: RoutePilot takes the bonus under the boom (${first.gates.join(', ')})`);
+}
+
+// ============================================================ 8. RoutePilot: over an obstacle, then steeply down
+// What the city ladder is built on: something tall standing on the straight-in glide path, flown over level and
+// then a descent well steeper than 3 degrees onto the final, in each aircraft RoutePilot must fly. The same course
+// flown straight in by Autoland (obstacle-blind) must hit the obstacle, or the test proves nothing.
+{
+  const base = { n: 0, title: 'Steep descent (test)', group: 'obstacles', difficulty: 3, tags: [], time: 12, vis: 30000, wind: { rel: 20, speed: 6, turb: 0.2 }, weight: 'normal', failures: [], scoring: { type: 'runway' } };
+  const cases = [
+    // a 150 m tower 2 km out on Bayfield's glide path (which is 120 m up there); over it at 175 m, then 108 m down in
+    // 950 m (6.5 degrees) onto the glide path
+    { minDeg: 6, sc: { ...base, id: 'steep-condor', aircraft: 'condor', site: 'bayfield', spawn: { u: -6500, v: 0, alt: 175, gamma: 0, flap: 0.75, speedKt: 155, fixed: true },
+      course: { obstacles: [{ kind: 'tower', u: -2000, v: 0, w: 30, d: 30, h: 150, name: 'the test tower' }] },
+      route: [{ u: -2150, v: 0, alt: 175, over: true }, { u: -1850, v: 0, alt: 175, over: true }, { u: -900, v: 0, alt: 67 }] }, hit: 'Hit the test tower' },
+    // a 55 m mast 600 m out at Ridgefield (the glide path is 46 m there); over at 70 m, then 42 m down in 310 m
+    { minDeg: 6, sc: { ...base, id: 'steep-skylark', aircraft: 'skylark', site: 'ridgefield', spawn: { u: -2400, v: 0, alt: 70, gamma: 0, flap: 0.333, speedKt: 70, fixed: true },
+      course: { obstacles: [{ kind: 'mast', u: -600, v: 0, h: 55, r: 1, name: 'the test mast' }] },
+      route: [{ u: -660, v: 0, alt: 70, over: true }, { u: -560, v: 0, alt: 70, over: true, flap: 1 }, { u: -250, v: 0, alt: 28, flap: 1 }] }, hit: 'Hit the test mast' },
+    // a row of 55 m spruce 300 m out at Ridgefield (the Trailblazer's 5-degree glide path is 48 m up there); over at
+    // 68 m, then 53 m down in 330 m onto the runway
+    { minDeg: 8, sc: { ...base, id: 'steep-trailblazer', aircraft: 'trailblazer', site: 'ridgefield', spawn: { u: -1600, v: 0, alt: 68, gamma: 0, flap: 1, speedKt: 52, fixed: true },
+      course: { obstacles: [{ kind: 'treeWall', u: -300, from: -60, to: 60, step: 9, scale: 2.2, rows: 1 }] },
+      route: [{ u: -360, v: 0, alt: 68, over: true }, { u: -270, v: 0, alt: 68, over: true }, { u: 60, v: 0, alt: 15 }] }, hit: 'Hit a tree' },
+  ];
+  for (const { sc, minDeg, hit } of cases) {
+    for (const seed of [307, 4271]) {
+      const r = await simulate(sc.id, { scenario: sc, seed, track: 5 });
+      // the steepest flight path held for a second on the way down (after the obstacle, before the handover)
+      const leg = r.track.filter((p) => p.phase === 'route' && p.u > sc.route[1].u);
+      let steep = 0;
+      for (let i = 5; i < leg.length; i++) steep = Math.max(steep, -Math.max(...leg.slice(i - 5, i).map((p) => p.gam)));
+      ok(!r.crashed && r.touchdown && r.points >= 50 && r.touchdown.u > 0, `${sc.id} seed ${seed}: over the obstacle and steeply down, then Autoland lands (${r.crashed ? r.reason : r.points + ' ' + r.grade}, touchdown ${r.touchdown ? r.touchdown.u + ' m in, ' + r.touchdown.fpm + ' fpm' : '-'})`);
+      ok(steep >= minDeg, `${sc.id} seed ${seed}: the descent after the obstacle is steep (${steep.toFixed(1)} deg held for a second; wanted ${minDeg})`);
+      console.log(`PASS ${sc.id} seed ${seed}: ${r.points} ${r.grade}, down at ${steep.toFixed(1)} deg after the obstacle, touchdown ${r.touchdown ? `${r.touchdown.u} m in, ${r.touchdown.fpm} fpm, ${r.touchdown.kt} kt` : '-'}`);
+    }
+    const straight = await simulate(sc.id, { scenario: sc, seed: 307, pilot: 'autoland' });
+    ok(straight.crashed && straight.reason === hit, `${sc.id}: flown straight in by Autoland it must end "${hit}" (got ${straight.crashed ? straight.reason : 'no crash'})`);
+  }
+  say('RoutePilot: over a tower, a mast and a tree line, then 7-10 degrees down to a landing, in the Condor, Skylark and Trailblazer; straight in, each obstacle is hit');
 }
 
 console.log(fails ? `\n${fails} of ${checks} obstacle checks FAILED` : `\nall ${checks} obstacle checks passed`);
