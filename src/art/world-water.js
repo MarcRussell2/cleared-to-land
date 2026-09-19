@@ -119,8 +119,10 @@ export function makeWater(size, level, sun) {
         if (uv.x <= 0.0 || uv.y <= 0.0 || uv.x >= 1.0 || uv.y >= 1.0) return vec2(1.0, 0.0);
         return texture2D(wvShallowMap, uv).rg;
       }
-      vec3 wvShallowBody(vec3 deep, vec2 s, float day) {
+      vec3 wvShallowBody(vec3 deep, vec2 s, float day, float sunK) {
         vec3 c = mix(mix(wvShallow, wvLagoon, smoothstep(0.02, 0.3, s.x)), wvReef, s.y);
+        // at a low sun the colour goes too: greyer as well as darker, like the land beside it
+        c = mix(vec3(dot(c, vec3(0.3, 0.55, 0.15))), c, 0.3 + 0.7 * sunK);
         return mix(c * day, deep, smoothstep(0.25, 0.85, s.x));
       }
       #endif
@@ -159,8 +161,9 @@ export function makeWater(size, level, sun) {
         vec3 body = wvDeep * mix(0.025, 0.72, atDay);
         #ifdef WV_SHALLOWS
         // (the sand under a few metres of water is lit by the sun's height, not just by whether it is day:
-        // at a low sun it darkens with the land instead of glowing cyan against a dusk coast)
-        body = wvShallowBody(body, wvS, mix(0.025, 0.72, atDay) * (0.3 + 0.7 * smoothstep(0.0, 0.5, atSun.y)));
+        // at a low sun it darkens and greys with the land instead of glowing teal against a dusk coast)
+        float wvSunK = smoothstep(0.0, 0.35, atSun.y);
+        body = wvShallowBody(body, wvS, mix(0.025, 0.72, atDay) * (0.08 + 0.92 * wvSunK), wvSunK);
         #endif
         vec3 col = mix(body, sky, fres);
         // Sun glitter on the perturbed normal; the lobe widens and dims with the pixel

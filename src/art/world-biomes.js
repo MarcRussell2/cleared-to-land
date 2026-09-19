@@ -49,9 +49,14 @@ export const BIOME_STYLES = new Set(['island', 'desert', 'arctic']);
 // (thickest along the shore, thin up the hills). The trees below grow on these and the ground under them
 // (world-ground.js biomeColor) darkens on the same masks, so a stand sits on its own shade and reads as a mass
 // from a distance instead of as a scatter of dots. `shore` is field.lakeShore(x, z), already to hand.
-export function islandStand(field, x, z) { return smoothstep(0.25, 0.40, field.forestNoise(x, z)); }
+// (A stand's edge is a narrow band of the noise, so a wood is a wood and the open scrub is open: on Kestrel about
+// a quarter of the land is woods. Round the lake, a band of spruce 60 to 180 m deep follows every shore whatever
+// the noise says, so both shores read as a dark line from the approach in clear air (in Whiteout's snow they are
+// 480 m off to the side, too far to see); the woods inland are thinner, for the cap's sake.)
+export function islandStand(field, x, z) { return smoothstep(0.31, 0.37, field.forestNoise(x, z)); }
 export function arcticWood(field, x, z, shore) {
-  return smoothstep(-0.15, 0.2, field.forestNoise(x, z)) * (0.2 + 0.8 * (1 - smoothstep(300, 1100, shore)));
+  const band = 1 - smoothstep(60, 180, shore);
+  return Math.max(band, smoothstep(-0.15, 0.2, field.forestNoise(x, z)) * (0.15 + 0.65 * (1 - smoothstep(250, 1000, shore))));
 }
 
 // ------------------------------------------------------------------ geometry helpers
@@ -267,7 +272,7 @@ export function biomeForest(field, opts = {}) {
     const px = x + rng() * cell, pz = z + rng() * cell;
     const chance = rng(), size = rng(), angle = rng() * Math.PI * 2, tier = rng(), rank = rng();
     if (chance > 0.92) continue;                                // cheap early rejection: nothing is denser
-    let species = null, height = 0, h;
+    let species = null, height = 0, h, stand = 0;
     if (island) {
       // Palms crowd the back of every beach and dot the lowland; the dry forest grows in stands (islandStand)
       // with only a rare tree in the open scrub between them. The coast distance and the mask are cheap, so
@@ -278,7 +283,8 @@ export function biomeForest(field, opts = {}) {
       const palm = (0.68 * smoothstep(6, 18, dc) * (1 - smoothstep(50, 140, dc)) + 0.012 * (1 - smoothstep(100, 500, dc))) * cell * cell / 225;
       if (chance < palm) species = 'palm';
       else {
-        const scrub = Math.min(0.8, field.treeDensity * (0.012 + 1.15 * islandStand(field, px, pz))) * smoothstep(20, 60, dc);
+        stand = islandStand(field, px, pz);
+        const scrub = Math.min(0.9, field.treeDensity * (0.012 + 1.3 * stand)) * smoothstep(20, 60, dc);
         if (chance < palm + scrub) species = 'scrub'; else continue;
       }
       h = field.height(px, pz);
@@ -299,7 +305,7 @@ export function biomeForest(field, opts = {}) {
     }
     if (field.nearFlat(px, pz, 16)) continue;
     if (field.normal(px, pz, normal).y < (island ? 0.72 : 0.78)) continue;
-    trees.push({ x: px, z: pz, h, species, height, angle, tier, rank, lean: species === 'palm' ? size : 0 });
+    trees.push({ x: px, z: pz, h, species, height, angle, tier, rank, lean: species === 'palm' ? size : 0, stand });
   }
   trees.sort((a, b) => a.rank - b.rank);
   const kept = trees.slice(0, cap).filter((t) => t.tier <= treeScale);
@@ -309,7 +315,8 @@ export function biomeForest(field, opts = {}) {
   const instance = (geo, mat, list, origin, card) => {
     const mesh = new THREE.InstancedMesh(geo, mat, list.length);
     list.forEach((t, i) => {
-      const S = SPECIES[t.species], sc = t.height / S.model, wide = sc * S.wide * (0.9 + 0.2 * t.rank);
+      // (inside a stand the dry forest's crowns spread a quarter wider, so the canopy closes over the 12 m cells)
+      const S = SPECIES[t.species], sc = t.height / S.model, wide = sc * S.wide * (0.9 + 0.2 * t.rank) * (1 + 0.25 * t.stand);
       position.set(t.x - origin.x, t.h - origin.y - 0.2, t.z - origin.z);
       scale.set(wide, sc, card ? sc : wide);
       euler.set(0, card ? 0 : t.angle, 0);
@@ -512,12 +519,11 @@ export function buildSiteProps(rw, place, kind, groundAt) {
   const kit = propKit(rw, place, groundAt);
   const I = BIOMES.island;
   if (kind === 'paradise') {
-    // the beach: two rows of umbrellas on the dry sand, a gap straight under the approach
+    // the beach: a few umbrellas in four little clusters on the dry sand (the brief: a few at most), none
+    // straight under the approach
     const rng = makeRng(911), spots = [];
-    for (let v = -620; v <= 620; v += 34) {
-      if (Math.abs(v) < 40) continue;
-      spots.push([-92 + 6 * rng(), v + 8 * (rng() - 0.5)]);
-      if (rng() < 0.6) spots.push([-76 + 5 * rng(), v + 12 + 8 * (rng() - 0.5)]);
+    for (const [v0, n] of [[-410, 3], [-175, 3], [150, 2], [395, 3]]) {
+      for (let i = 0; i < n; i++) spots.push([-88 + 10 * (rng() - 0.5), v0 + 9 * (i - (n - 1) / 2) + 4 * (rng() - 0.5)]);
     }
     beach(kit, spots, 912);
     // the coast road's traffic (solid), and the airport fence behind it with the famous sign

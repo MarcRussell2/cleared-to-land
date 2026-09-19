@@ -8,7 +8,9 @@
 //   dust-wall   Skylark, Red Mesa: a haboob on final, the visibility falls to a kilometre, gusty crosswind
 // The weather's look and model come from the weather area (src/systems/weather.js, src/art/weather-look.js);
 // these carry the spec, and the visibility and wind that matter to the flying are the scenario's own vis
-// and wind (plus, for dust-wall, the rough air of the dust front, a turbBurst). Each one is landed by the stock
+// and wind (plus, for dust-wall, the rough air of the dust front, a turbBurst). The visibility a briefing names
+// is what the pilot sees, and `vis` is set for it: the weather look thickens the air on top of `vis`, see
+// src/missions/README.md "Visibility" (tools/test-maps.mjs holds the numbers to it). Each one is landed by the stock
 // Autoland on its straight path (tools/test-maps.mjs checks that path clears the terrain, and only just; the
 // branch's commit messages carry the headless flights, with the weather model and without it).
 // eslint-disable-next-line no-unused-vars
@@ -22,15 +24,17 @@ export const MAPS_MISSIONS = [
     aircraft: 'skylark', site: 'kestrel', time: 10.5, vis: 40000,
     desc: 'A 650 m strip with a hill in front of it and the sea behind it. Come up the valley, cross the saddle a few metres above the cars on the road, then dive at 6.5 degrees and get it stopped before the sunbathers.',
     tips: [
-      'The saddle is the only gap in the ridge: about 80 m wide, right on the centreline. The hills either side are 100 m high.',
-      'Over the ridge: throttle to idle and push. The PAPI is set at 6.5 degrees; two white, two red still means on the path, it just looks like a dive.',
+      'The saddle is the only gap in the ridge: about 150 m across at the bottom, right on the centreline. The hills either side are 100 m high.',
+      'Once you are over the col, and not before: throttle to idle and push. The PAPI is set at 6.5 degrees; two white, two red still means on the path, it just looks like a dive.',
       'The trade wind gusts through the col. Hold 62 kt and flare early: at 6.5 degrees you come down at 700 ft a minute, twice the usual. Then brake hard, the beach is 650 m away. Brakes: hold Space.',
     ],
     wind: { rel: 40, speed: 12, gust: 20, turb: 0.4 }, weight: 'normal',
     spawn: { dist: 1600, flap: 1.0 }, failures: [], scoring: { type: 'runway' },
+    // (the col's crest is 240 m out and the path clears the ground least just past it, 220 m out: the push-over
+    // comes only once the col is behind, so a pilot who takes it at its word still clears the ridge; test-maps)
     hint: (c) => (c.ac.onGround || c.ac.crashed ? null
-      : c.d > 420 ? 'Line up on the saddle: the gap in the ridge, dead ahead. Stay on the PAPI.'
-      : c.d > 180 ? 'Over the col: idle, and push over. Two white, two red.'
+      : c.d > 230 ? 'Line up on the saddle: the gap in the ridge, dead ahead. Stay on the PAPI.'
+      : c.d > 120 ? 'Over the col: idle, and push over. Two white, two red.'
       : c.d > -60 ? 'Steep and fast down: start the flare early.'
       : null),
   },
@@ -56,7 +60,7 @@ export const MAPS_MISSIONS = [
     desc: 'A 500 m dirt strip on top of a 150 m sandstone cliff. The wind pours over the mesa and down its face, so the last hundred metres before the rim are shear and chop. Arrive on the path, cross the edge with a few metres to spare, and put it down.',
     tips: [
       'Stay on the 4.5-degree path until the rim. Close to the mesa the headwind drops away and the airspeed goes with it: below the path you will not climb out of that in a Trailblazer.',
-      'Full flap (F twice), 5 kt above the usual 48 for the gusts, and a hand on the throttle over the edge.',
+      'Full flap is already set. Fly 5 kt above the usual 48 for the gusts, and keep a hand on the throttle over the edge.',
       'Over the lip: idle, three-point it, brake gently. Touch down in the first 100 m and 500 m is plenty.',
     ],
     wind: { rel: 0, speed: 14, gust: 22, turb: 0.55, shear: 0.7 }, weight: 'normal',
@@ -68,11 +72,11 @@ export const MAPS_MISSIONS = [
   },
   {
     id: 'whiteout', n: 42, group: 'maps', difficulty: 4, title: 'Whiteout', tags: T('map', 'weather', 'crosswind'),
-    aircraft: 'skylark', site: 'frostbite', time: 13, vis: 900,
+    aircraft: 'skylark', site: 'frostbite', time: 13, vis: 1520,   // (the pilot sees 900 m: README "Visibility")
     weather: { preset: 'snow', snow: 0.9 },
     desc: 'Snow blowing across a frozen lake, 900 metres of visibility, and a runway that is a ploughed strip of ice. The crosswind is only 10 knots; the problem is the grip, or the lack of it: whichever way the wheels touch down is the way the airplane keeps going.',
     tips: [
-      'You will see nothing until about half a mile out, then the black spruce on both shores. Until then fly the PAPI and the edge lights; the cones come last.',
+      'Nothing shows until about a kilometre out: fly the runway heading on the tape and a 3-degree descent, about 300 ft a minute. Then the PAPI and the ploughed banks come out of the snow; the cones come last.',
       'Crab into the wind all the way down and kick it straight only in the flare. On ice, a wheel that touches down sideways keeps going sideways.',
       'Braking does almost nothing on ice. Land slow, hold the nose up to use the drag, and steer with rudder (Q/E), not the brakes.',
     ],
@@ -82,16 +86,16 @@ export const MAPS_MISSIONS = [
   {
     id: 'dust-wall', n: 43, group: 'maps', difficulty: 5, title: 'Dust Wall', tags: T('map', 'weather', 'crosswind', 'bush'),
     aircraft: 'skylark', site: 'redmesa', time: 17, vis: 6000,
-    // (the drop is to 2,300 m of model visibility: the weather look thickens the air by (1 + 1.6 x dust) on top of
-    // it, so the pilot sees about a kilometre, as the briefing says; at 1,100 m the dust-coloured mesa vanished
-    // against the dust-coloured desert 200 m before the rim of a strip with no lights and no PAPI)
+    // (README "Visibility": in dust 0.8 the pilot sees about 6,900 m at the start and 1,100 m after the drop to 2,300,
+    // as the briefing says; a drop to 1,100 of model visibility, 480 m seen, hid the dust-coloured mesa against the
+    // dust-coloured desert until 200 m before the rim of a strip with no lights and no PAPI)
     weather: { preset: 'dust', dust: 0.8, events: [
       { type: 'visDrop', at: { type: 'dist', value: 1500 }, vis: 2300, ramp: 8 },
       { type: 'turbBurst', at: { type: 'dist', value: 1500 }, turb: 0.3, dur: 12 },   // the front's rough air
     ] },
-    desc: 'A haboob is coming over the mesa, and so are you. Gusts to 23 knots across a 500 m strip on a cliff top, and when the dust wall arrives the visibility goes from six kilometres to one. Get lined up while you can still see.',
+    desc: 'A haboob is coming over the mesa, and so are you. Gusts to 23 knots across a 500 m strip on a cliff top, and when the dust wall arrives the visibility goes from seven kilometres to one. Get lined up while you can still see.',
     tips: [
-      'The dust arrives on final and the mesa goes grey at about a mile. Before it does, line up and fix where the strip sits against the rim.',
+      'The dust arrives about a mile out; after that the mesa is a grey shape in the grey until the last few hundred metres. Line up before the dust gets here, and fix where the strip sits against the rim.',
       'Crab into the wind and carry 5 kt extra for the gusts. Cross the rim high rather than low: the cliff is 150 m straight down.',
       'In the flare, kick it straight with rudder (Q/E) and hold the upwind wing down. Keep flying it with the ailerons until it has stopped.',
     ],

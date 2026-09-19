@@ -98,7 +98,11 @@ export const NEW_SITES = {
       rwFrame: frame(KESTREL_RW),
       // the terminal, the hangar and the apron beside the strip (world-biomes.js draws them), and the road
       clear: { spots: [{ u: 390, v: 64, r: 22 }, { u: 530, v: 58, r: 16 }, ...[370, 420, 470, 520].map((u) => ({ u, v: 31, r: 26 }))], roads: KESTREL_ROADS },
-      runwayFlats: [runwayFlat(KESTREL_RW, { before: 35, after: 25, width: 30, m0: 70, m1: 45, mv: 55, trees: 18 })],
+      // (the strip, narrow so the valley's sides stay steep; and a wider level shelf beside its middle for the
+      // PAPI, 25 to 52 m left of the centreline, and the apron, the terminal and the hangar on the right, which
+      // otherwise stood up to 2.5 m into the hillside. Both stop well clear of the saddle and the beach.)
+      runwayFlats: [runwayFlat(KESTREL_RW, { before: 35, after: 25, width: 30, m0: 70, m1: 45, mv: 55, trees: 18 }),
+        runwayFlat(KESTREL_RW, { before: -40, after: -90, width: 64, m0: 40, m1: 40, mv: 45, trees: 12 })],
       island: {
         x: -300, z: 650, rx: 2700, rz: 1350, wobble: 0.14, calm: { x: 0, z: -690, r: 380, fade: 650 }, beach: 40, low: 12, hills: 170,
         peaks: [{ x: -540, z: 240, r: 260, h: 150 }, { x: 580, z: 290, r: 300, h: 130 }, { x: -1600, z: 950, r: 650, h: 230 }, { x: 1300, z: 1050, r: 520, h: 170 }],
@@ -133,8 +137,8 @@ export const NEW_SITES = {
       rwFrame: frame(FROST_RW),
       runwayFlats: [runwayFlat(FROST_RW, { before: 200, after: 150, width: 60, m0: 200, m1: 200, mv: 150, trees: 40 })],
       arctic: {
-        // a long, narrow lake: the spruce on its shores stands 450 m either side of the runway, the only dark
-        // thing to see in a whiteout
+        // a long, narrow lake: the spruce on its shores stands about 480 m either side of the runway, a dark line
+        // down each side in clear air
         lake: { u: 300, halfLength: 3300, halfWidth: 480, wobble: 0.14 },
         islets: [{ u: -1700, v: 230, r: 90, h: 12 }, { u: 1850, v: -250, r: 120, h: 18 }, { u: -2600, v: -200, r: 70, h: 9 }],
         hills: 340, lows: [{ u0: -9000, u1: -2800, half: 420, fade: 900, max: 215 }],

@@ -10,7 +10,9 @@
 //     clears the ground and every solid prop from the longest spawn to the threshold, and clears the saddle and
 //     the rim by only a few metres (the challenge is real, and fair: Autoland lands every one of them);
 //   - friction: packed snow and lake ice brake at about a third and an eighth of dry asphalt;
-//   - the missions' data: ids, n, group, fields, tips that name keys have a touch wording;
+//   - the missions' data: ids, n, group, fields, tips that name keys have a touch wording; the visibility each
+//     briefing names is what the pilot sees through the weather (src/missions/README.md "Visibility"); Hill
+//     Hop's push-over hint comes only once the col is behind, where taking it at its word still clears the ridge;
 //   - the look builds in Node: the biome forests, boulders and site props, with named materials and budgets.
 import { installDomStub } from './dom-stub.mjs';
 installDomStub();
@@ -25,6 +27,7 @@ const { NEW_SITES } = await import('../src/missions/sites.js');
 const { touchify } = await import('../src/touch.js');
 const { makeRng, DEG, headingToVec } = await import('../src/config.js');
 const biomes = await import('../src/art/world-biomes.js');
+const { clearExtinction, VISIBILITY_EXTINCTION } = await import('../src/art/world-atmosphere.js');
 const { WORLD_QUALITY } = await import('../src/art/quality.js');
 
 let failures = 0, passes = 0;
@@ -99,6 +102,10 @@ for (const id of NEW) {
   ok(crest > 26 && crest < 40, `kestrel: the saddle's crest is ${crest.toFixed(1)} m (26..40)`);
   ok(side > 80, `kestrel: the hills either side of the saddle stand ${side.toFixed(0)} m (> 80)`);
   ok(H('kestrel', -120) < 12 && H('kestrel', -40) < 7, `kestrel: the ground falls to the threshold (${H('kestrel', -120).toFixed(1)} m at 120 m out, ${H('kestrel', -40).toFixed(1)} m at 40 m)`);
+  // the PAPI (25 to 52 m left, 80 m in) and the apron, terminal and hangar (right) stand on level ground
+  let shelf = 0;
+  for (const [u, v] of [[80, -25], [80, -34], [80, -43], [80, -52], [350, 12], [350, 50], [530, 12], [530, 50], [390, 64], [530, 58]]) shelf = Math.max(shelf, Math.abs(H('kestrel', u, v) - 5));
+  ok(shelf < 0.05, `kestrel: the PAPI and the apron stand on level ground (worst ${shelf.toFixed(2)} m off)`);
   const beach = G('kestrel', 700), sea = G('kestrel', 780);
   ok(beach.kind === 'sand', `kestrel: sand 50 m past the far end (${beach.kind}, ${beach.y.toFixed(1)} m)`);
   ok(sea.kind === 'water', `kestrel: the sea 130 m past the far end (${sea.kind})`);
@@ -133,6 +140,7 @@ section('snow and ice');
   ok(mu('ice') >= 0.1 && mu('ice') <= 0.15, `airport.js: an ice runway brakes at mu ${mu('ice')} (0.10..0.15)`);
   ok(/out\.mu = rw\.wet \? 0\.5 : 0\.85; out\.kind = 'runway'/.test(src) && /s === 'gravel'\) \{ out\.mu = 0\.62/.test(src) && /s === 'sand'\) \{ out\.mu = 0\.5;/.test(src) && /else \{ out\.mu = 0\.55; out\.kind = 'dirt'/.test(src), 'airport.js: the four original surfaces keep their friction');
   for (const f of ['../src/camera.js', '../src/art/effects.js']) ok(/'snow'/.test(readFileSync(new URL(f, import.meta.url), 'utf8')), `${f.slice(7)} knows packed snow is rough ground`);
+  ok(/if \(night && rw\.surface === 'asphalt' && rw\.taxiway !== false\)/.test(src), 'airport.js: a runway with taxiway: false (Kestrel) has no taxiway lights either');
 }
 
 // ------------------------------------------------------------------ 4. the missions
@@ -168,7 +176,19 @@ for (const sc of MAPS_MISSIONS) {
     for (const e of sc.weather.events || []) ok(['visDrop', 'turbBurst', 'gustFront', 'windShift'].includes(e.type) && e.at && e.at.type, `${tag}: weather event ${e.type} with a trigger`);
   }
 }
-ok(MAPS_MISSIONS.find((s) => s.id === 'whiteout').weather.snow >= 0.8 && MAPS_MISSIONS.find((s) => s.id === 'whiteout').vis <= 1000, 'whiteout: heavy snow, under a kilometre of visibility');
+// What the pilot sees (README "Visibility"): the sky's air for `vis` (clearExtinction), thickened by the weather
+// look by 1 + 0.8 snow + 1.6 dust (src/art/weather-look.js on m-weather 5b06abe; change both together).
+const seenVis = (vis, wx) => VISIBILITY_EXTINCTION / (clearExtinction(vis) * (1 + 0.8 * (wx.snow || 0) + 1.6 * (wx.dust || 0)));
+{
+  const wo = MAPS_MISSIONS.find((s) => s.id === 'whiteout'), dw = MAPS_MISSIONS.find((s) => s.id === 'dust-wall');
+  const a = seenVis(wo.vis, wo.weather);
+  ok(wo.weather.snow >= 0.8 && a > 850 && a < 950 && /900 metres of visibility/.test(wo.desc), `whiteout: heavy snow, and the pilot sees ${a.toFixed(0)} m, as the briefing's 900 metres says (vis ${wo.vis})`);
+  const drop = dw.weather.events.find((e) => e.type === 'visDrop');
+  const b0 = seenVis(dw.vis, dw.weather), b1 = seenVis(drop.vis, dw.weather);
+  ok(b0 > 6300 && b0 < 7700 && b1 > 900 && b1 < 1250 && /from seven kilometres to one/.test(dw.desc), `dust-wall: the pilot sees ${(b0 / 1000).toFixed(1)} km, then ${(b1 / 1000).toFixed(2)} km after the drop, as "from seven kilometres to one" says`);
+  // every other map mission is in clear air: its vis is what the sky draws, and the text names no visibility
+  for (const sc of MAPS_MISSIONS) if (!sc.weather) ok(sc.vis >= 30000 && !/visibility/.test(sc.desc), `${sc.id}: clear air (vis ${sc.vis})`);
+}
 ok(SITES.frostbite.runways[0].surface === 'ice', 'whiteout: the runway is ice');
 ok(MAPS_MISSIONS.find((s) => s.id === 'dust-wall').weather.events.some((e) => e.type === 'visDrop' && e.at.type === 'dist'), 'dust-wall: the visibility drops on final');
 
@@ -199,7 +219,32 @@ for (const sc of MAPS_MISSIONS) {
     }
   }
   ok(worst.c > 3, `${sc.id}: the ${(gs / DEG).toFixed(1)}-degree path clears everything from ${far} m out by ${worst.c.toFixed(1)} m (tightest at u ${worst.u})`);
-  if (sc.id === 'hill-hop') ok(nearWorst < 15, `hill-hop: ...and crosses the saddle and its road only ${nearWorst.toFixed(1)} m up (the challenge)`);
+  if (sc.id === 'hill-hop') {
+    ok(nearWorst < 15, `hill-hop: ...and crosses the saddle and its road only ${nearWorst.toFixed(1)} m up (the challenge)`);
+    // The hint says "idle, and push over": never before the col (240 m out), and wherever it shows, a pilot who
+    // pushes into a 12-degree dive from the path and holds it for 100 m (or down to 100 m out, where the next hint
+    // says to flare) still clears the ground and the cars by 3 m.
+    const crest = -site.terrain.island.ridges[0].u, flying = { onGround: false, crashed: false };
+    const push = (d) => /push over/.test(sc.hint({ ac: flying, d, ra: 50, t: 0 }) || '');
+    let early = 0, shown = 0, dive = { c: 1e9, d: 0 };
+    for (let d = 1600; d >= 0; d -= 5) {
+      if (!push(d)) continue;
+      shown++; if (d > crest) early++;
+      const h0 = rw.elevation + (rw.aimDistance + d) * Math.tan(gs);
+      for (let d1 = d; d1 >= Math.max(d - 100, 100); d1 -= 5) {
+        let top = -1e9;
+        for (const v of [-12, 0, 12]) {
+          const p = at(id, -d1, v);
+          top = Math.max(top, T[id].height(p.x, p.z));
+          for (const o of props) if ((p.x - o.x) ** 2 + (p.z - o.z) ** 2 < (o.r + 6) ** 2) top = Math.max(top, o.y);
+        }
+        const c = h0 - (d - d1) * Math.tan(12 * DEG) - top;
+        if (c < dive.c) dive = { c, d };
+      }
+    }
+    ok(shown > 0 && early === 0, `hill-hop: the push-over hint shows only once the col (${crest} m out) is behind (${early} of ${shown} samples early)`);
+    ok(dive.c > 3, `hill-hop: pushing into a 12-degree dive where the hint says so clears everything by ${dive.c.toFixed(1)} m (tightest from ${dive.d} m out)`);
+  }
   if (sc.id === 'mesa-top' || sc.id === 'dust-wall') {
     const rim = rw.elevation + (rw.aimDistance + 30) * Math.tan(gs) - H('redmesa', -30);
     ok(rim > 3 && rim < 12, `${sc.id}: the wheels cross the rim ${rim.toFixed(1)} m up`);
@@ -209,6 +254,22 @@ for (const sc of MAPS_MISSIONS) {
 // ------------------------------------------------------------------ 6. the look builds
 section('the look');
 {
+  // The woods: Kestrel's dry forest grows in stands with a narrow edge (a wood, or open scrub, rarely in between),
+  // and both shores of Frostbite's lake carry a band of spruce whatever the woodland noise says.
+  let land = 0, full = 0, part = 0;
+  const I = T.kestrel.island;
+  for (let x = I.x - I.rx; x < I.x + I.rx; x += 40) for (let z = I.z - I.rz; z < I.z + I.rz; z += 40) {
+    if (T.kestrel.height(x, z) < 5) continue;
+    land++; const s = biomes.islandStand(T.kestrel, x, z); if (s > 0.99) full++; else if (s > 0.01) part++;
+  }
+  ok(full / land > 0.18 && full / land < 0.4 && part / land < 0.15, `kestrel: woods on ${(100 * full / land).toFixed(0)}% of the land, the edge of a stand on ${(100 * part / land).toFixed(0)}%`);
+  let band = 1;
+  for (let i = 0; i < 400; i++) {
+    const x = (i * 977) % 12000 - 6000, z = (i * 613) % 12000 - 6000, s = T.frostbite.lakeShore(x, z);
+    if (s > 16 && s < 60) band = Math.min(band, biomes.arcticWood(T.frostbite, x, z, s));
+  }
+  ok(band > 0.99, `frostbite: the spruce is at full density within 60 m of every shore (lowest ${band.toFixed(2)})`);
+
   const named = (objs) => { let n = 0, bad = 0; for (const o of objs) o.traverse((m) => { if (m.material) { n++; if (!m.material.name) bad++; } }); return { n, bad }; };
   for (const detail of ['high', 'low']) {
     WORLD_QUALITY.detail = detail;
@@ -243,6 +304,7 @@ section('the look');
     let noColour = 0; for (const o of props) if (!o.geometry.attributes.color) noColour++;
     ok(noColour === 0, `${id}: every prop geometry carries the vertex colours its material reads`);
     ok(p.obstacles.every((o) => o.kind === 'structure' && o.r > 0 && o.y > rw.elevation - 5 && o.name), `${id}: ${p.obstacles.length} solid props, each a named structure`);
+    if (id === 'paradise') { const um = p.objects.find((o) => o.name === 'biome/umbrellas'); ok(um && um.count >= 6 && um.count <= 12, `paradise: a few umbrellas on the public beach (${um ? um.count : 0}; the brief: a few at most)`); }
     // the site's own roads: drawn at all, facing up (the terrain-look ribbon faces down and is culled from above),
     // on the ground and not under it (the analytic height or the 20 m ground mesh, whichever is higher), not in the sea
     const want = ((rw.surroundings && rw.surroundings.roads) || []).filter((r) => r.pts).length;

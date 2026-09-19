@@ -252,7 +252,7 @@ export const BIOMES = {
     scrub: [0.11, 0.11, 0.065],        // sage and blackbrush
     rock: [0.38, 0.12, 0.05],          // Entrada-red cliffs
     rockLight: [0.47, 0.26, 0.14],     // the paler bands
-    varnish: [0.09, 0.05, 0.035],      // desert varnish under the caprock
+    varnish: [0.16, 0.085, 0.055],     // desert varnish under the caprock: dark red-brown streaks
     caprock: [0.40, 0.29, 0.18],       // the mesa tops
     talus: [0.30, 0.15, 0.08],
     boulder: 0xa05a3a,

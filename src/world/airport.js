@@ -228,7 +228,7 @@ export class Airport {
       this.strobes.push({ set: ls, i: addL(-2, -rw.width / 2 - 12, 0.6, L.approach), phase: 0, reil: true });
       this.strobes.push({ set: ls, i: addL(-2, rw.width / 2 + 12, 0.6, L.approach), phase: 0, reil: true });
     }
-    if (night && rw.surface === 'asphalt') {
+    if (night && rw.surface === 'asphalt' && rw.taxiway !== false) {   // (taxiway: false, the new maps: none to light)
       const twy = rw.width / 2 + 90;
       for (let u = 0; u <= rw.length; u += 40) { addL(u, twy - 12, 0.3, L.taxiway); addL(u, twy + 12, 0.3, L.taxiway); }
     }

@@ -138,7 +138,8 @@ function biomeColor(field, h, slope, x, z, out) {
     const rock=[lerp(B.rock[0],B.rockLight[0],band*band),lerp(B.rock[1],B.rockLight[1],band*band),lerp(B.rock[2],B.rockLight[2],band*band)];
     mix(B.talus,smoothstep(0.10,0.22,slope)*(1-smoothstep(0.3,0.5,slope)));
     mix(rock,smoothstep(0.24,0.5,slope));
-    mix(B.varnish,smoothstep(0.45,0.8,slope)*smoothstep(0.1,0.6,noise2(x/90,z/90,field.seed+51))*0.45);
+    // (a streak of it, not a smear of soot: at most a quarter, and the colour itself a dark red-brown)
+    mix(B.varnish,smoothstep(0.45,0.8,slope)*smoothstep(0.1,0.6,noise2(x/90,z/90,field.seed+51))*0.25);
     mix(B.caprock,smoothstep(40,90,rel)*flat*(0.75+0.25*broad));
   } else {
     const B=BIOMES.arctic, shore=field.lakeShore?field.lakeShore(x,z):1e3;
