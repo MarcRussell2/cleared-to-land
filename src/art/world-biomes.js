@@ -15,7 +15,9 @@
 //                             runway with `props`. rw and place(u, v, out) are as everywhere in
 //                             airport-look.js; groundAt(x, z) is the terrain height (a beach is
 //                             lower than the runway). Solid props return obstacles, like the
-//                             aerodrome's buildings: {x, z, r, y, kind: 'structure', name}.
+//                             aerodrome's buildings: {x, z, r, y, kind: 'structure', name}. It also
+//                             draws the site's own roads, rw.surroundings.roads entries of the form
+//                             {w, pts: [[u, v], ...]}: see siteRoads() below.
 //
 // `field` is the live Terrain, read-only (the list of what it offers is in world-ground.js's
 // header); the new styles add `island`, `desert`, `arctic` (their parameters) and, for the arctic,
@@ -37,7 +39,7 @@
 import * as THREE from 'three';
 import { clamp, smoothstep, lerp, makeRng, noise2 } from '../config.js';
 import { mergeGeos } from '../geom.js';
-import { BIOMES, FINISH } from './palette.js';
+import { BIOMES, FINISH, PALETTE } from './palette.js';
 import { WORLD_QUALITY } from './quality.js';
 
 // The terrain styles this file dresses (src/world/terrain.js).
@@ -47,9 +49,9 @@ export const BIOME_STYLES = new Set(['island', 'desert', 'arctic']);
 // (thickest along the shore, thin up the hills). The trees below grow on these and the ground under them
 // (world-ground.js biomeColor) darkens on the same masks, so a stand sits on its own shade and reads as a mass
 // from a distance instead of as a scatter of dots. `shore` is field.lakeShore(x, z), already to hand.
-export function islandStand(field, x, z) { return smoothstep(0.02, 0.24, field.forestNoise(x, z)); }
+export function islandStand(field, x, z) { return smoothstep(0.25, 0.40, field.forestNoise(x, z)); }
 export function arcticWood(field, x, z, shore) {
-  return smoothstep(-0.15, 0.2, field.forestNoise(x, z)) * (0.25 + 0.75 * (1 - smoothstep(500, 1700, shore)));
+  return smoothstep(-0.15, 0.2, field.forestNoise(x, z)) * (0.2 + 0.8 * (1 - smoothstep(300, 1100, shore)));
 }
 
 // ------------------------------------------------------------------ geometry helpers
@@ -77,8 +79,7 @@ const lin = (hex) => { const c = new THREE.Color(hex); return [c.r, c.g, c.b]; }
 const hsl = (o, k = 0.5) => { const c = new THREE.Color().setHSL(o.h, o.s, o.l + (o.lVary || 0) * (k - 0.5)); return [c.r, c.g, c.b]; };
 
 // A palm, 12 m tall at scale 1, leaning a little down +x: a curved, tapering trunk and a crown of
-// seven fronds, each folded along its midrib and drooping in an arc; the lowest two are the old
-// brown ones. 108 triangles (the forest budget is 110 a tree); level 1 keeps the silhouette in 52.
+// seven fronds, each folded along its midrib and drooping in an arc; the lowest is an old brown one. 108 triangles (the forest budget is 110 a tree); level 1 keeps the silhouette in 52.
 function palmGeometry(level) {
   const parts = [];
   const trunkC = lin(BIOMES.island.palmTrunk);
@@ -95,7 +96,7 @@ function palmGeometry(level) {
   const fronds = level ? 5 : 7, steps = level ? 2 : 3;
   const green = hsl(BIOMES.island.palmFrond, 0.55), dry = BIOMES.island.palmDry;
   for (let f = 0; f < fronds; f++) {
-    const a = f * 2.39996 + 0.3, old = !level && f >= fronds - 2;
+    const a = f * 2.39996 + 0.3, old = !level && f === fronds - 1;
     const len = old ? 3.6 : 4.6, lift = old ? -0.9 : 0.35 - 0.12 * (f % 3);
     const dx = Math.cos(a), dz = Math.sin(a);
     const verts = [], idx = [];
@@ -241,7 +242,7 @@ function rangeMaterial(name, extra, near, far, card = false) {
 // ------------------------------------------------------------------ the forests
 const SPECIES = {
   palm: { geo: palmGeometry, model: 12, card: 9, double: true, wide: 1 },
-  scrub: { geo: scrubGeometry, model: 6, card: 9, double: false, wide: 1.5 },
+  scrub: { geo: scrubGeometry, model: 6, card: 9, double: false, wide: 1.7 },
   spruce: { geo: spruceGeometry, model: 14, card: 4.5, double: false, wide: 1 },
 };
 
@@ -253,7 +254,8 @@ export function biomeForest(field, opts = {}) {
   const high = detail === 'high', low = detail === 'low';
   const island = field.style === 'island';
   const area = Math.min(field.treeArea, 5400), rng = makeRng(field.seed * 131 + 17);
-  const cell = island ? 15 : 18, water = field.waterLevel ?? -1e9;
+  // (12 m on an island: a stand's crowns, 7 to 17 m across, have to close into one canopy; 14 m for the spruce)
+  const cell = island ? 12 : 14, water = field.waterLevel ?? -1e9;
   const cap = Math.floor(opts.maxTrees ?? 24000);
   const normal = new THREE.Vector3();
   const trees = [];
@@ -272,7 +274,8 @@ export function biomeForest(field, opts = {}) {
       // they decide before the height is sampled.
       const dc = field.coastDistance ? field.coastDistance(px, pz) : 100;
       if (dc < 5) continue;
-      const palm = 0.68 * smoothstep(6, 18, dc) * (1 - smoothstep(50, 140, dc)) + 0.012 * (1 - smoothstep(100, 500, dc));
+      // (per 15 m square, whatever the cell)
+      const palm = (0.68 * smoothstep(6, 18, dc) * (1 - smoothstep(50, 140, dc)) + 0.012 * (1 - smoothstep(100, 500, dc))) * cell * cell / 225;
       if (chance < palm) species = 'palm';
       else {
         const scrub = Math.min(0.8, field.treeDensity * (0.012 + 1.15 * islandStand(field, px, pz))) * smoothstep(20, 60, dc);
@@ -535,8 +538,8 @@ export function buildSiteProps(rw, place, kind, groundAt) {
     kit.box(walls, 530, 58, 0, 0, 0, 16, 7, 20); kit.solid(530, 58, 12, 8, 'the hangar');
     kit.box(I.roof, 530, 58, 0, 7, 0, 17, 0.8, 21);
     kit.box(0x55585c, 440, 31, 0, -0.52, 0, 38, 0.6, 180);   // the apron
-    // cars on the road through the saddle: fly over them, not into them
-    cars(kit, [[-252, -92, Math.PI / 2], [-248, -18, -Math.PI / 2], [-252, 47, Math.PI / 2], [-248, 160, -Math.PI / 2]], 921);
+    // cars on the road over the col (sites.js): fly over them, not into them
+    cars(kit, [[-268, -22, Math.PI / 2 - 0.55], [-250, 12, -Math.PI / 2 - 0.1], [-247, 52, Math.PI / 2 - 0.05]], 921);
     // and the beach past the far end
     const rng = makeRng(922), spots = [];
     for (let v = -330; v <= 330; v += 42) if (Math.abs(v) > 60) spots.push([695 + 6 * rng(), v + 10 * (rng() - 0.5)]);
@@ -555,7 +558,61 @@ export function buildSiteProps(rw, place, kind, groundAt) {
     }
     kit.instanced('shacks', geo, huts, true);
   }
+  siteRoads(kit, rw, place, groundAt);
   return kit.finish();
+}
+
+// The site's own roads (rw.surroundings.roads, {w, pts: [[u, v], ...]} in the runway frame): one merged,
+// draped ribbon, resampled every 6 m and laid on whichever is higher, the terrain or the ground mesh drawn over
+// it (a 20 m grid: vertices on multiples of 20 m, each cell split from (i+1, j) to (i, j+1), as world-ground.js
+// builds it), plus 12 cm; its triangles face up. (terrain-look's buildRoad, which the original sites use, winds
+// its ribbon so that it faces down and is culled from above: those roads are never seen. Out of this file's
+// remit; the new maps' roads come this way instead.)
+function meshTop(groundAt, x, z) {
+  const i = Math.floor(x / 20), j = Math.floor(z / 20), fx = x / 20 - i, fz = z / 20 - j;
+  const h = (a, b) => groundAt(a * 20, b * 20);
+  return fx + fz <= 1 ? h(i, j) + (h(i + 1, j) - h(i, j)) * fx + (h(i, j + 1) - h(i, j)) * fz
+    : h(i + 1, j + 1) + (h(i, j + 1) - h(i + 1, j + 1)) * (1 - fx) + (h(i + 1, j) - h(i + 1, j + 1)) * (1 - fz);
+}
+function siteRoads(kit, rw, place, groundAt) {
+  const list = ((rw.surroundings && rw.surroundings.roads) || []).filter((r) => r && r.pts && r.pts.length > 1);
+  if (!list.length || !groundAt) return;
+  const pos = [], idx = [], p = new THREE.Vector3();
+  const vert = (u, v) => {
+    place(u, v, p);
+    pos.push(p.x, Math.max(groundAt(p.x, p.z), meshTop(groundAt, p.x, p.z)) + 0.12, p.z);
+    return pos.length / 3 - 1;
+  };
+  for (const r of list) {
+    const pts = [];
+    for (let k = 0; k < r.pts.length - 1; k++) {
+      const [u0, v0] = r.pts[k], [u1, v1] = r.pts[k + 1], n = Math.max(1, Math.ceil(Math.hypot(u1 - u0, v1 - v0) / 6));
+      for (let s = 0; s < n; s++) pts.push([lerp(u0, u1, s / n), lerp(v0, v1, s / n)]);
+    }
+    pts.push(r.pts[r.pts.length - 1]);
+    let prev = null;
+    for (let k = 0; k < pts.length; k++) {
+      const a = pts[Math.max(0, k - 1)], b = pts[Math.min(pts.length - 1, k + 1)];
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, nu = -(b[1] - a[1]) / L * r.w / 2, nv = (b[0] - a[0]) / L * r.w / 2;
+      const pair = [vert(pts[k][0] + nu, pts[k][1] + nv), vert(pts[k][0] - nu, pts[k][1] - nv)];
+      if (prev) for (const [i, j, l] of [[prev[0], prev[1], pair[0]], [prev[1], pair[1], pair[0]]]) {
+        // wind each triangle so that it faces up
+        const ax = pos[j * 3] - pos[i * 3], az = pos[j * 3 + 2] - pos[i * 3 + 2], bx = pos[l * 3] - pos[i * 3], bz = pos[l * 3 + 2] - pos[i * 3 + 2];
+        if (az * bx - ax * bz > 0) idx.push(i, j, l); else idx.push(i, l, j);
+      }
+      prev = pair;
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  g.computeBoundingSphere();
+  const mat = new THREE.MeshStandardMaterial({ color: PALETTE.road, ...FINISH.ground, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  mat.name = 'biome/roads';
+  const mesh = new THREE.Mesh(g, mat);
+  mesh.name = 'biome/roads'; mesh.receiveShadow = true; mesh.castShadow = false;
+  kit.objects.push(mesh);
 }
 
 // Beach hotels: [u, v, width along the beach, depth, height] in the runway frame. Walls in one

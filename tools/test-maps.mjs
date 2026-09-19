@@ -236,12 +236,36 @@ section('the look');
     const place = (u, v, out) => out.copy(rw.threshold).addScaledVector(rw.dir, u).addScaledVector(rw.right, v).setY(rw.elevation);
     const p = biomes.buildSiteProps(rw, place, rw.props, (x, z) => T[id].height(x, z));
     const m = named(p.objects), mats = new Set();
-    for (const o of p.objects) o.traverse((x) => { if (x.material) mats.add(x.material); });
-    ok(m.bad === 0 && p.objects.length <= 6, `${id}: site props are ${p.objects.length} draws, every material named`);
-    ok(mats.size === 1, `${id}: site props share one material (${mats.size}; the aerodrome's budget is 20)`);
-    let noColour = 0; for (const o of p.objects) if (!o.geometry.attributes.color) noColour++;
+    const props = p.objects.filter((o) => o.name !== 'biome/roads'), road = p.objects.find((o) => o.name === 'biome/roads');
+    for (const o of props) o.traverse((x) => { if (x.material) mats.add(x.material); });
+    ok(m.bad === 0 && p.objects.length <= 7, `${id}: site props are ${p.objects.length} draws, every material named`);
+    ok(mats.size === 1, `${id}: site props share one material, the roads another (${mats.size} + ${road ? 1 : 0}; the aerodrome's budget is 20)`);
+    let noColour = 0; for (const o of props) if (!o.geometry.attributes.color) noColour++;
     ok(noColour === 0, `${id}: every prop geometry carries the vertex colours its material reads`);
     ok(p.obstacles.every((o) => o.kind === 'structure' && o.r > 0 && o.y > rw.elevation - 5 && o.name), `${id}: ${p.obstacles.length} solid props, each a named structure`);
+    // the site's own roads: drawn at all, facing up (the terrain-look ribbon faces down and is culled from above),
+    // on the ground and not under it (the analytic height or the 20 m ground mesh, whichever is higher), not in the sea
+    const want = ((rw.surroundings && rw.surroundings.roads) || []).filter((r) => r.pts).length;
+    ok(!want || !!road, `${id}: its ${want} road(s) are drawn`);
+    if (road) {
+      const P = road.geometry.attributes.position, I = road.geometry.index;
+      let down = 0, sunk = 0, wet = 0, far = 0;
+      const mesh20 = (x, z) => { const i = Math.floor(x / 20), j = Math.floor(z / 20), fx = x / 20 - i, fz = z / 20 - j, h = (a, b) => T[id].height(a * 20, b * 20);
+        return fx + fz <= 1 ? h(i, j) + (h(i + 1, j) - h(i, j)) * fx + (h(i, j + 1) - h(i, j)) * fz : h(i + 1, j + 1) + (h(i, j + 1) - h(i + 1, j + 1)) * (1 - fx) + (h(i + 1, j) - h(i + 1, j + 1)) * (1 - fz); };
+      for (let t = 0; t < I.count; t += 3) {
+        const a = I.getX(t), b = I.getX(t + 1), c = I.getX(t + 2);
+        const ax = P.getX(b) - P.getX(a), az = P.getZ(b) - P.getZ(a), bx = P.getX(c) - P.getX(a), bz = P.getZ(c) - P.getZ(a);
+        if (az * bx - ax * bz <= 0) down++;
+        // the middle of each triangle, where the ground mesh is least likely to agree with its corners
+        const x = (P.getX(a) + P.getX(b) + P.getX(c)) / 3, z = (P.getZ(a) + P.getZ(b) + P.getZ(c)) / 3, y = (P.getY(a) + P.getY(b) + P.getY(c)) / 3;
+        if (y < Math.max(T[id].height(x, z), mesh20(x, z)) - 0.05) sunk++;
+        if (y < (T[id].waterLevel ?? -1e9) + 0.5) wet++;
+      }
+      for (let i = 0; i < P.count; i++) if (Math.abs(P.getY(i) - T[id].height(P.getX(i), P.getZ(i))) > 1.5) far++;
+      ok(down === 0, `${id}: every road triangle faces up (${down} of ${I.count / 3} face down)`);
+      ok(sunk === 0 && far === 0, `${id}: the roads lie on the ground (${sunk} triangles sunk under it, ${far} vertices over 1.5 m off it)`);
+      ok(wet === 0, `${id}: no road runs into the sea (${wet} triangles at the waterline)`);
+    }
   }
 }
 

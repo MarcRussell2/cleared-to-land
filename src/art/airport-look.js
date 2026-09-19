@@ -194,6 +194,9 @@ export function buildShoulders(rw, place) {
     const edge=side*(rw.width/2+1.5);
     add(0,rw.length,edge-2.5,edge+2.5,fringe);
   }
+  // (the new maps: a runway with `taxiway: false` - Kestrel Island's strip, whose apron is the site's own, on a
+  // hillside the parallel taxiway would cut through - keeps only its shoulders)
+  if (rw.taxiway === false) return batchStatic(objects);
   for(const edge of [twyOffset-12,twyOffset+12])add(0,rw.length,edge-1.7,edge+1.7,fringe);
   add(0, rw.length, twyOffset - 12, twyOffset + 12);
   for (const u of [40, rw.length * 0.5, rw.length - 40]) add(u - 12, u + 12, rw.width / 2, twyOffset);

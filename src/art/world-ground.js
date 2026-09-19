@@ -117,7 +117,7 @@ function biomeColor(field, h, slope, x, z, out) {
     // stands (the same mask the trees grow on, world-biomes.js islandStand), red earth where the slopes erode,
     // rock on the steep faces and knolls
     out.setRGB(B.scrub[0]+B.lushNoise[0]*n,B.scrub[1]+B.lushNoise[1]*n,B.scrub[2]+B.lushNoise[2]*n);
-    mix(B.lush,(1-smoothstep(5,45,d))*smoothstep(-0.3,0.2,-broad)*0.7);
+    mix(B.lush,(1-smoothstep(5,45,d))*smoothstep(-0.3,0.2,-broad)*0.55);
     mix(B.dryGrass,smoothstep(0.0,0.55,m1+0.35*broad)*smoothstep(4,30,d)*(0.45+0.3*smoothstep(30,120,d)));
     mix(B.woodFloor,islandStand(field,x,z)*smoothstep(3,10,d)*0.85);
     mix(B.soil,smoothstep(0.10,0.28,slope)*(0.35+0.35*m2)*smoothstep(4,15,d));
@@ -187,15 +187,20 @@ export function buildGround(field, opts = {}) {
     mat.name=farOnly?'world/ground-far':'world/ground';
     mat.userData.parcelMap=parcels;mat.userData.detailMap=detail;
     if(!farOnly)mat.addEventListener('dispose',()=>{parcels.dispose();detail.dispose();});
-    // The new maps' ground draws its near detail at a strength of their own (grass blades
+    // The new maps' desert and snow draw their near detail at a strength of their own (grass blades
     // on snow and sand read as litter at full strength): a separate program, the others unchanged.
-    const biome=!!BIOMES[field.style];
+    // The island keeps the full strength: its scrub is what that texture is for (and so it shares
+    // the original program).
+    const biome=!!BIOMES[field.style]&&field.style!=='island';
     // The desert's cliffs are layered sandstone, and a cliff is one or two rows of a 20 m mesh: its vertex
     // colours cannot carry the layers, so steep facets get their bands here, by height (three warped sines:
     // beds of uneven thickness with thin partings), paler and redder in turn. Desert only; its own program.
+    // How steep comes from the interpolated vertex normal (the grid's finite differences span the drop), not
+    // the facet: on a coarse tile a cliff crosses the grid diagonally, its triangles alternate between steep
+    // and half-steep, and facet steepness drew that as a comb of V-shaped teeth along every far mesa.
     const strata=field.style==='desert'?`
-        vec3 grFacet=normalize(cross(dFdx(grWorld),dFdy(grWorld)));
-        float grSteep=smoothstep(0.45,0.8,1.0-abs(grFacet.y));
+        float grUp=dot(normalize(vNormal),normalize((viewMatrix*vec4(0.0,1.0,0.0,0.0)).xyz));
+        float grSteep=smoothstep(0.35,0.7,1.0-abs(grUp));
         float grBand=clamp(0.5+0.32*sin(grWorld.y*0.45+grWide*6.0)+0.22*sin(grWorld.y*1.3+1.7)+0.14*sin(grWorld.y*3.1+grWide*9.0),0.0,1.0);
         diffuseColor.rgb*=mix(vec3(1.0),mix(vec3(0.83,0.79,0.77),vec3(1.12,1.09,1.04),grBand),grSteep);
       `:'';

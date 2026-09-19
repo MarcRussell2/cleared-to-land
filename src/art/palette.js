@@ -218,12 +218,12 @@ export const BIOMES = {
     sand: [0.60, 0.56, 0.45],          // coral sand: whiter than a temperate beach
     wetSand: [0.34, 0.32, 0.26],
     seabed: [0.42, 0.44, 0.36],
-    lush: [0.046, 0.090, 0.026],       // the moist hollows and the lowland: greener, never lawn
+    lush: [0.050, 0.076, 0.030],       // the moist hollows and the lowland: greener, never lawn
     lushNoise: [0.010, 0.015, 0.006],
-    scrub: [0.068, 0.076, 0.036],      // the island's base: dry olive-grey scrub (a Leeward island, not a jungle)
+    scrub: [0.070, 0.073, 0.037],      // the island's base: dry olive-grey scrub (a Leeward island, not a jungle)
     dryGrass: [0.165, 0.145, 0.075],   // sun-burnt patches
     soil: [0.20, 0.115, 0.06],         // red-brown earth where the slopes erode
-    woodFloor: [0.024, 0.036, 0.017],  // the dry forest's shade, which is what makes its stands read as masses
+    woodFloor: [0.032, 0.044, 0.020],  // the dry forest's shade under its closed canopy: a stand reads as one mass
     rock: [0.25, 0.22, 0.18],
     // The water body over the shallows (world-water.js), multiplied by the daylight as the deep colour is:
     // sand seen through a metre of water, the turquoise over the shelf, the darker reef and weed patches.
@@ -231,8 +231,8 @@ export const BIOMES = {
     lagoon: [0.028, 0.23, 0.25],
     reef: [0.018, 0.09, 0.10],
     palmTrunk: 0x7d705e,
-    palmFrond: { h: 0.23, hVary: 0.04, s: 0.55, l: 0.075, lVary: 0.03 },
-    palmDry: [0.20, 0.17, 0.08],        // the old fronds hanging lowest
+    palmFrond: { h: 0.26, hVary: 0.04, s: 0.62, l: 0.068, lVary: 0.03 },   // a live coconut palm is green, not khaki
+    palmDry: [0.12, 0.10, 0.045],       // the old frond hanging lowest
     scrubTree: { h: 0.24, hVary: 0.05, s: 0.5, l: 0.068, lVary: 0.025 },
     umbrellas: [0xd9483b, 0x2f7fb8, 0xe8c547, 0xf2f0e8, 0x3c9a6e, 0xe07b39],
     pole: 0xd8d2c4,

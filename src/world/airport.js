@@ -267,7 +267,8 @@ export class Airport {
     const road = (u0, v0, u1, v1, w) => { this.point(rw, u0, v0, tmp); this.point(rw, u1, v1, tmp2); T.addRoad(tmp.x, tmp.z, tmp2.x, tmp2.z, w); };
     // a site may place its own (the new maps: a coast road, a road through a saddle; runway frame)
     if (rw.surroundings) {
-      for (const r of rw.surroundings.roads || []) road(...r);
+      // (a polyline {w, pts} is drawn by the site's own props, look.buildSiteProps, facing up and draped)
+      for (const r of rw.surroundings.roads || []) if (Array.isArray(r)) road(...r);
       for (const [u, v, n, spread] of rw.surroundings.villages || []) { this.point(rw, u, v, tmp); T.addVillage(tmp.x, tmp.z, n, spread); }
       return;
     }

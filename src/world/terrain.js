@@ -15,7 +15,8 @@
 // Their parameters are the objects `island`, `arctic` and `desert` in site.terrain (each one is
 // documented at its height function below), plus `rwFrame` {x, z, heading}: runway 0's threshold and
 // heading, the frame (u metres along the runway, v to its right) the features are placed in. A site
-// may also hand `runwayFlats`: explicit flats with a blend margin per side (m0 at the approach end,
+// may also hand `clear` (runway-frame spots and roads kept free of trees and boulders: see the constructor) and
+// `runwayFlats`: explicit flats with a blend margin per side (m0 at the approach end,
 // m1 at the far end, mv at the sides) instead of the airport/bush defaults from siteFlats(), which
 // would level a ridge, a cliff or a beach the map needs right at the threshold. The four original
 // styles, and every height they produce, are exactly as they were (tools/test-maps.mjs checks it).
@@ -60,6 +61,17 @@ export class Terrain {
     const fh = (F.heading || 0) * DEG;
     this.frame = { x: F.x || 0, z: F.z || 0, dx: Math.sin(fh), dz: -Math.cos(fh) };
     this._u = 0; this._v = 0;
+    // The new maps: runway-frame places kept clear of trees and boulders, site.terrain.clear = {spots: [{u, v, r}],
+    // roads: [{w, pts: [[u, v], ...]}]}: a site's own buildings and roads, which are placed after the forest is
+    // grown. They join keepOut (what nearFlat() keeps clutter out of); a road is a circle every 10 m of it.
+    if (opts.clear) {
+      const at = (u, v, r) => this.keepOut.push({ x: this.frame.x + u * this.frame.dx - v * this.frame.dz, z: this.frame.z + u * this.frame.dz + v * this.frame.dx, r });
+      for (const c of opts.clear.spots || []) at(c.u, c.v, c.r);
+      for (const r of opts.clear.roads || []) for (let k = 0; k < r.pts.length - 1; k++) {
+        const [u0, v0] = r.pts[k], [u1, v1] = r.pts[k + 1], n = Math.max(1, Math.ceil(Math.hypot(u1 - u0, v1 - v0) / 10));
+        for (let i = 0; i <= n; i++) at(lerp(u0, u1, i / n), lerp(v0, v1, i / n), r.w / 2);
+      }
+    }
     this.group = new THREE.Group();
     this.tmpN = new THREE.Vector3();
     this.treeCount = 0;
@@ -351,14 +363,16 @@ export class Terrain {
         clear = Math.min(clear, smoothstep(0, L.fade, Math.hypot(du, dv)));
       }
       if (clear > 0) {
-        const n = fbm2(x / 1900, z / 1900, 4, s + 2);
-        const rock = 0.62 * smoothstep(0.27, 0.31, n) + 0.2 * smoothstep(0.19, 0.28, n) + 0.45 * smoothstep(0.42, 0.45, n);
+        // (three octaves and steps about two ground-mesh cells wide: a sheerer edge wandering across the 20 m
+        // grid is drawn as a row of V-shaped teeth)
+        const n = fbm2(x / 1900, z / 1900, 3, s + 2);
+        const rock = 0.62 * smoothstep(0.25, 0.33, n) + 0.2 * smoothstep(0.19, 0.28, n) + 0.45 * smoothstep(0.41, 0.47, n);
         h += D.butte * rock * clear * (0.85 + 0.15 * fbm2(x / 300, z / 300, 2, s + 16));
       }
     }
     if (D.buttes) for (const B of D.buttes) {
       const sd = Math.hypot(u - B.u, v - B.v) - B.r * (1 + 0.14 * fbm2(x / 250, z / 250, 2, s + 17));
-      if (sd < 130) h = Math.max(h, floor + B.h * (1 - this.mesaProfile(sd)));
+      if (sd < 130) h = Math.max(h, floor + B.h * (1 - this.mesaProfile(sd, 28)));   // round: a wider face (see above)
     }
     if (D.mesa) {
       const M = D.mesa, rr = M.round ?? 100, hu = (M.u1 - M.u0) / 2;
@@ -381,9 +395,10 @@ export class Terrain {
     return h;
   }
 
-  // 0 on a mesa's top, 1 at its foot: a near-vertical cliff (three quarters of the drop in 14 m)
-  // and a talus slope below it. sd is the metres outside the edge.
-  mesaProfile(sd) { return 0.74 * smoothstep(0, 14, sd) + 0.26 * smoothstep(8, 120, sd); }
+  // 0 on a mesa's top, 1 at its foot: a near-vertical cliff (three quarters of the drop in `w` metres, 14 by
+  // default: the strip's mesa, whose faces run along the ground grid) and a talus slope below it. sd is the
+  // metres outside the edge.
+  mesaProfile(sd, w = 14) { return 0.74 * smoothstep(0, w, sd) + 0.26 * smoothstep(8, 120, sd); }
 
   build(scene, opts = {}) {
     this.mesh = look.buildGround(this);
