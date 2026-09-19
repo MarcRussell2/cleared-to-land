@@ -4,7 +4,13 @@
 // (a microburst pilot flies the escape the tips teach); and the carrier-in-a-storm trap is asserted, which
 // tools/test-carrier.mjs (a log, no assertions) does not do.
 //
-//   node tools/test-weather.mjs            the checks (exit 1 on a failure)
+//   node tools/test-weather.mjs            the checks (exit 1 on a failure), what npm test runs: every mission with
+//                                          every pilot, on the first seed of each sweep for a runway (its analytic
+//                                          terrain makes a flight there about a second) and the first three for the
+//                                          carrier, and Roulette's storm and snow spins
+//   node tools/test-weather.mjs --full     the same checks over the whole sweep (5 seeds per runway pilot, 12 per
+//                                          carrier pilot, a Roulette spin of every kind): run it before a merge and
+//                                          after any change to the weather, the carrier or the flight model (~35 s)
 //   node tools/test-weather.mjs --fly id [seeds]   one mission's flights in detail, e.g. --fly microburst 1-12
 import { installDomStub } from './dom-stub.mjs';
 installDomStub();   // src/world/terrain.js reaches the art bench, which draws canvas textures
@@ -23,6 +29,7 @@ const { KT, FT, DEG, RAD, FPM, makeRng, headingToVec } = await import('../src/co
 let fails = 0, passes = 0;
 const ok = (c, msg) => { if (c) { passes++; if (VERBOSE) console.log('PASS ' + msg); } else { fails++; console.log('FAIL ' + msg); } };
 const VERBOSE = process.argv.includes('-v');
+const FULL = process.argv.includes('--full');
 const say = (s) => console.log(s);
 
 // ---------------------------------------------------------------- a world without the GPU
@@ -456,8 +463,9 @@ say('weather model');
 // the tips teach, and a pilot who freezes attitude and power (who must NOT make it: the burst is real).
 // Carriers: Autoland for the record, and the LSO pilot (above) for the assertion - a pilot who flies the ball's
 // average and adds power when the stern is coming up must never hit the ramp, and must get aboard often.
-const SEEDS = [307, 11, 42, 99, 123];
-const BOAT_SEEDS = [307, 11, 42, 99, 123, 7, 8, 9, 10, 12, 13, 14];
+const SEEDS = [307, 11, 42, 99, 123].slice(0, FULL ? 5 : 1);
+const BOAT_SEEDS = [307, 11, 42, 99, 123, 7, 8, 9, 10, 12, 13, 14].slice(0, FULL ? 12 : 3);
+say(FULL ? '  (--full: every seed)' : `  (the first ${SEEDS.length === 1 ? 'seed' : SEEDS.length + ' seeds'} of the runway sweep and ${BOAT_SEEDS.length} of the carrier sweep; --full flies them all)`);
 const results = {};
 const rate = (rs, f) => `${rs.filter(f).length}/${rs.length}`;
 for (const m of WEATHER_MISSIONS) {
@@ -552,9 +560,11 @@ for (const m of WEATHER_MISSIONS) {
     const s = resolveScenario(base, makeRng(seed), { approach: 'short' });
     if (s.weather && SITES[s.site].kind === 'airport' && !spins.some((x) => x.w === s.weather.preset)) spins.push({ seed, w: s.weather.preset });
   }
-  const rs = spins.map(({ seed }) => fly(base, seed));
-  say(`  roulette     autoland ${rs.map((r, i) => `${r.seed} ${spins[i].w}: ${outcome(r)}`).join('; ')}`);
-  ok(rs.every((r) => !r.crashed && r.td), `Roulette: a spin of each kind of weather lands on Autoland (${spins.map((x) => x.w).join(', ')})`);
+  // (by default the storm and snow spins: the wet runway and the lowest cloud; --full flies every kind)
+  const flown = FULL ? spins : spins.filter((x) => x.w === 'storm' || x.w === 'snow');
+  const rs = flown.map(({ seed }) => fly(base, seed));
+  say(`  roulette     autoland ${rs.map((r, i) => `${r.seed} ${flown[i].w}: ${outcome(r)}`).join('; ')}`);
+  ok(flown.length >= 2 && rs.every((r) => !r.crashed && r.td), `Roulette: a spin of ${FULL ? 'each kind of' : 'storm and of snow'} weather lands on Autoland (${flown.map((x) => x.w).join(', ')})`);
 }
 
 // 10. The look (src/art/weather-look.js), in plain Node: what it builds for each kind of weather, the art bench's
