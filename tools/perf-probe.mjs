@@ -60,6 +60,8 @@
 //                          breach. `npm run perf-budget` (structural budgets on the default GPU);
 //                          `npm run perf-budget -- --gpu intel --phone --cpu 3 --quality medium`
 //                          also asserts the GPU-millisecond budgets on the mobile stand-in.
+//     --scenes a,b,...     with --budget: these scenes (chase and cockpit each) instead of the
+//                          standard five, e.g. the new maps: --budget --scenes hill-hop,mesa-top
 //
 // Work dir: C:/tmp/ctl-perf (bundle, pages, Edge profiles). Only Edge processes started by
 // this tool are killed (by PID tree). npm script: `npm run perf-probe -- --scene heavy`.
@@ -108,6 +110,7 @@ function parseArgs(argv) {
       case '--label': o.label = next(); break;
       case '--matrix': o.matrix = argv[i + 1] && !argv[i + 1].startsWith('--') ? next() : 'default'; break;
       case '--budget': o.budget = true; o.census = true; break;
+      case '--scenes': o.scenes = next().split(',').filter(Boolean); break;
       case '--help': case '-h': console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').filter((l) => l.startsWith('//')).map((l) => l.slice(3)).join('\n')); process.exit(0);
       default: throw new Error('unknown option ' + a);
     }
@@ -717,6 +720,9 @@ const MATRIX = {
   'p3-desktop': ['solo', 'heavy', 'cq', 'night', 'gravel', 'fog'].flatMap((scene) => ['chase', 'cockpit'].map((camera) => ({ scene, camera, quality: 'high' }))),
   'p3-phone': ['solo', 'heavy', 'cq', 'night', 'gravel', 'fog'].flatMap((scene) => ['chase', 'cockpit'].map((camera) => ({ scene, camera, quality: 'medium', phone: true }))),
   'p3-proxy': ['solo', 'heavy', 'cq', 'night', 'gravel', 'fog'].flatMap((scene) => ['low', 'medium', 'high'].flatMap((quality) => ['chase', 'cockpit'].map((camera) => ({ scene, camera, quality, phone: true, gpu: 'intel', cpu: 3 })))),
+  // the missions expansion's new maps (2026-09-17): island, island airliner field, desert mesa, frozen lake
+  maps: ['hill-hop', 'beach-buzz', 'mesa-top', 'whiteout', 'dust-wall'].flatMap((scene) => ['chase', 'cockpit'].map((camera) => ({ scene, camera, quality: 'high' }))),
+  'maps-phone': ['hill-hop', 'beach-buzz', 'mesa-top', 'whiteout'].map((scene) => ({ scene, camera: 'chase', quality: 'medium', phone: true })),
   // price list: what each feature costs on the plains and the coast at high
   ablation: [
     ...['solo', 'heavy'].flatMap((scene) => ['', 'shadows', 'pcf', 'shadow:2048', 'composer', 'bloom', 'msaa:0', 'clouds', 'sky', 'forest', 'terrain', 'water', 'airport', 'aircraft', 'hud', 'hudjs', 'vignette', 'fog', 'physics'].map((a) => ({ scene, camera: 'chase', quality: 'high', ablate: a ? [a] : [] }))),
@@ -739,7 +745,7 @@ function budgetChecks(r) {
   const intel = /intel/i.test(s.gpu || '');
   const treeScale = s.treeScale || 1;
   const veg = ow('vegetation+props (instanced)');
-  const vegBudget = Math.round(({ plains: 1.2e6, coast: 1.2e6, mountain: 2.0e6, sea: 0 }[s.style] ?? 1.2e6) * treeScale);
+  const vegBudget = Math.round(({ plains: 1.2e6, coast: 1.2e6, mountain: 2.0e6, sea: 0, island: 1.2e6, arctic: 1.2e6, desert: 0.2e6 }[s.style] ?? 1.2e6) * treeScale);
   add('vegetation+props', 'visible triangles (main pass, after culling)', veg.visibleTris, vegBudget, { note: `treeScale ${treeScale}, ${veg.visibleDraws}/${veg.draws} chunks in view` });
   add('ground', 'draws (LOD tiles)', ow('ground').draws, 24);   // world-ground.js: 16 central + 8 outer tiles by design
   add('water', 'draws', ow('water').draws, 1);
@@ -797,9 +803,10 @@ async function main() {
   if (o.budget) {
     let breaches = 0, total = 0;
     const failed = [];
-    for (let i = 0; i < BUDGET_MATRIX.length; i++) {
-      const oo = { ...o, ...BUDGET_MATRIX[i] };
-      process.stdout.write(`[${i + 1}/${BUDGET_MATRIX.length}] ${oo.scene}/${oo.camera}/${oo.quality}${oo.phone ? '/phone' : ''}${oo.gpu ? '/' + oo.gpu : ''} ... `);
+    const list = o.scenes ? o.scenes.flatMap((scene) => ['chase', 'cockpit'].map((camera) => ({ scene, camera }))) : BUDGET_MATRIX;
+    for (let i = 0; i < list.length; i++) {
+      const oo = { ...o, ...list[i] };
+      process.stdout.write(`[${i + 1}/${list.length}] ${oo.scene}/${oo.camera}/${oo.quality}${oo.phone ? '/phone' : ''}${oo.gpu ? '/' + oo.gpu : ''} ... `);
       try {
         const r = await measure(oo, jsFile);
         const checks = budgetChecks(r);

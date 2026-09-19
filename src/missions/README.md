@@ -78,6 +78,19 @@ has `rwToWorld(site, u, v, y)`.
 `gustFront` (the wind swings `shift` degrees and rises to `speed` kt over a few seconds), `windShift`,
 `turbBurst`, `squall` (rain and wind jump together), `visDrop` (visibility falls to `vis` metres).
 
+### Visibility
+*(Added by the maps area, 2026-09-18, from the look as it stands on m-weather 5b06abe; the weather area owns it.)*
+A scenario's `vis`, and a `visDrop`'s `vis`, is the number the sky and the weather model are given
+(`weather.state.vis`, and what the briefing card shows). What the pilot sees is the 2%-contrast distance of
+the air the look draws: `3.912 / (clearExtinction(vis) × m)`. `clearExtinction` (src/art/world-atmosphere.js)
+is exact at 900 m and below and draws the air clearer above that (6,000 of `vis` is about 16 km of clear air),
+as it does for the original twenty; `m = 1 + 1.4 × (rain − the mission's own rain) + 0.8 × snow + 1.6 × dust`
+is the weather look's thickening (src/art/weather-look.js). So in snow or dust the pilot sees less than `vis`:
+a mission's text names **what the pilot sees**, and the mission sets `vis` to give it (Whiteout: `vis` 1,520 in
+snow 0.9 shows 900 m). tools/test-maps.mjs checks the maps missions against this formula. If the look ever
+subtracts the mission's own snow and dust as it already does its rain, `vis` becomes what the pilot sees in
+every mission, and those values go back to the seen ones.
+
 ## Engine interfaces (stubs exist; the owners fill them in)
 
 - `new Weather(spec, { seed, wind, world, scenario, hud, audio, rig })`; `update(dt, t, ac)`; `addWind(p, t, out)`

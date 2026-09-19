@@ -320,3 +320,76 @@ export function carrierDeck(spec) {
   t.anisotropy = 16;
   return t;
 }
+
+// ---------------------------------------------------------------- the new maps (2026-09-17)
+// An ice runway ploughed on a frozen lake ('ice'), or a runway of packed snow ('snow'): painted like
+// runwaySurface (2048 x 512, u along the runway, v across it, mapped 1:1 onto the quad), in the
+// colours of BIOMES.runway. Ice: grey-blue, streaked with blown snow along the wind, cracked, the
+// wheel tracks polished darker, the plough's banks white at both edges. Snow: packed white with
+// grey-blue ruts. No paint: an ice strip is marked by the cones down its edges.
+import { BIOMES } from './palette.js';
+
+export function frozenRunwaySurface(rw) {
+  const W = 2048, H = 512, L = rw.length, Wd = rw.width, sx = W / L, sy = H / Wd;
+  const ice = rw.surface === 'ice';
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  const B = BIOMES.runway;
+  g.fillStyle = ice ? B.ice : B.snow;
+  g.fillRect(0, 0, W, H);
+  const img = g.getImageData(0, 0, W, H), d = img.data;
+  for (let y = 0; y < H; y += 2) for (let x = 0; x < W; x += 2) {
+    const n = noise2(x / 31, y / 31, 17) * (ice ? 10 : 6) + noise2(x / 4.1, y / 4.1, 19) * (ice ? 5 : 7);
+    for (let k = 0; k < 2; k++) for (let j = 0; j < 2; j++) {
+      const i = ((y + j) * W + (x + k)) * 4;
+      d[i] = clamp(d[i] + n, 0, 255); d[i + 1] = clamp(d[i + 1] + n, 0, 255); d[i + 2] = clamp(d[i + 2] + n * 1.1, 0, 255);
+    }
+  }
+  g.putImageData(img, 0, 0);
+  const rng = makeRng(Math.round(L) * 17 + Math.round(Wd) * 5 + (ice ? 3 : 4));
+  // blown snow in long wisps, a few degrees off the runway's axis
+  for (let i = 0; i < (ice ? 700 : 220); i++) {
+    const x = rng() * W, y = rng() * H, len = (6 + rng() * 40) * sx, wid = (0.2 + rng() * 1.1) * sy;
+    g.save(); g.translate(x, y); g.rotate(Math.atan(Math.tan(-0.03 + (rng() - 0.5) * 0.02) * sy / sx));
+    g.fillStyle = ice ? `rgba(232,238,242,${0.10 + rng() * 0.25})` : `rgba(250,252,255,${0.2 + rng() * 0.3})`;
+    g.beginPath(); g.ellipse(0, 0, len, wid, 0, 0, Math.PI * 2); g.fill(); g.restore();
+  }
+  // the wheel tracks: polished dark on ice, grey-blue ruts in snow
+  for (const side of [-1, 1]) for (let lane = 0; lane < 2; lane++) {
+    g.beginPath();
+    for (let x = 0; x <= W; x += 8) {
+      const v = Wd / 2 + side * (1.4 + lane * 0.5) + noise2(x / 190, side + lane * 3, 23) * 0.35;
+      if (x === 0) g.moveTo(x, v * sy); else g.lineTo(x, v * sy);
+    }
+    g.strokeStyle = ice ? 'rgba(40,58,70,0.22)' : 'rgba(120,140,160,0.30)';
+    g.lineWidth = (lane ? 0.35 : 0.55) * sy; g.stroke();
+  }
+  if (ice) {
+    // cracks: short jagged dark lines with a pale rim
+    for (let i = 0; i < 90; i++) {
+      let x = rng() * W, y = rng() * H;
+      g.beginPath(); g.moveTo(x, y);
+      for (let j = 0; j < 6; j++) { x += (rng() - 0.5) * 9 * sx; y += (rng() - 0.5) * 3 * sy; g.lineTo(x, y); }
+      g.strokeStyle = 'rgba(20,32,40,0.35)'; g.lineWidth = 0.05 * sy; g.stroke();
+      g.strokeStyle = 'rgba(235,242,246,0.25)'; g.lineWidth = 0.12 * sy; g.stroke();
+    }
+  }
+  // the plough's banks: white at both edges, ragged on the inside
+  g.fillStyle = B.bank;
+  for (const side of [0, 1]) {
+    g.beginPath();
+    for (let x = 0; x <= W; x += 6) {
+      const w = (1.0 + 0.45 * noise2(x / 60, side * 7, 29) + 0.2 * noise2(x / 9, side * 7, 31)) * sy;
+      const y = side ? H - w : w;
+      if (x === 0) g.moveTo(x, side ? H : 0);
+      g.lineTo(x, y);
+    }
+    g.lineTo(W, side ? H : 0); g.closePath(); g.fill();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 16;
+  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
+}

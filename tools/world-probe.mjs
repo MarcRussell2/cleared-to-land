@@ -38,6 +38,12 @@ const SHOTS = [
   ['mountain',     'gravel',  'chase',   'ra < 260',    3200],
   ['ridge',        'oneway',  'wing',    'ra < 350',    2600],
   ['fog',          'fog',     'chase',   'ra < 500',    2600],
+  // the missions expansion's new maps (2026-09-18: island, desert, arctic)
+  ['island',       'hill-hop',   'chase', 'd < 900',  3600],
+  ['beach',        'beach-buzz', 'chase', 'd < 300',  3600],
+  ['mesa',         'mesa-top',   'chase', 'd < 450',  4200],
+  ['whiteout',     'whiteout',   'chase', 'd < 600',  4000],
+  ['dust',         'dust-wall',  'chase', 'd < 900',  5200],
 ];
 
 const S = (process.env.CTL_PROBE_DIR || 'C:/tmp/ctl-probe').replace(/\\/g, '/');

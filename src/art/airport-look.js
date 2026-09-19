@@ -25,9 +25,11 @@ import * as THREE from 'three';
 import { clamp, noise2 } from '../config.js';
 import { mergeGeos } from '../geom.js';
 import { PALETTE, FINISH } from './palette.js';
-import { runwaySurface } from './textures.js';
+import { runwaySurface, frozenRunwaySurface } from './textures.js';
 import { LightSet } from './lights.js';
 import { WORLD_QUALITY } from './quality.js';
+// The new maps' site props (beach, terminal, shacks: world/airport.js calls it for a runway with `props`).
+export { buildSiteProps } from './world-biomes.js';
 
 // Bake static meshes by material and shadow policy; parked LODs stay separate.
 function batchStatic(objects) {
@@ -59,10 +61,11 @@ function namedMaterial(name, color, finish = FINISH.building) {
 // follow the runway's slope exactly); this is what it is painted with.
 export function runwayMaterial(rw) {
   const mat = new THREE.MeshStandardMaterial({
-    map: runwaySurface(rw), ...FINISH.runway,
+    map: rw.surface === 'ice' || rw.surface === 'snow' ? frozenRunwaySurface(rw) : runwaySurface(rw), ...FINISH.runway,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
   });
   mat.name = 'aerodrome/runway';
+  if (rw.surface === 'ice') mat.roughness = 0.42;   // the new maps' lake ice: a sheen the sun can catch
   // Grain under the wheels: a tiling aggregate texture at a 3 m repeat, faded out
   // beyond 250 m so the painted surface carries the runway from the approach and
   // the grain carries it in the flare. Uniforms prefixed `ap`.
@@ -191,6 +194,9 @@ export function buildShoulders(rw, place) {
     const edge=side*(rw.width/2+1.5);
     add(0,rw.length,edge-2.5,edge+2.5,fringe);
   }
+  // (the new maps: a runway with `taxiway: false` - Kestrel Island's strip, whose apron is the site's own, on a
+  // hillside the parallel taxiway would cut through - keeps only its shoulders)
+  if (rw.taxiway === false) return batchStatic(objects);
   for(const edge of [twyOffset-12,twyOffset+12])add(0,rw.length,edge-1.7,edge+1.7,fringe);
   add(0, rw.length, twyOffset - 12, twyOffset + 12);
   for (const u of [40, rw.length * 0.5, rw.length - 40]) add(u - 12, u + 12, rw.width / 2, twyOffset);

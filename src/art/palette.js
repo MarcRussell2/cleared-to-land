@@ -206,3 +206,74 @@ export const FINISH = {
   fabric:    { roughness: 0.90, metalness: 0.0 },
   deck:      { roughness: 0.90, metalness: 0.1 },
 };
+
+// ---------------------------------------------------------------- the new maps (2026-09-17)
+// The missions expansion's three terrain styles (src/world/terrain.js 'island', 'desert', 'arctic') and
+// their props, read by world-ground.js, world-biomes.js, world-water.js and textures.js. Same conventions
+// as PALETTE above: linear [r, g, b] albedos, 0xRRGGBB material colours, '#rrggbb' canvas fills, and HSL
+// parts where a colour varies per instance (in three's linear working space: l = 0.06 is a dark green).
+// A separate export so the original book above is untouched.
+export const BIOMES = {
+  island: {
+    sand: [0.60, 0.56, 0.45],          // coral sand: whiter than a temperate beach
+    wetSand: [0.34, 0.32, 0.26],
+    seabed: [0.42, 0.44, 0.36],
+    lush: [0.050, 0.076, 0.030],       // the moist hollows and the lowland: greener, never lawn
+    lushNoise: [0.010, 0.015, 0.006],
+    scrub: [0.070, 0.073, 0.037],      // the island's base: dry olive-grey scrub (a Leeward island, not a jungle)
+    dryGrass: [0.165, 0.145, 0.075],   // sun-burnt patches
+    soil: [0.20, 0.115, 0.06],         // red-brown earth where the slopes erode
+    woodFloor: [0.032, 0.044, 0.020],  // the dry forest's shade under its closed canopy: a stand reads as one mass
+    rock: [0.25, 0.22, 0.18],
+    // The water body over the shallows (world-water.js), multiplied by the daylight as the deep colour is:
+    // sand seen through a metre of water, the turquoise over the shelf, the darker reef and weed patches.
+    shallow: [0.25, 0.47, 0.42],
+    lagoon: [0.028, 0.23, 0.25],
+    reef: [0.018, 0.09, 0.10],
+    palmTrunk: 0x7d705e,
+    palmFrond: { h: 0.26, hVary: 0.04, s: 0.62, l: 0.068, lVary: 0.03 },   // a live coconut palm is green, not khaki
+    palmDry: [0.12, 0.10, 0.045],       // the old frond hanging lowest
+    scrubTree: { h: 0.24, hVary: 0.05, s: 0.5, l: 0.068, lVary: 0.025 },
+    umbrellas: [0xd9483b, 0x2f7fb8, 0xe8c547, 0xf2f0e8, 0x3c9a6e, 0xe07b39],
+    pole: 0xd8d2c4,
+    lounger: 0xe6e0d2,
+    towel: 0x3a78b0,
+    walls: { h: 0.10, hVary: 0.08, s: 0.30, sVary: 0.30, l: 0.62, lVary: 0.20 },   // pastel hotels and houses
+    roof: 0xa8492d,                    // terracotta
+    fence: 0x8c9196,
+    sign: 0xd8c23a,
+    cars: [0xb8bcc0, 0x2a2d31, 0xc0392b, 0xe8e8e6, 0x2c5f8a],
+  },
+  desert: {
+    sand: [0.44, 0.23, 0.115],         // red sand
+    sandNoise: [0.030, 0.016, 0.008],
+    dune: [0.52, 0.30, 0.16],          // wind-sorted, paler
+    wash: [0.46, 0.34, 0.22],          // a dry wash's bed
+    scrub: [0.11, 0.11, 0.065],        // sage and blackbrush
+    rock: [0.38, 0.12, 0.05],          // Entrada-red cliffs
+    rockLight: [0.47, 0.26, 0.14],     // the paler bands
+    varnish: [0.16, 0.085, 0.055],     // desert varnish under the caprock: dark red-brown streaks
+    caprock: [0.40, 0.29, 0.18],       // the mesa tops
+    talus: [0.30, 0.15, 0.08],
+    boulder: 0xa05a3a,
+  },
+  arctic: {
+    snow: [0.70, 0.72, 0.76],          // a little under the mountains' 0.85: a whole valley of it
+    drift: [0.58, 0.63, 0.70],         // wind-packed snow, bluer
+    ice: [0.27, 0.37, 0.44],           // lake ice the wind has cleared
+    iceDark: [0.12, 0.19, 0.24],       // clear black ice, thick and old
+    rock: [0.085, 0.085, 0.09],        // bare rock on the steep faces
+    scree: [0.30, 0.31, 0.33],
+    underTrees: [0.46, 0.50, 0.55],    // snow in the shade of a wood, and the needles and twigs on it
+    spruce: { h: 0.40, hVary: 0.03, s: 0.30, l: 0.032, lVary: 0.012 },
+    snowOnTree: [0.70, 0.73, 0.78],
+    boulder: 0x4a4b4f,
+    shacks: [0xb03a2e, 0x2f6fa8, 0xd9a62b, 0x4a7a3a, 0x8a3fa0],
+    shackRoof: 0x3a3a3c,
+  },
+  runway: {
+    ice: '#7f95a1',                    // ploughed lake ice
+    snow: '#dfe3e6',                   // packed snow
+    bank: '#f1f3f5',                   // the ploughed snow banks at its edges
+  },
+};

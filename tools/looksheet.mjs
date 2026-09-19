@@ -51,6 +51,12 @@ const SHOTS = [
   ['mountain',     'gravel',  'chase',   'ra < 260',    3200, 'Mountain valley: spruce, river, gravel bar'],
   ['ridge',        'oneway',  'wing',    'ra < 350',    2600, 'Wing view over the ridge strip'],
   ['fog',          'fog',     'chase',   'ra < 500',    2600, 'Low visibility: fog and the approach lights'],
+  // the missions expansion's new maps (2026-09-18: island, desert, arctic)
+  ['island',       'hill-hop',   'chase', 'd < 900',  3600, 'Kestrel Island: dry scrub hills, the saddle, the strip, the sea'],
+  ['beach',        'beach-buzz', 'chase', 'd < 300',  3600, 'Paradise Bay: turquoise shallows, the beach, the airliner low'],
+  ['mesa',         'mesa-top',   'chase', 'd < 450',  4200, 'Red Mesa: sandstone cliffs and the strip on top'],
+  ['whiteout',     'whiteout',   'chase', 'd < 600',  4000, 'Frostbite Lake in snow: spruce shores, the ice runway'],
+  ['dust',         'dust-wall',  'chase', 'd < 900',  5200, 'Red Mesa in a haboob: dust, crosswind, the rim'],
 ];
 
 const S = (process.env.CTL_SHOTS_DIR || 'C:/tmp/ctl-shots').replace(/\\/g, '/');
