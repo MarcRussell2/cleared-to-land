@@ -145,7 +145,8 @@ export class AudioSys {
     for (const l of ac.legs) { if (l.contact) { skid = Math.max(skid, l.skid); roll = Math.max(roll, clamp(ac.gsRel / 40, 0, 1)); } }
     for (const p of ac.points) if (p.contact && ac.gsRel > 3) skid = Math.max(skid, 0.6);
     this.screechGain.gain.setTargetAtTime(skid * 0.2, now, 0.05);
-    const roughK = ac.legs.some((l) => l.contact && l.kind !== 'runway' && l.kind !== 'deck') ? 2.0 : 1;
+    // (a runway, the deck and lake ice are smooth; everything else rumbles)
+    const roughK = ac.legs.some((l) => l.contact && l.kind !== 'runway' && l.kind !== 'deck' && l.kind !== 'ice') ? 2.0 : 1;
     this.rollGain.gain.setTargetAtTime(roll * 0.18 * roughK * (cockpit ? 1.3 : 0.8), now, 0.1);
     this.rollLP.frequency.setTargetAtTime(70 + roll * 160 * roughK, now, 0.1);
     if (this.wx) this.wx.update(ac, ctx, dt, now);

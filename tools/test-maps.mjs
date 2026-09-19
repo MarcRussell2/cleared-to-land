@@ -141,6 +141,7 @@ section('snow and ice');
   ok(mu('ice') >= 0.1 && mu('ice') <= 0.15, `airport.js: an ice runway brakes at mu ${mu('ice')} (0.10..0.15)`);
   ok(/out\.mu = rw\.wet \? 0\.5 : 0\.85; out\.kind = 'runway'/.test(src) && /s === 'gravel'\) \{ out\.mu = 0\.62/.test(src) && /s === 'sand'\) \{ out\.mu = 0\.5;/.test(src) && /else \{ out\.mu = 0\.55; out\.kind = 'dirt'/.test(src), 'airport.js: the four original surfaces keep their friction');
   for (const f of ['../src/camera.js', '../src/art/effects.js']) ok(/'snow'/.test(readFileSync(new URL(f, import.meta.url), 'utf8')), `${f.slice(7)} knows packed snow is rough ground`);
+  ok(/const roughK = [^\n]*l\.kind !== 'ice'/.test(readFileSync(new URL('../src/audio.js', import.meta.url), 'utf8')), 'audio.js rolls quietly on ice, as on a runway (only rough ground rumbles)');
   ok(/if \(night && rw\.surface === 'asphalt' && rw\.taxiway !== false\)/.test(src), 'airport.js: a runway with taxiway: false (Kestrel) has no taxiway lights either');
 }
 
