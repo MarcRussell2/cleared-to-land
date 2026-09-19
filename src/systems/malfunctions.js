@@ -5,14 +5,14 @@
 //   applies(def)            can this aircraft have it at all (Free Flight lists only these: a single-engine airplane
 //                           has no left engine, a fixed-gear one no gear to jam, only a hook aircraft a lens to lose)
 //   silent                  true: no warning, no chime, no voice; the pilot has to notice (the airspeed quietly lying,
-//                           a tyre that announces itself with a bang)
+//                           a tire that announces itself with a bang)
 //   effect                  true: applied from outside the flight model by src/systems/failureEffects.js (jams,
-//                           runaways, a stuck throttle, fire, bird strike, sensors, electrics, gear, tyres, flutter, the
+//                           runaways, a stuck throttle, fire, bird strike, sensors, electrics, gear, tires, flutter, the
 //                           carrier's lens). Absent: the aircraft models it itself through ac.fail().
 //   action                  the key action that deals with it, if there is one (fireHandle, trimCutout, fuelCutoff)
 //   warning                 true: a red master WARNING and the fire bell rather than the amber caution chime
 //   freeAt                  the moment it happens in Free Flight, where every failure is otherwise dealt a random
-//                           altitude (a tyre bursts on touchdown, a gear that will not come down is known from the start)
+//                           altitude (a tire bursts on touchdown, a gear that will not come down is known from the start)
 // New names must not collide with the ones src/physics/aircraft.js checks (engine, engineLeft, engineRight, noseGear,
 // gearStuck, flapsStuck, elevatorJam, hydraulics, brakes, ice): those names have effects inside the flight model.
 const ALL = () => true;
@@ -31,7 +31,7 @@ export const FAILURES = {
   ice: { name: 'Wing icing', desc: 'Stall speed up, early stall, extra drag and weight.', hint: 'Fly 10-15 kt faster, partial flaps, shallow flare.', msg: 'WING ICE', applies: ALL },
 
   // ---- the missions expansion: effects applied from outside the flight model (src/systems/failureEffects.js) ----
-  aileronJam: { name: 'Aileron jam', desc: 'The ailerons stick a little off centre and the stick does nothing sideways.', hint: 'Roll with rudder (Q/E): yaw first, the bank follows a second later. Small and early.', msg: 'AILERONS JAMMED', applies: ALL, effect: true },
+  aileronJam: { name: 'Aileron jam', desc: 'The ailerons stick a little off center and the stick does nothing sideways.', hint: 'Roll with rudder (Q/E): yaw first, the bank follows a second later. Small and early.', msg: 'AILERONS JAMMED', applies: ALL, effect: true },
   rudderJam: { name: 'Rudder hardover', desc: 'The rudder runs partly over to one side and stays there until the wheels are down.', hint: 'Hold the wings level against it with aileron and opposite pedal. It lets go on the ground.', msg: 'RUDDER HARDOVER', applies: ALL, effect: true },
   runawayTrim: { name: 'Runaway trim', desc: 'The pitch trim runs away nose down until it is cut out.', hint: 'Trim cutout now (press D), hold the nose up, then wind the trim back with T.', msg: 'TRIM RUNAWAY', applies: ALL, effect: true, action: 'trimCutout' },
   stuckThrottle: { name: 'Stuck throttle', desc: 'The throttles jam where they are: no more, no less.', hint: 'Burn the extra energy with drag: flaps, gear, speedbrake. Cut the fuel (press U) in the flare.', msg: 'THROTTLE JAMMED', applies: ALL, effect: true, action: 'fuelCutoff' },
@@ -43,7 +43,7 @@ export const FAILURES = {
   electrical: { name: 'Electrical failure', desc: 'The electrics die: no HUD, no panel lights, no landing light. A standby airspeed and altimeter remain.', hint: 'A torch on the standby airspeed and altimeter. Fly the runway lights and the PAPI.', msg: 'ELECTRICAL FAILURE', applies: (d) => d.engines[0].type === 'prop', effect: true },
   gearUp: { name: 'Gear will not extend', desc: 'The landing gear stays up whatever you do.', hint: 'Belly landing: full flaps, slow, wings level, cut the fuel (press U) in the flare.', msg: 'GEAR UNSAFE', applies: RETRACT, effect: true, action: 'fuelCutoff', freeAt: { type: 'start' } },
   oneMainStuck: { name: 'One main wheel missing', desc: 'One main wheel is not there to land on.', hint: 'Land on the good wheel, hold the other wing up with aileron while it flies, rudder against the swerve.', msg: 'MAIN GEAR UNSAFE', applies: ALL, effect: true, freeAt: { type: 'start' } },
-  blownTire: { name: 'Blown tire', desc: 'A main tyre bursts on touchdown and pulls toward its side.', hint: 'Keep it straight with rudder against the pull, and brake gently.', msg: 'TIRE BURST', applies: ALL, effect: true, silent: true, freeAt: { type: 'touchdown' } },
+  blownTire: { name: 'Blown tire', desc: 'A main tire bursts on touchdown and pulls toward its side.', hint: 'Keep it straight with rudder against the pull, and brake gently.', msg: 'TIRE BURST', applies: ALL, effect: true, silent: true, freeAt: { type: 'touchdown' } },
   flutter: { name: 'Control flutter', desc: 'A control surface buzzes and shakes the airplane, worse the faster you go.', hint: 'Slow down: the buzz fades near Vref. Small, firm inputs.', msg: 'FLUTTER', applies: ALL, effect: true },
   lensFail: { name: 'Lens failure', desc: 'The carrier\'s landing lens is dark: no ball. The LSO talks you down.', hint: 'No ball: hold 8.1° AoA, fly the numbers, and do what Paddles says. POWER means now.', msg: 'LENS INOP', applies: (d) => !!d.hook, effect: true, freeAt: { type: 'start' } },
   hookFail: { name: 'Hook failure', desc: 'The tailhook will not come down.', hint: 'No hook, no trap. Fly the pass and take the bolter.', msg: 'HOOK UNSAFE', applies: (d) => !!d.hook, effect: true, freeAt: { type: 'start' } },

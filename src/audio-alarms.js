@@ -1,16 +1,20 @@
 // Failure alarms, synthesized like the rest of src/audio.js (no sample files): the master caution chime, the fire
-// bell, the clack of a runaway trim wheel, the buzz of flutter, the bang of an engine surge or a tyre going.
+// bell, the clack of a runaway trim wheel, the buzz of flutter, the bang of an engine surge or a tire going.
 // AudioSys owns one of these (audio.alarms); src/systems/failureEffects.js drives it:
 //   chime(n)            one caution chime (n = 1) or the warning's triple (n = 2)
 //   update(dt, snd)     every frame while flying, snd = { bell, clacker, buzz, bang, thud } (0..1 each; bang and thud
 //                       are one-shots, the rest last while they are set); snd = null stops everything
+//   dark                true while the electrics are dead (failureEffects.js Electrical): silence(text) then tells
+//                       AudioSys.say() to drop the radio altimeter's calls (main.js says them as a number alone)
 // The continuous sounds are made of short strikes scheduled from update(), and the buzz fades by itself unless
 // update() keeps it up, so when the frames stop (pause, the debrief, the menu) the alarms stop with them.
 import { clamp } from './config.js';
 
 export class Alarms {
-  constructor(sys) { this.sys = sys; this.bellT = 0; this.clackT = 0; this.buzzOn = false; }
+  constructor(sys) { this.sys = sys; this.bellT = 0; this.clackT = 0; this.buzzOn = false; this.dark = false; }
   get ok() { return this.sys.ready && this.sys.enabled; }
+  // No electrics, no radio altimeter: its calls ("50", "20") are dropped; everything else still speaks.
+  silence(text) { return this.dark && /^\d+$/.test(text); }
 
   // A struck tone: a sine and its metallic overtone, gone in `decay` s.
   strike(f, gain, decay, when = 0) {

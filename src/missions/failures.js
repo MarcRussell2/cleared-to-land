@@ -19,7 +19,7 @@ export const FAILURES_MISSIONS = [
   {
     id: 'stuck-throttle', n: 26, group: 'breaks', difficulty: 3, title: 'Stuck Throttle', tags: T('failure', 'heavy'),
     aircraft: 'condor', site: 'harbor', time: 15.5, vis: 30000,
-    desc: 'Levelling off at 1,300 ft the throttles jam at 75%, which is most of climb power, and stay there. The airliner does not want to come down and nothing on the pedestal will take the power off. Hang out every bit of drag it has, fly it down fast, and cut the fuel over the runway.',
+    desc: 'Leveling off at 1,300 ft the throttles jam at 75%, which is most of climb power, and stay there. The airliner does not want to come down and nothing on the pedestal will take the power off. Hang out every bit of drag it has, fly it down fast, and cut the fuel over the runway.',
     tips: [
       'Flaps 40 (press F once more), gear down, and the speedbrake out: press K twice. That is all the drag there is.',
       'Fly the glideslope with pitch and accept about 165 kt. The speed will not come back until the engines stop.',
@@ -63,7 +63,7 @@ export const FAILURES_MISSIONS = [
   {
     id: 'bird-strike', n: 28, group: 'breaks', difficulty: 3, title: 'Bird Strike', tags: T('failure', 'heavy'),
     aircraft: 'condor', site: 'harbor', time: 17.5, vis: 30000,
-    desc: 'Geese over the harbour at 800 ft. One hits the windshield, which cracks and holds, and one goes down the right engine, which keeps running, badly: it surges and bangs every few seconds and gives you about 60% when it feels like it.',
+    desc: 'Geese over the harbor at 800 ft. One hits the windshield, which cracks and holds, and one goes down the right engine, which keeps running, badly: it surges and bangs every few seconds and gives you about 60% when it feels like it.',
     tips: [
       'Fly the airplane first: wings level, nose on the glideslope. The windshield is cracked, not gone, and the HUD still works.',
       'Each surge yaws you toward the right engine: left rudder (Q). Or shut it down with the fire handle (press A) and fly one engine.',
@@ -130,7 +130,7 @@ export const FAILURES_MISSIONS = [
     desc: 'The fire bell goes at 1,100 ft: left engine fire. You have about thirty seconds before the wing stops being a wing. Pull the handle, then fly the rest of it on one engine.',
     tips: [
       'Pull the fire handle: press A. The engine stops, the bell stops, and the fire goes out.',
-      'Then it is the One Engine landing: right rudder (E) whenever you add power, and keep the ball centred.',
+      'Then it is the One Engine landing: right rudder (E) whenever you add power, and keep the ball centered.',
       'Vref 142 with flaps 30, and do not get slow. 2,600 m of runway and one reverser (hold R) is plenty.',
     ],
     wind: { rel: 10, speed: 8 }, weight: 'normal',
@@ -141,7 +141,7 @@ export const FAILURES_MISSIONS = [
       const f = fx(ctx, 'engineFire');
       if (!f || ctx.ac.onGround) return null;
       if (!f.out) return 'ENGINE FIRE: pull the fire handle, press A.';
-      return 'One engine: right rudder (E) with power, ball centred. Vref 142.';
+      return 'One engine: right rudder (E) with power, ball centered. Vref 142.';
     }),
   },
   {
@@ -203,9 +203,9 @@ export const FAILURES_MISSIONS = [
     aircraft: 'hornet', site: 'carrier', time: 16, vis: 30000, seaState: 0.3,
     desc: 'The carrier\'s landing lens is dark: no ball, no datum lights, nothing to fly but the numbers. Paddles can still see you and will talk you down. Fly on-speed, fly the numbers, and do what the LSO says the moment he says it.',
     tips: [
-      'Hook, gear and full flaps are already down. Hold on-speed with power: 8.1° AoA (the green ON SPD mark), about 135 kt.',
-      'Fly the path by the numbers with small pitch changes: 1 NM from the ramp 460 ft, half a mile 270 ft, over the ramp 85 ft.',
-      '"Power" means power now; "a little high" means ease it down. No flare, and full throttle the instant you touch.',
+      'Hook, gear and full flaps are already down. Hold on-speed with pitch: 8.1° AoA (the green ON SPD mark), about 135 kt.',
+      'Fly the glide path with the throttle, by the numbers (altitude against the distance to the ramp): 1 NM 470 ft, half a mile 285 ft, over the ramp 100 ft.',
+      '"Power" means power now; "a little high" means ease the throttle back. No flare, and full throttle the instant you touch.',
     ],
     wind: { rel: 0, speed: 8 }, weight: 'normal',
     spawn: { dist: 2600, hook: true, flap: 1.0, fixed: true },
@@ -214,7 +214,7 @@ export const FAILURES_MISSIONS = [
     hint: H((ctx) => {
       const ac = ctx.ac;
       if (ac.onGround) return null;   // the deck's own hints (full power until the wire has you)
-      if (ctx.d > 400) return 'No ball: on-speed AoA with power; the altimeter against the numbers: 1 NM 460 ft, ½ NM 270 ft, the ramp 85 ft.';
+      if (ctx.d > 400) return 'No ball: on-speed AoA with pitch, the numbers with the throttle: 1 NM 470 ft, ½ NM 285 ft, the ramp 100 ft.';
       return 'Do what Paddles says, now. No flare: fly it into the deck.';
     }),
   },

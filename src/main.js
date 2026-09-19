@@ -589,9 +589,7 @@ class Game {
         ap.tdV = tdx * rw.right.x + tdz * rw.right.z;
       }
     }
-    // the landing's score, what the failures change in it (a belly landing asked for is not damage), the mission's lines
-    const landing = this.failRt ? this.failRt.score(scoreLanding(ac, sc, ap), ac, ap) : scoreLanding(ac, sc, ap);
-    const result = this.mission ? this.mission.score(landing, ac, ap) : landing;
+    const result = this.mission ? this.mission.score(scoreLanding(ac, sc, ap), ac, ap) : scoreLanding(ac, sc, ap);
     let newBest = false;
     if (!forced || ac.stats.touchdown) {
       const b = this.best[sc.id];
@@ -745,8 +743,7 @@ class Game {
     this.callouts();
     // world & visuals
     w.airport?.update(dt, ac.pos, this.wind, this.t);
-    // (the lens shows what failRt.lens() lets it: dark when it has failed; the LSO and the score keep the true ball)
-    if (w.carrier) { const mb = w.carrier.meatball(ac.pos, 3); w.carrier.updateLens(this.failRt.lens(mb), this.t); this.meatball = mb; }
+    if (w.carrier) { const mb = w.carrier.meatball(ac.pos, 3); w.carrier.updateLens(mb, this.t); this.meatball = mb; }
     w.sky.update(ac.pos, dt);
     if (w.terrain.water) { w.terrain.water.setSun(w.sky.sunDir, w.sky.dayness, w.sky.fogColor); w.terrain.water.tick(dt); }
     this.model.update(ac, dt);

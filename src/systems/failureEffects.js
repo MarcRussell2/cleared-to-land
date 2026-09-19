@@ -7,8 +7,10 @@
 //                         `display` switches for the HUD and the cockpit (dark panel, no ball, a cracked
 //                         windshield, the master caution), fire and smoke, the alarms.
 //   action(name)          the keys that deal with a failure: fireHandle (A), trimCutout (D), fuelCutoff (U).
-//   score(result, ...)    what a failure changes in the debrief (a belly landing asked for is not a fault).
+//   score(result, ...)    what a failure changes in the debrief (a belly landing asked for is not a fault), and
+//   hint(ctx)             a failure's own hint: both reach main.js through the mission runtime (hookMission).
 //   lens(mb)              the ball the carrier's lens shows (dark when it has failed; the LSO still sees the truth).
+// main.js is the skeleton's: nothing here needs a line of its own there.
 // Failures the aircraft itself models (engine, engineLeft/Right, flapsStuck, gearStuck, noseGear, elevatorJam,
 // hydraulics, brakes, ice) still go through malfunctions.applyFailure -> ac.fail(); never edit the physics. The new
 // ones (catalogue entries with `effect: true`) are the classes below; ac.fail() still records their names in
@@ -20,7 +22,8 @@
 // the value before our last change; the effects work on that copy (`w`) and `_write()` puts it back.
 //
 // Randomness from the flight seed only (makeRng(seed * 7919 + ...)); never Math.random(), never the rng that
-// resolveScenario draws from. Nothing here allocates per frame after a failure has started.
+// resolveScenario draws from. Nothing here allocates per frame after a failure has started (text is made again only
+// when what it says changes; the one-off bursts - a strike, a burst tire - allocate when they happen).
 import { applyFailure, shouldTrigger, FAILURES } from './malfunctions.js';
 import { scoreLanding } from './scoring.js';
 import { makeRng, clamp, lerp, KT, FT, DEG, RAD } from '../config.js';
@@ -79,7 +82,7 @@ class RudderJam {
 // and nothing else they did before (the assist mode's attitude nudge, direct mode's electric trim) happens.
 class RunawayTrim {
   constructor(rt, spec) { this.rt = rt; this.rate = spec.arg ?? -0.1; this.limit = spec.limit ?? 0.95; this.bias = 0; this.cut = false; this.held = null; this.lastW = null; this.heldW = 0; }
-  start() { this.rt.setAction('trimCutout', 'TRIM CUT', 'trim cutout', 'D', true); this.rt.annun('STAB TRIM', 'bad'); }
+  start() { this.rt.setAction('trimCutout', 'TRIM CUT', 'trim cutout', 'D', true, this); this.rt.annun('STAB TRIM', 'bad'); }
   pre(dt, ac, inp, w) {
     if (!this.cut) this.bias = clamp(this.bias + this.rate * dt, -this.limit, this.limit);
     else if (this.rt.fcsFlying() && inp) {
@@ -111,13 +114,16 @@ class RunawayTrim {
     w.trim = clamp(w.trim + this.bias, -1.5, 1.5);
   }
   post(dt) {
-    if (!this.cut) this.rt.sound.clacker = 1;
-    this.rt.cfgLine(this.cut ? `TRIM MAN ${this.bias > 0 ? 'NU' : 'ND'} ${Math.abs(this.bias * 10).toFixed(1)}` : 'STAB TRIM ▾ RUNAWAY', this.cut ? (Math.abs(this.bias) > 0.15 ? 'moving' : 'on') : 'bad');
+    if (!this.cut) { this.rt.sound.clacker = 1; this.rt.cfgLine('STAB TRIM ▾ RUNAWAY', 'bad'); return; }
+    // the wheel's position in the config box, in the trim line's own units; the text is made again only when it changes
+    const k = Math.round(this.bias * 100);
+    if (k !== this._k) { this._k = k; this._txt = `TRIM MAN ${k > 0 ? 'NU' : 'ND'} ${(Math.abs(k) / 10).toFixed(1)}`; }
+    this.rt.cfgLine(this._txt, Math.abs(this.bias) > 0.15 ? 'moving' : 'on');
   }
   action(name) {
     if (name !== 'trimCutout' || this.cut) return false;
     this.cut = true;
-    this.rt.clearAction('trimCutout');
+    this.rt.clearAction('trimCutout', this);
     this.rt.clearAnnun('STAB TRIM');
     this.rt.say('Trim cutout.', 'TRIM CUTOUT', '');
     this.rt.later(this.rt.touchify('Manual trim: wind it back with T.'), 1.2);
@@ -128,11 +134,11 @@ class RunawayTrim {
 // The throttles jam at `arg` (default: wherever the lever is when it happens). Fuel cutoff (U, the runtime's own
 // cutFuel()) takes the lever to idle for the spool-down and then shuts every engine down (no reverse after that).
 class StuckThrottle {
-  constructor(rt, spec, ac) { this.rt = rt; this.jam = spec.arg != null ? clamp(spec.arg, 0, 1) : clamp(ac.input.throttle, 0, 1); }
-  start() { this.rt.setAction('fuelCutoff', 'FUEL CUT', 'fuel cutoff', 'U', true); }
+  constructor(rt, spec, ac) { this.rt = rt; this.jam = spec.arg != null ? clamp(spec.arg, 0, 1) : clamp(ac.input.throttle, 0, 1); this.txt = `THR JAMMED ${Math.round(this.jam * 100)}%`; }
+  start() { this.rt.setAction('fuelCutoff', 'FUEL CUT', 'fuel cutoff', 'U', true, this); }
   get cut() { return this.rt.fuelCut; }
   pre(dt, ac, inp, w) { if (!this.rt.fuelCut) w.throttle = this.jam; }
-  post() { if (!this.rt.fuelCut) this.rt.cfgLine(`THR JAMMED ${Math.round(this.jam * 100)}%`, 'bad'); }
+  post() { if (!this.rt.fuelCut) this.rt.cfgLine(this.txt, 'bad'); }
   action(name) { return name === 'fuelCutoff' && this.rt.cutFuel(); }
 }
 
@@ -155,7 +161,7 @@ class EngineSurge {
     this.rng = makeRng(rt.seed * SEED_K + SEED_C + 31 + n);
     this.next = 1 + this.rng() * 2; this.t = 0; this.dip = 0; this.hold = 0; this.k = 1; this.shut = false;
   }
-  start() { this.rt.setAction('fireHandle', 'ENG OFF', 'engine off', 'A', false); }
+  start() { this.rt.setAction('fireHandle', 'ENG OFF', 'engine off', 'A', false, this); }
   pre(dt, ac) {
     if (this.shut || this.e.failed) return;
     this.t += dt;
@@ -177,7 +183,7 @@ class EngineSurge {
   action(name) {
     if (name !== 'fireHandle' || this.shut || this.e.failed) return false;
     this.shut = true; this.rt.shutEngine(this.i);
-    this.rt.clearAction('fireHandle');
+    this.rt.clearAction('fireHandle', this);
     this.rt.say(`${sideName(this.rt.ac, this.i).toLowerCase()}engine shut down.`, `${sideName(this.rt.ac, this.i)}ENGINE SHUT DOWN`, '');
     return true;
   }
@@ -195,7 +201,7 @@ class EngineSurge {
 class EngineFire {
   constructor(rt, spec, ac) { this.rt = rt; this.i = engineIndex(ac, spec); this.burn = spec.burn ?? 32; this.t = 0; this.out = false; this.outT = 0; this.em = null; this.seized = false; }
   start() {
-    this.rt.setAction('fireHandle', 'FIRE', 'fire handle', 'A', true);
+    this.rt.setAction('fireHandle', 'FIRE', 'fire handle', 'A', true, this);
     this.rt.annun(`${sideName(this.rt.ac, this.i)}ENG FIRE`, 'bad');
     this.emitters();
   }
@@ -248,7 +254,7 @@ class EngineFire {
     if (name !== 'fireHandle' || this.out) return false;
     this.out = true;
     this.rt.shutEngine(this.i, true);
-    this.rt.clearAction('fireHandle'); this.rt.clearAnnun(`${sideName(this.rt.ac, this.i)}ENG FIRE`);
+    this.rt.clearAction('fireHandle', this); this.rt.clearAnnun(`${sideName(this.rt.ac, this.i)}ENG FIRE`);
     this.rt.say('Fire handle pulled. Fire out.', 'FIRE OUT', '');
     return true;
   }
@@ -303,15 +309,17 @@ class PitotIce {
   }
 }
 
-// The electrics die: the HUD goes dark but for a standby airspeed and altimeter, the panel loses its lights
-// (src/cockpit.js dims every interior light to what daylight alone would give it while s.power is 0), the landing
-// light and the navigation lights go out. The airplane's own steam gauges and the stall horn need no electricity,
-// so they carry on.
+// The electrics die: the HUD goes dark but for a standby airspeed and altimeter (and the status line with its
+// distance, which is a DME), the panel loses its lights (src/cockpit.js dims every interior light to what daylight
+// alone would give it while s.power is 0) and its radio faces go blank, the ILS needles drop, the radio altimeter's
+// calls stop (audio-alarms.js silence(), hud.js callout()), the landing light and the navigation lights go out.
+// The airplane's own steam gauges and the stall horn need no electricity, so they carry on.
 class Electrical {
   constructor(rt) { this.rt = rt; this.light = null; this.max = 0; this.nav = null; }
   start() {
     const rt = this.rt;
     rt.display.dark = true; rt.power = 0;
+    if (rt.audio && rt.audio.alarms) rt.audio.alarms.dark = true;
     const m = rt.game && rt.game.model, p = m && m.parts;
     // models.js sets the landing light's intensity to userData.max below 600 ft with the gear down: max 0 keeps it
     // dark without hiding the light (a light switched invisible recompiles every lit shader in the scene)
@@ -321,18 +329,32 @@ class Electrical {
     const nav = p && p.lights && p.lights.points;
     if (nav) { this.nav = nav; nav.visible = false; }
   }
-  dispose() { if (this.light) this.light.userData.max = this.max; if (this.nav) this.nav.visible = true; }
+  dispose() {
+    if (this.light) this.light.userData.max = this.max; if (this.nav) this.nav.visible = true;
+    if (this.rt.audio && this.rt.audio.alarms) this.rt.audio.alarms.dark = false;
+  }
 }
 
 // The gear will not come down (or up: it goes up and stays there). Belly landing: the mission's scoring.belly says
 // that is the job, not a fault (scoreBelly below); the fuel cutoff (U, the runtime's cutFuel()) is part of the drill.
+// Fired before the first frame (a 'start' trigger, as Free Flight deals it) the gear is simply up from the start
+// rather than seen folding away; G says it is unsafe instead of the usual GEAR DOWN.
 class GearUp {
   constructor(rt) { this.rt = rt; }
-  start() { this.rt.setAction('fuelCutoff', 'FUEL CUT', 'fuel cutoff', 'U', false); }
+  start() {
+    const ac = this.rt.ac;
+    if (this.rt.t === 0) { ac.input.gearCmd = 0; ac.ctl.gear = 0; for (const l of ac.legs) if (l.stuckAt == null) l.ext = 0; }
+    this.rt.setAction('fuelCutoff', 'FUEL CUT', 'fuel cutoff', 'U', false, this);
+  }
   get cut() { return this.rt.fuelCut; }
   pre(dt, ac) { ac.input.gearCmd = 0; }
   post() { this.rt.cfgLine('GEAR UNSAFE', 'bad'); }
-  action(name) { return name === 'fuelCutoff' && this.rt.cutFuel(); }
+  action(name) {
+    if (name === 'gear') { this.rt.say('', 'GEAR UNSAFE: IT WILL NOT COME DOWN', 'bad'); return true; }
+    return name === 'fuelCutoff' && this.rt.cutFuel();
+  }
+  // (Free Flight has no mission hint, and the game's own would say "Gear down: press G")
+  hint(ctx) { return ctx.ac.onGround ? null : 'Gear up for good: belly landing. Full flaps, slow, wings level, cut the fuel (press U) in the flare.'; }
 }
 
 // scoring.belly (a mission that asks for a belly landing; this area owns the flag): the landing is scored again with
@@ -358,7 +380,7 @@ export function scoreBelly(result, ac, approach, sc, running) {
 
 // One main wheel is not there. A retractable leg stays up (stuckAt 0: that side lands on its engine pod or wing); on
 // fixed gear the wheel came off and the leg ends in a stub: it touches lower down, scrapes instead of rolling (and
-// throws sparks), pulls the nose toward its side, and has no brake. models.js hides the tyre (leg.wheelOff); the
+// throws sparks), pulls the nose toward its side, and has no brake. models.js hides the tire (leg.wheelOff); the
 // fairing stays, its lower edge where the stub touches. score() says how slow the wing was held up. The pull is a
 // rudder bias: the stand-in for a per-leg rolling drag the flight model does not have.
 class OneMainStuck {
@@ -406,15 +428,18 @@ class OneMainStuck {
     }
     // The wheel's spring rolls the airplane onto the stub within a second or two of touching down (the ailerons cannot
     // hold a wheel's worth of weight), so what the pilot controls is how slowly that happens: land at the stall.
-    const v = this.heldTo == null ? 0 : this.heldTo / KT, vs0 = ac.def.speeds.Vs0 * Math.sqrt(ac.mass / ac.def.mass);
+    const wing = this.side < 0 ? 'Left' : 'Right';
+    // (a flight ended with that wing still up - a touch and go, or End flight while still rolling on one wheel - says so)
+    if (this.heldTo == null) { r.lines.push({ k: `${wing} wing`, v: 'still up when the flight ended', cls: '' }); return r; }
+    const v = this.heldTo / KT, vs0 = ac.def.speeds.Vs0 * Math.sqrt(ac.mass / ac.def.mass);
     const pp = Math.min(10, Math.round(Math.max(0, v / vs0 - 1.05) * 40));
-    r.lines.push({ k: `${this.side < 0 ? 'Left' : 'Right'} wing held up until`, v: `${v.toFixed(0)} kt` + (pp ? `  (-${pp})` : '  nicely done'), cls: pp > 6 ? 'warn' : 'good' });
+    r.lines.push({ k: `${wing} wing held up until`, v: `${v.toFixed(0)} kt` + (pp ? `  (-${pp})` : '  nicely done'), cls: pp > 6 ? 'warn' : 'good' });
     r.points = clamp(r.points - pp, 0, 100);
     return r;
   }
 }
 
-// A main tyre bursts the first time its wheel takes weight (or at once, if already rolling): a bang, the wheel runs
+// A main tire bursts the first time its wheel takes weight (or at once, if already rolling): a bang, the wheel runs
 // on the rim (smaller, less grip, no brake), and it drags the nose toward its side (a rudder bias, as above).
 class BlownTire {
   constructor(rt, spec, ac) { this.rt = rt; this.i = legIndex(ac, spec, makeRng(rt.seed * SEED_K + SEED_C + 71)); this.leg = ac.legs[this.i]; this.side = this.leg.pos.x < 0 ? -1 : 1; this.gone = false; this.t = 0; this.pull = spec.pull ?? 0.22; }
@@ -465,17 +490,24 @@ class Flutter {
   post() { this.rt.shake = Math.max(this.rt.shake, this.level * 0.45); this.rt.sound.buzz = Math.max(this.rt.sound.buzz, this.level); if (this.level > 0.1) this.rt.cfgLine('FLUTTER: SLOW DOWN', 'bad'); }
 }
 
-// The carrier's lens goes dark: the HUD ball and the 3D lens show nothing (main.js passes the ball through lens()),
-// while the LSO, who can see where you are, talks you down more often than usual. Paddles judges the trend, not the
-// deck's every heave (the ball is smoothed over a second and a half), and in close only says what matters.
+// The carrier's lens goes dark: the HUD ball and the 3D lens show nothing, while the LSO, who can see where you are,
+// talks you down more often than usual. Paddles judges the trend, not the deck's every heave (the ball is smoothed
+// over a second and a half), and in close only says what matters. The 3D lens: main.js hands the carrier's
+// updateLens() the true ball every frame, so start() puts this flight's own updateLens on that carrier instance, which
+// passes the ball through rt.lens() first (dark), and dispose() takes it off again; carrier.js is not edited.
 class LensFail {
-  constructor(rt) { this.rt = rt; this.said = -10; this.last = ''; this.cells = null; }
+  constructor(rt) { this.rt = rt; this.said = -10; this.last = ''; this.cells = null; this.lensHook = null; }
   start() {
     const rt = this.rt;
     rt.display.noBall = true;
     // the green datum bars go dark with the ball (carrier.js lights them once and never writes them again)
     const cv = rt.world && rt.world.carrier;
     if (cv && cv.lensSet && cv.datum) for (const i of cv.datum) cv.lensSet.setColor(i, 0, 0, 0);
+    if (cv && typeof cv.updateLens === 'function') {
+      const own = Object.prototype.hasOwnProperty.call(cv, 'updateLens'), orig = cv.updateLens;
+      cv.updateLens = (mb, t) => orig.call(cv, rt.lens(mb), t);
+      this.lensHook = { cv, own, orig };
+    }
     if (rt.game && rt.game.calloutState) rt.game.calloutState.rogerBall = true;   // nobody will call the ball
     rt.later('Paddles contact. The lens is down. Fly your numbers, I will talk you in.', 0.3, true);
   }
@@ -500,9 +532,22 @@ class LensFail {
     rt.say(call, '', '', true);
     if (rt.hud) rt.hud.callout(call.replace(/\.$/, '').toUpperCase(), 1.6);
   }
+  dispose() {
+    const h = this.lensHook;
+    if (!h) return;
+    if (h.own) h.cv.updateLens = h.orig; else delete h.cv.updateLens;
+    this.lensHook = null;
+  }
 }
 
-class HookFail { pre(dt, ac) { ac.input.hookCmd = 0; } }
+// The hook will not come down: up from the start if it fires before the first frame (as GearUp), H says so.
+class HookFail {
+  constructor(rt) { this.rt = rt; }
+  start() { const ac = this.rt.ac; if (this.rt.t === 0) { ac.input.hookCmd = 0; ac.ctl.hook = 0; } }
+  pre(dt, ac) { ac.input.hookCmd = 0; }
+  action(name) { if (name !== 'hook') return false; this.rt.say('', 'HOOK UNSAFE: IT WILL NOT COME DOWN', 'bad'); return true; }
+  hint(ctx) { return ctx.ac.onGround ? null : 'No hook, no trap: fly the pass, touch down, full power and take the bolter.'; }
+}
 
 const EFFECTS = {
   aileronJam: AileronJam, rudderJam: RudderJam, runawayTrim: RunawayTrim, stuckThrottle: StuckThrottle,
@@ -589,13 +634,34 @@ export class FailureRuntime {
     this._dark = { inRange: false, cells: 0, waveoff: false, range: 0, dl: null, dev: 0 };
     this.meatball = null;      // a harness without main.js hands the true ball in here (main.js keeps game.meatball)
     this.lso = { call: '', t: -10 };   // Paddles' last call (the lens failure): what a scripted pilot listens to
+    this._fuelArmT = 0;        // the fuel cutoff's guard: > 0 while a first press above 300 ft waits for the second
+    this._lines = new WeakSet();   // the debrief lines score() has handed back (it applies itself once per result)
+    this._mission = null;      // the mission runtime this one has hooked into (hookMission)
     if (game && game.cockpitView) {
-      game.cockpitView.failView = this;
-      // a bird strike cracks the windshield: the decal is made now, blank, so it compiles with the rest of the interior
-      if (this.pending.some((f) => f.name === 'birdStrike') && game.cockpitView.prepareCrack) game.cockpitView.prepareCrack(ac.def, makeRng(seed * SEED_K + SEED_C + 13));
+      const cv = game.cockpitView;
+      cv.failView = this;
+      // a bird strike cracks the windshield, dead electrics blank the radio faces: what they draw is made now, not yet
+      // showing, so it compiles with the rest of the interior
+      if (this.pending.some((f) => f.name === 'birdStrike') && cv.prepareCrack) cv.prepareCrack(ac.def, makeRng(seed * SEED_K + SEED_C + 13));
+      if (this.pending.some((f) => f.name === 'electrical') && cv.prepareDeadDisplays) cv.prepareDeadDisplays(ac.def);
     }
     if (touch && touch.setFailureButtons) touch.setFailureButtons([]);
     if (hud && hud.setExtraKeys) hud.setExtraKeys([]);
+  }
+
+  // main.js makes the mission runtime right after this one and asks it, not this, for the debrief and the hints. On the
+  // first check() this runtime puts its own score() and hint() in front of that instance's (mission.js is not edited):
+  // the mission's lines come on top of what the failures changed (a belly landing asked for is not damage), and its
+  // hints come first, this runtime's (a failure's own, where the game's would mislead: "Gear down: press G" with the
+  // gear gone) only where it has none. dispose() takes them off again.
+  hookMission() {
+    const m = this.game && this.game.mission;
+    if (!m || this._mission || typeof m.score !== 'function') return;
+    const own = (k) => Object.prototype.hasOwnProperty.call(m, k);
+    const score = m.score, hint = m.hint;
+    this._mission = { m, score, hint, ownScore: own('score'), ownHint: own('hint') };
+    m.score = (result, ac, approach) => score.call(m, this.score(result, ac, approach), ac, approach);
+    if (typeof hint === 'function') m.hint = (ctx) => hint.call(m, ctx) || this.hint(ctx);
   }
 
   // Is the pilot flying through the flight control (not the debug autopilot, not a scripted pilot)?
@@ -607,6 +673,7 @@ export class FailureRuntime {
 
   // Fire whatever is due. ctx = { t, distToThreshold } from main.js; the gate count comes from the mission runtime.
   check(ac, ctx) {
+    if (!this._mission && this.game && this.game.mission) this.hookMission();
     if (this.game && this.game.mission && this.game.mission.gatesPassed != null) ctx.gatesPassed = this.game.mission.gatesPassed;
     for (let i = this.pending.length - 1; i >= 0; i--) {
       const f = this.pending[i];
@@ -618,7 +685,7 @@ export class FailureRuntime {
     const info = applyFailure(this.ac, spec);
     const E = EFFECTS[spec.name];
     const silent = spec.silent ?? info.silent;
-    this.display = this._display;
+    if (E) this.display = this._display;   // (the first ten leave the HUD and the cockpit exactly as they were)
     if (!silent) this.active.push(info.name);
     if (E) {
       const fx = new E(this, spec, this.ac, this.fx.length * 10);
@@ -634,23 +701,23 @@ export class FailureRuntime {
   announce(info, spec) {
     const hud = this.hud, audio = this.audio;
     if (hud) { hud.setFailures(this.active); hud.message(info.msg, 'bad', 4); }
+    // the new failures light the master caution (or warning) with its chime; the first ten keep their beep and nothing more
     if (info.effect) this.caution(info.warning ? 'warning' : 'caution', info.msg);
-    else { if (audio) audio.beep(520, 0.4); this.caution('caution', info.msg, true); }
+    else if (audio) audio.beep(520, 0.4);
     if (info.hint && hud) {
       const hintText = this.touchify(info.hint);
       clearTimeout(this._hintTimer);
-      this._hintTimer = setTimeout(() => hud.callout(hintText, 6), 800);
+      this._hintTimer = setTimeout(() => hud.callout(hintText, 6, true), 800);   // (true: advice, shown on a dark HUD too)
     }
     if (audio && this.power) audio.say('Warning. ' + info.name.toLowerCase(), true);
   }
 
-  // The master caution (amber) or warning (red): it flashes for a few seconds with its chime or bell. `quiet` = the
-  // first ten failures, which keep their old beep and get only the light.
-  caution(level, text, quiet = false) {
+  // The master caution (amber) or warning (red): it flashes for a few seconds with its chime or bell.
+  caution(level, text) {
     const c = this._display.caution;
     c.level = level; c.text = text; c.blink = 4;
     this.display = this._display;
-    if (!quiet && this.audio && this.audio.alarms && this.power) this.audio.alarms.chime(level === 'warning' ? 2 : 1);
+    if (this.audio && this.audio.alarms && this.power) this.audio.alarms.chime(level === 'warning' ? 2 : 1);
   }
   annun(text, cls) { const a = this._display.annun; if (!a.some((x) => x.text === text)) a.push({ text, cls }); this.display = this._display; }
   clearAnnun(text) { const a = this._display.annun; const i = a.findIndex((x) => x.text === text); if (i >= 0) a.splice(i, 1); }
@@ -664,20 +731,37 @@ export class FailureRuntime {
     if (msg && this.hud) this.hud.message(msg, cls, 3);
     if (voice && this.audio && this.power) this.audio.say(voice, priority);
   }
+  // A callout a moment from now (advice, so it shows on a dark HUD too); `voice`: said as well (Paddles on the radio).
   later(text, s, voice = false) {
-    const id = setTimeout(() => { if (voice) { if (this.audio) this.audio.say(text, true); if (this.hud) this.hud.callout(text.split('.')[0].toUpperCase(), 3); } else if (this.hud) this.hud.callout(text, 5); }, s * 1000);
+    const id = setTimeout(() => { if (voice) { if (this.audio) this.audio.say(text, true); if (this.hud) this.hud.callout(text.split('.')[0].toUpperCase(), 3, true); } else if (this.hud) this.hud.callout(text, 5, true); }, s * 1000);
     this._laterTimers.push(id);
   }
 
   // The keys that deal with a failure, offered on the touch bar and the key strip while they are still to be used.
-  setAction(a, label, name, key, hot) { if (!this._actions.some((x) => x.a === a)) this._actions.push({ a, label, name, key, hot }); this._syncActions(); }
-  clearAction(a) { const i = this._actions.findIndex((x) => x.a === a); if (i >= 0) this._actions.splice(i, 1); this._syncActions(); }
+  // Each effect offers its own (owner); two effects can offer the same action (an engine fire and a bird strike's
+  // surging engine both use the fire handle), and the button stays, with the next one's label, until neither needs
+  // it. clearAction(a) without an owner takes every offer of it away (the fuel cutoff, which serves them all at once).
+  setAction(a, label, name, key, hot, owner = null) {
+    if (!this._actions.some((x) => x.a === a && x.owner === owner)) this._actions.push({ a, label, name, key, hot, owner });
+    this._syncActions();
+  }
+  clearAction(a, owner) {
+    for (let i = this._actions.length - 1; i >= 0; i--) if (this._actions[i].a === a && (owner === undefined || this._actions[i].owner === owner)) this._actions.splice(i, 1);
+    this._syncActions();
+  }
+  // What is on offer: one entry per action, the first offer's label (made only when an offer comes or goes).
+  get offers() {
+    const out = [];
+    for (const x of this._actions) if (!out.some((o) => o.a === x.a)) out.push(x);
+    return out;
+  }
   _syncActions() {
-    const k = this._actions.map((x) => x.a + x.hot).join('|');
+    const list = this.offers;
+    const k = list.map((x) => x.a + x.label + x.hot).join('|');
     if (k === this._actionsKey) return;
     this._actionsKey = k;
-    if (this.touch && this.touch.setFailureButtons) this.touch.setFailureButtons(this._actions);
-    if (this.hud && this.hud.setExtraKeys) this.hud.setExtraKeys(this._actions.map((x) => [x.name, [[x.key, x.a]]]));
+    if (this.touch && this.touch.setFailureButtons) this.touch.setFailureButtons(list);
+    if (this.hud && this.hud.setExtraKeys) this.hud.setExtraKeys(list.map((x) => [x.name, [[x.key, x.a]]]));
   }
 
   // Engines: one shut down by a handle (it becomes the aircraft's own engine failure, so the flight model, the hints
@@ -694,8 +778,18 @@ export class FailureRuntime {
   // shutdown, not a failure: the engines' own numbers go to zero (per-instance copies; ac.def is never touched) rather
   // than `failed`, so the particle effects do not stream a failed engine's smoke behind a deliberate shutdown, and the
   // gauges say OFF and run down (preStep, postStep). Offered by the stuck throttle and the gear-up belly landing.
+  // The levers are guarded, as real ones are: below 300 ft (and on the ground), where the drill uses it, one press
+  // does it; higher up a press only asks, and a second one within two seconds cuts. A U pressed by mistake on the
+  // approach (it sits between the trim keys and the look keys) does not turn the airliner into a glider.
   cutFuel() {
     if (this.fuelCut) return false;
+    const ac = this.ac, low = ac.onGround || ac.wheelsOnGround || ac.radioAlt < 300 * FT;
+    if (!low && !(this._fuelArmT > 0)) {
+      this._fuelArmT = 2;
+      this.say('', this.touchify('FUEL CUTOFF? PRESS U AGAIN'), 'warn');
+      return true;
+    }
+    this._fuelArmT = 0;
     this.fuelCut = true; this.fuelCutT = 0;
     this.clearAction('fuelCutoff');
     this.say('Fuel cutoff.', 'FUEL CUTOFF', '');
@@ -727,6 +821,7 @@ export class FailureRuntime {
     this.t += dt;
     if (this.runAtContact == null && ac.stats.touchdown) this.runAtContact = !(this.fuelCut && this.fuelCutT > 2.5) && ac.engines.some((e) => !e.failed);
     if (!this.fx.length && !this.display) return;
+    if (this._fuelArmT > 0) this._fuelArmT -= dt;
     const d = this._display, snd = this.sound;
     snd.bell = 0; snd.clacker = 0; snd.buzz = 0;
     this.shake = 0; this.warnLight = false; this._cfgN = 0;
@@ -751,12 +846,26 @@ export class FailureRuntime {
     if (this.audio && this.audio.alarms) { this.audio.alarms.update(dt, ac.crashed ? null : snd); }
     snd.bang = 0; snd.thud = 0;
   }
+  // A key action. 'failDrill' is whichever drill is on offer first (one button for them all, for a gamepad: see the
+  // report's hooks_needed; nothing sends it yet).
   action(name) {
+    if (name === 'failDrill') { const o = this.offers[0]; return !!o && this.action(o.a); }
     for (const f of this.fx) if (f.action && f.action(name)) return true;
     return false;
   }
-  // The landing result with what the failures change (main.js: before the mission's own lines).
+  // A failure's own hint where the mission has none (hookMission), or null. Not while the stall warning sounds above
+  // the flare: the game's own hint then is the one that matters.
+  hint(ctx) {
+    const ac = ctx.ac;
+    if (!this.fx.length || ac.crashed || (ac.aero.warning && !ac.onGround && ac.radioAlt > ac.flareZone())) return null;
+    for (const f of this.fx) if (f.hint) { const h = f.hint(ctx); if (h) return h; }
+    return null;
+  }
+  // The landing result with what the failures change (the mission runtime's score() calls this first: hookMission).
+  // Applied once: a result that already carries lines this handed back (a copy the mission made of it) comes back as
+  // it is, so a mission runtime that also calls this itself cannot count a failure twice.
   score(result, ac, approach) {
+    if (result.lines.some((l) => this._lines.has(l))) return result;
     let r = result;
     if (this.sc.scoring && this.sc.scoring.belly && this.sc.scoring.type !== 'carrier') r = scoreBelly(r, ac, approach, this.sc, this.runAtContact !== false);
     for (const f of this.fx) if (f.score) r = f.score(r, ac, approach, this);
@@ -766,6 +875,7 @@ export class FailureRuntime {
     if (fs.some((f) => FAILURES[f.name] && FAILURES[f.name].effect)) {
       for (const l of r.lines) if (l.k === 'Malfunction handled') l.v = fs.map((f) => (FAILURES[f.name] ? FAILURES[f.name].name : f.name)).join(', ') + ' (+5)';
     }
+    for (const l of r.lines) this._lines.add(l);
     return r;
   }
   // The ball the lens shows. The true one goes to the scoring, the callouts and the LSO; with the lens failed the
@@ -780,6 +890,12 @@ export class FailureRuntime {
     for (const id of this._laterTimers) clearTimeout(id);
     this._laterTimers.length = 0;
     for (const f of this.fx) if (f.dispose) f.dispose();
+    const mh = this._mission;
+    if (mh) {
+      if (mh.ownScore) mh.m.score = mh.score; else delete mh.m.score;
+      if (mh.ownHint) mh.m.hint = mh.hint; else delete mh.m.hint;
+      this._mission = null;
+    }
     if (this.game && this.game.cockpitView && this.game.cockpitView.failView === this) this.game.cockpitView.failView = null;
     if (this.touch && this.touch.setFailureButtons) this.touch.setFailureButtons([]);
     if (this.hud && this.hud.setExtraKeys) this.hud.setExtraKeys([]);

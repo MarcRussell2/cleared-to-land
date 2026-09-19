@@ -25,6 +25,8 @@ import { SITES, SCENARIOS, resolveScenario } from '../src/systems/scenarios.js';
 import { FAILURES, applyFailure, shouldTrigger } from '../src/systems/malfunctions.js';
 import { FailureRuntime, EFFECT_NAMES, crackPattern } from '../src/systems/failureEffects.js';
 import { FAILURES_MISSIONS } from '../src/missions/failures.js';
+import { MissionRuntime } from '../src/systems/mission.js';
+import { Alarms } from '../src/audio-alarms.js';
 import { NEW_MISSIONS, MISSION_GROUPS } from '../src/missions/index.js';
 import { scoreLanding, vrefFor } from '../src/systems/scoring.js';
 import { FlightControl } from '../src/systems/flightControl.js';
@@ -261,17 +263,52 @@ const TECHNIQUES = {
       return ac.gs > 15 ? Math.max(pc, 5 * DEG) : pc;   // and the nose stays up: the wing lifts for as long as it flies
     },
   },
-  // Tips: hook, gear, full flaps; on speed (8.1° AoA, about 135 kt) with power; the glideslope with small pitch
-  // changes by the numbers (height against distance from the ramp, which is what hDes is); do what Paddles says the
-  // moment he says it; no flare, full power at touchdown. No ball anywhere: this pilot never reads it.
+  // Tips: hook, gear, full flaps; on-speed AoA (8.1°) with pitch, the glide path with the throttle by the numbers
+  // (the HUD altitude against the distance on the status line, which moves in 0.1 NM steps); what Paddles says, the
+  // moment he says it; no flare, full power at touchdown. This pilot never reads the ball, and knows the glide path
+  // only from the numbers, which it reads out of the tips themselves (so they are the numbers that were proven); the
+  // geometry's hDes is not used.
   'no-ball': {
-    before(p) { p.aimLow = 1.5; },   // the numbers in the tips sit a metre and a half under the lens's line
     approach(p, g, pc, vsErr, speedErr, dt) {
-      const ac = p.ac, lso = p.rt.lso;
-      if (!lso || p.t > lso.t + 1.2) return pc;
-      if (/Power/.test(lso.call)) { ac.input.throttle = Math.min(1, ac.input.throttle + (/little/.test(lso.call) ? 0.05 : 0.12)); return pc + 0.4 * DEG; }
-      if (/high/.test(lso.call)) { ac.input.throttle = Math.max(0, ac.input.throttle - 0.04); return pc - (/little/.test(lso.call) ? 0.3 : 0.6) * DEG; }
-      return pc;
+      const ac = p.ac, m = p.memo, c = p.world.carrier, lso = p.rt.lso;
+      if (!m.nb) {
+        const x = /1 NM (\d+) ft, half a mile (\d+) ft, over the ramp (\d+) ft/.exec((p.sc.tips || []).join(' '));
+        if (!x) throw new Error('no-ball: the numbers are not in the tips');
+        m.nb = [+x[3], +x[2], +x[1]];   // at 0, 0.5 and 1 NM
+      }
+      const nb = m.nb;
+      // The status line: "0.7 NM to the ramp", one decimal. The moment it ticks over (0.3 to 0.2) the ramp is 0.25 NM
+      // away; in between, the distance runs down at the closing speed. The numbers in between by eye, and at the same
+      // rate beyond 1 NM.
+      const dl = c.deckLocal(ac.pos, m.dl || (m.dl = { u: 0, v: 0, h: 0, onDeck: false }));
+      const shown = Math.round(-dl.u / 1852 * 10) / 10, closure = Math.max(ac.gs - c.speed, 5);
+      if (m.shown == null) m.r = shown * 1852;
+      else if (shown !== m.shown) m.r = (shown + m.shown) / 2 * 1852;
+      else m.r -= closure * dt;
+      m.shown = shown; m.r = clamp(m.r, (shown - 0.05) * 1852, (shown + 0.05) * 1852);
+      const nm = Math.max(0, m.r / 1852);
+      const hT = (nm <= 0.5 ? nb[0] + (nb[1] - nb[0]) * nm / 0.5 : nb[1] + (nb[2] - nb[1]) * (nm - 0.5) / 0.5) * FT;
+      const perM = (nb[2] - nb[0]) * FT / 1852;                        // the numbers' own descent, per metre flown
+      const vsDes = clamp(-closure * perM + 0.15 * (hT - ac.alt), -5, 2), e = vsDes - ac.vs;
+      m.hT = hT;   // (--fly prints it)
+      // The glide path with the throttle, on top of the power it was trimmed with (p.thr0): the sink rate against the
+      // one wanted, the power that takes (built up slowly), and a hand that eases off as the sink rate starts to change
+      // (a jet's thrust comes late, so a pilot leads it). Paddles' calls go into the power, once each.
+      if (m.ti == null) { m.ti = 0; m.p = ac.euler.pitch; m.acc = 0; }
+      m.ti = clamp(m.ti + 0.025 * e * dt, -0.5, 0.5);
+      if (lso && lso.t > (m.heard ?? -1)) {
+        m.heard = lso.t;
+        if (/Power!/.test(lso.call)) m.ti += 0.12; else if (/little power/.test(lso.call)) m.ti += 0.03; else if (/Power/.test(lso.call)) m.ti += 0.075;
+        else if (/high/.test(lso.call)) m.ti -= /little/.test(lso.call) ? 0.03 : 0.06;
+      }
+      if (m.vs0 != null) m.acc += ((ac.vs - m.vs0) / dt - m.acc) * Math.min(1, dt / 0.5);
+      m.vs0 = ac.vs;
+      ac.input.throttle = clamp(p.thr0 + m.ti + 0.1 * e - 0.4 * m.acc, 0, 1);
+      if (ac.aero.warning) ac.input.throttle = Math.max(ac.input.throttle, 0.9);
+      // On-speed AoA with pitch: the attitude eased up or down as the AoA drifts off the ON SPD mark.
+      const aerr = ac.aero.alpha - ac.def.approach.onSpeedAoA;
+      m.p = clamp(m.p - 0.3 * aerr * dt, -2 * DEG, 12 * DEG);
+      return m.p - 0.3 * aerr;
     },
   },
   // Tips: pull the fire handle (A); then the One Engine landing.
@@ -441,7 +478,7 @@ function logCarrier(ap, ac, mb) {
 function fmtState(t, ac, w, rt, p) {
   const d = distTo(w, ac);
   const sens = rt.sensed ? ` shown ${(rt.sensed.ias / KT).toFixed(0)}` : '';
-  return `${t.toFixed(1).padStart(6)}s d=${d.toFixed(0).padStart(6)} ra=${(ac.radioAlt / FT).toFixed(0).padStart(5)}ft ias=${(ac.ias / KT).toFixed(0)}${sens} vs=${(ac.vs / FPM).toFixed(0).padStart(5)} pitch=${(ac.euler.pitch * RAD).toFixed(1)} roll=${(ac.euler.roll * RAD).toFixed(1)} beta=${(ac.aero.beta * RAD).toFixed(1)} thr=${ac.input.throttle.toFixed(2)} trim=${ac.input.trim.toFixed(2)} el=${ac.ctl.elevator.toFixed(2)} ail=${ac.ctl.aileron.toFixed(2)} rud=${ac.ctl.rudder.toFixed(2)} flap=${ac.ctl.flap.toFixed(2)} spl=${ac.ctl.spoiler.toFixed(1)} aoa=${(ac.aero.alpha * RAD).toFixed(1)} ${p ? p.phase : ''}${ac.crashed ? ' CRASH ' + ac.crashReason : ''}`;
+  return `${t.toFixed(1).padStart(6)}s d=${d.toFixed(0).padStart(6)} ra=${(ac.radioAlt / FT).toFixed(0).padStart(5)}ft ias=${(ac.ias / KT).toFixed(0)}${sens} vs=${(ac.vs / FPM).toFixed(0).padStart(5)} pitch=${(ac.euler.pitch * RAD).toFixed(1)} roll=${(ac.euler.roll * RAD).toFixed(1)} beta=${(ac.aero.beta * RAD).toFixed(1)} thr=${ac.input.throttle.toFixed(2)} trim=${ac.input.trim.toFixed(2)} el=${ac.ctl.elevator.toFixed(2)} ail=${ac.ctl.aileron.toFixed(2)} rud=${ac.ctl.rudder.toFixed(2)} flap=${ac.ctl.flap.toFixed(2)} spl=${ac.ctl.spoiler.toFixed(1)} aoa=${(ac.aero.alpha * RAD).toFixed(1)}${p && p.memo.hT != null ? ` target=${(p.memo.hT / FT).toFixed(0)}ft alt=${(ac.alt / FT).toFixed(0)}ft` : ''} ${p ? p.phase : ''}${ac.crashed ? ' CRASH ' + ac.crashReason : ''}`;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -546,7 +583,11 @@ function runChecks() {
     rt.trigger({ name: 'stuckThrottle', arg: 0.7 });
     run(ac, rt, 1, (t, a) => { a.input.throttle = 0.1; });
     check(Math.abs(ac.input.throttle - 0.7) < 1e-9, 'stuck throttle: the lever says 0.1, the engines get 0.7');
-    check(rt.action('fuelCutoff') && !rt.action('fuelCutoff'), 'fuel cutoff (U) is taken once');
+    // the guard: at 1,600 ft a press only asks; it lapses after two seconds; a second press within them cuts
+    const asked = rt.action('fuelCutoff') && !rt.fuelCut;
+    run(ac, rt, 2.2, (t, a) => { a.input.throttle = 0.1; });
+    const lapsed = rt.action('fuelCutoff') && !rt.fuelCut;
+    check(asked && lapsed && rt.action('fuelCutoff') && rt.fuelCut && !rt.action('fuelCutoff'), `fuel cutoff (U) is guarded above 300 ft (a press asks, ${'"' + touchify('FUEL CUTOFF? PRESS U AGAIN') + '"'} on a phone; the question lapses after 2 s), a second press cuts, and it is taken once`);
     run(ac, rt, 1, (t, a) => { a.input.throttle = 0.9; });
     const spooling = ac.engines.every((e) => !e.failed && e.thrust > 0) && ac.input.throttle === 0;
     run(ac, rt, 2, (t, a) => { a.input.throttle = 0.9; });
@@ -555,6 +596,10 @@ function runChecks() {
     check(spooling && ac.engines.every((e) => !e.failed && e.thrust === 0) && rt.display.engOff[0] && rt.display.engOff[1] && ac.engines[0].rpm < rpm * 0.5,
       `the engines spool down, then stop: no thrust, the gauges say OFF and run down (N1 ${(rpm * 100).toFixed(0)}% -> ${(ac.engines[0].rpm * 100).toFixed(0)}%), and a shutdown is not a failure (no smoke)`);
     check(AIRCRAFT.condor.engines[0].maxThrust > 0, '...on the aircraft\'s own copy of the engines, not the shared definition');
+    const low = airborne('condor', { alt: 60 }), rl = new FailureRuntime(low, { failures: [] }, { seed: 1 });
+    rl.trigger({ name: 'stuckThrottle', arg: 0.7 });
+    run(low, rl, 0.2);
+    check(low.radioAlt < 300 * FT && low.radioAlt > 100 * FT && rl.action('fuelCutoff') && rl.fuelCut, `below 300 ft (the flare, where the drill uses it) one press cuts (at ${(low.radioAlt / FT).toFixed(0)} ft)`);
   }
   {
     const ac = airborne('condor'), rt = new FailureRuntime(ac, { failures: [] }, { seed: 1 });
@@ -610,9 +655,45 @@ function runChecks() {
   }
   {
     const ac = airborne('condor'), rt = new FailureRuntime(ac, { failures: [] }, { seed: 1 });
-    rt.trigger({ name: 'gearUp' });
+    const down = ac.ctl.gear;
+    rt.trigger({ name: 'gearUp' });   // before the first frame, as Free Flight deals it: the gear is up, not folding away
+    const up = ac.ctl.gear === 0 && ac.legs.every((l) => l.ext === 0);
+    const said = rt.action('gear');
     ac.input.gearCmd = 1; rt.preStep(0.04, ac, {});
-    check(ac.input.gearCmd === 0, 'gear up: G does nothing, the gear stays up');
+    check(down === 1 && up && said && ac.input.gearCmd === 0, 'gear up: up from the start when it fires before the first frame, and G says GEAR UNSAFE instead of lowering it');
+    const h = airborne('hornet'), rh = new FailureRuntime(h, { failures: [] }, { seed: 1 });
+    h.input.hookCmd = 1; h.ctl.hook = 1;
+    rh.trigger({ name: 'hookFail' });
+    check(h.ctl.hook === 0 && rh.action('hook') && h.input.hookCmd === 0, 'hook failure: likewise up from the start, and H says so');
+    const ctx = { ac, ra: 900, d: 5000, t: 3 };
+    check(/belly landing/i.test(rt.hint(ctx)) && /\(press U\)/.test(rt.hint(ctx)), `...and its own hint where the game's would say "Gear down: press G" ("${rt.hint(ctx)}")`);
+  }
+  {
+    // the first ten: exactly as before - no master caution light, no display object for the HUD
+    const ac = airborne('condor'), rt = new FailureRuntime(ac, { failures: [] }, { seed: 1 });
+    rt.trigger({ name: 'engineLeft' });
+    run(ac, rt, 0.5, (t, a) => { a.input.throttle = 0.5; });
+    check(rt.display === null && rt._display.caution.blink <= 0 && !rt._display.caution.level, 'the first ten failures light no master caution and leave the HUD\'s failure display alone');
+  }
+  {
+    // two failures that both use the fire handle: one button, and it stays (with the next one's label) until both are done
+    const ac = airborne('condor'), rt = new FailureRuntime(ac, { failures: [] }, { seed: 1 });
+    rt.trigger({ name: 'engineFire', engine: 'left' });
+    rt.trigger({ name: 'engineSurge', engine: 'right' });
+    const o1 = rt.offers.map((o) => o.label).join(',');
+    rt.action('fireHandle');
+    const o2 = rt.offers.map((o) => o.label).join(',');
+    rt.action('failDrill');   // (the one-button drill a gamepad would send)
+    const o3 = rt.offers.length;
+    check(o1 === 'FIRE' && o2 === 'ENG OFF' && o3 === 0 && rt.get('engineFire').out && rt.get('engineSurge').shut, `the fire handle on offer while anything needs it: ${o1} -> ${o2} -> nothing`);
+  }
+  {
+    // One Wheel: a flight that ends with that wing still up does not say "0 kt"
+    const ac = airborne('skylark'), rt = new FailureRuntime(ac, { failures: [] }, { seed: 1 });
+    rt.trigger({ name: 'oneMainStuck', leg: 'left' });
+    ac.stats.touchdown = { ias: 55 * KT, vs: -1, pitch: 0.1, legs: ['right'], pos: ac.pos.clone() };
+    const r = rt.get('oneMainStuck').score({ points: 80, grade: 'OK', gradeIdx: 2, lines: [] }, ac, {}, rt);
+    check(r.points === 80 && r.lines.length === 1 && /still up when the flight ended/.test(r.lines[0].v) && !/0 kt/.test(r.lines[0].v), `one wheel, flight ended before the stub touched: "${r.lines[0].k}: ${r.lines[0].v}"`);
   }
   {
     const sky = airborne('skylark'), rs = new FailureRuntime(sky, { failures: [] }, { seed: 1 });
@@ -654,6 +735,55 @@ function runChecks() {
     ac.input.hookCmd = 1; rt.preStep(0.04, ac, {});
     check(ac.input.hookCmd === 0, 'hook failure: the hook stays up');
     rt.dispose();
+  }
+  {
+    // the 3D lens: main.js hands the carrier the true ball; the failure puts its own updateLens on that carrier
+    const carrier = new Carrier({ ...SITES.carrier.carrier, seaState: 0.3, x: 0, z: 0 });
+    let got = null;
+    const spy = (mb) => { got = mb; };
+    carrier.updateLens = spy;
+    const ac = airborne('hornet'), rt = new FailureRuntime(ac, { failures: [] }, { seed: 1, world: { carrier } });
+    rt.trigger({ name: 'lensFail' });
+    const mb = { inRange: true, cells: 1.3, waveoff: false, range: 900, dl: { u: -900, v: 0, h: 60 } };
+    carrier.updateLens(mb, 1);
+    const dark = got && got !== mb && !got.inRange;
+    rt.dispose();
+    carrier.updateLens(mb, 2);
+    check(dark && got === mb && carrier.updateLens === spy, 'lens failure: the carrier\'s own lens is handed the dark ball (main.js untouched), and gets the true one back after the flight');
+  }
+  {
+    // the debrief and the hints reach main.js through the mission runtime: hooked on the first check(), taken off after
+    const game = { ap: null, mission: null };
+    const ac = airborne('skylark'), sc = { id: 't', failures: [{ name: 'oneMainStuck', at: { type: 'start' }, leg: 'left' }], scoring: { type: 'runway' } };
+    const rt = new FailureRuntime(ac, sc, { seed: 1, game });
+    const m = game.mission = new MissionRuntime(sc, { failRt: rt });
+    rt.check(ac, { t: 0, distToThreshold: 1e9 });
+    ac.stats.touchdown = { ias: 55 * KT, vs: -1, pitch: 0.1, legs: ['right'], pos: ac.pos.clone() };
+    const r = m.score({ points: 80, grade: 'OK', gradeIdx: 2, lines: [] }, ac, {});
+    const again = rt.score(r, ac, {}), copy = rt.score({ ...r, lines: r.lines.slice() }, ac, {});
+    check(r.lines.some((l) => /Left wing/.test(l.k)) && again === r && copy.lines.length === r.lines.length, 'the mission\'s score() runs the failures\' first, and once only (a copy the mission made of it is left as it is)');
+    const g2 = { ap: null, mission: null }, a2 = airborne('condor');
+    const s2 = { id: 't', failures: [{ name: 'gearUp' }] };
+    const r2 = new FailureRuntime(a2, s2, { seed: 1, game: g2 });
+    const m2 = g2.mission = new MissionRuntime(s2, { failRt: r2 });
+    r2.check(a2, { t: 0, distToThreshold: 1e9 });
+    const ctx = { ac: a2, ra: 900, d: 5000, t: 1 };
+    const own = m2.hint(ctx);
+    s2.hint = () => 'the mission\'s own';
+    const first = m2.hint(ctx);
+    rt.dispose(); r2.dispose();
+    check(/belly landing/i.test(own) && first === 'the mission\'s own' && !Object.prototype.hasOwnProperty.call(m, 'score') && !Object.prototype.hasOwnProperty.call(m2, 'hint'), 'a failure\'s hint where the mission has none, the mission\'s first; both taken off on dispose');
+  }
+  {
+    // dead electrics: the radio altimeter's calls stop (audio-alarms.js silence(); AudioSys.say() asks it), nothing else
+    const alarms = new Alarms({ ready: false });
+    const audio = { alarms, say() {}, beep() {} };
+    const ac = airborne('skylark'), rt = new FailureRuntime(ac, { failures: [] }, { seed: 1, audio });
+    const before = alarms.silence('50');
+    rt.trigger({ name: 'electrical' });
+    const during = alarms.silence('50') && alarms.silence('20') && !alarms.silence('Stall. Stall.') && !alarms.silence('Crash.');
+    rt.dispose();
+    check(!before && during && !alarms.silence('50'), 'electrical: the "50", "20" calls are silent while the power is off, the other voices are not, and all of it ends with the flight');
   }
   check(JSON.stringify(AIRCRAFT, noFn) === defsBefore, 'the shared aircraft definitions are never written to');
 
@@ -737,6 +867,12 @@ function runChecks() {
   check(L('one-wheel').some((l) => /wing held up until/.test(l.k)), 'one wheel: the debrief says how slowly the wing came down');
   check(results['unreliable-ias'].rt.sensed.ias < results['unreliable-ias'].ac.stats.touchdown.ias * 0.8, 'unreliable airspeed: the tape was well wrong by the flare, and the landing was flown anyway');
   check(results['no-ball'].rt.lso.t > 0, 'no ball: Paddles talked');
+  {
+    // No Ball is flown by the numbers in its tips alone (no ball, no glide path from the geometry): more seeds (the
+    // gusts differ), with a keyboard's pedals
+    const res = [11, 4271, 42, 901].map((seed) => flyMission(SCENARIOS.find((s) => s.id === 'no-ball'), { seed, human: true }));
+    check(res.every((r) => !r.ac.crashed && r.ac.trap.trapped), `no ball, by the numbers, on four more seeds: ${res.map((r) => (r.ac.crashed ? 'CRASH ' + r.ac.crashReason : r.ac.trap.trapped ? `${r.ac.trap.wire}-wire ${r.result.points}` : 'no trap')).join(', ')}`);
+  }
 
   console.log('\n== Left alone, a failure ends badly ==');
   {
@@ -807,7 +943,7 @@ async function flyInPage(html, port = 9751, ids = null, seed = 307) {
       console.log(JSON.stringify({ id: r.id, frames: r.frames, points: r.points, grade: r.grade, crashed: r.crashed, reason: r.reason, wire: r.wire, keys: r.keys }));
       for (const l of r.lines || []) console.log('    ' + l);
     }
-    if (logs.length) console.log('CONSOLE:\n' + logs.slice(0, 20).join('\n'));
+    if (logs.length) { console.log('Console errors and warnings:'); console.log(logs.slice(0, 20).join('\n')); }
     ws.close();
   } finally {
     if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(edge.pid), '/T', '/F'], { stdio: 'ignore' }); else edge.kill();

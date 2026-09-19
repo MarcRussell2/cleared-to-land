@@ -186,7 +186,7 @@ export class AudioSys {
     o.connect(g); g.connect(this.master); o.start(now); o.stop(now + d + 0.02);
   }
   say(text, priority = false) {
-    if (!this.voice || !('speechSynthesis' in window)) return;
+    if (!this.voice || !('speechSynthesis' in window) || this.alarms.silence(text)) return;   // (silence: dead electrics, audio-alarms.js)
     if (priority) { window.speechSynthesis.cancel(); this.speechQ.length = 0; }
     this.speechQ.push(text);
   }

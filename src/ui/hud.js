@@ -3,8 +3,8 @@
 // Failures (2026-09-17, src/systems/failureEffects.js) reach the HUD through two fields of the context:
 //   ctx.sensed   what an instrument reads when it is lying (sensed.ias, m/s: an iced pitot); null = honest
 //   ctx.display  what has failed, one object refilled by the failure runtime; null until something fails:
-//     dark         the electrics are dead: every instrument goes (the ILS and the ball too), a torch-lit standby
-//                  airspeed and altimeter stay
+//     dark         the electrics are dead: every instrument goes (the ILS and the ball too, the status line with its
+//                  distance, the radio altimeter's callouts), a torch-lit standby airspeed and altimeter stay
 //     noBall       the carrier's lens is dark: no ball on the HUD either
 //     caution      { level: 'caution'|'warning', text, blink }: the master caution (amber) or warning (red) light
 //     annun        [{ text, cls }]: annunciators under it (L ENG FIRE, STAB TRIM, IAS DISAGREE)
@@ -110,7 +110,7 @@ export class HUD {
     this.mc.innerHTML = '<div class="light" id="mclight"></div><div class="annun" id="annun"></div>';
     h.appendChild(this.mc);
     this.mcLight = this.mc.querySelector('#mclight'); this.annun = this.mc.querySelector('#annun');
-    this._mc = '';
+    this._mc = 0;
     // the standby airspeed and altimeter, lit by a torch, for when the electrics die (drawn at the readout rate)
     this.stby = el('div'); this.stby.id = 'stby';
     this.stbyCanvas = document.createElement('canvas'); this.stbyCanvas.width = 400; this.stbyCanvas.height = 200;
@@ -197,7 +197,9 @@ export class HUD {
   }
 
   message(text, cls = '', dur = 3) { this.msg.textContent = text; this.msg.className = cls; this.msgT = dur; }
-  callout(text, dur = 1.2) { this.calls.textContent = text; this.calls.classList.add('on'); this.callT = dur; }
+  // `advice`: a hint rather than an instrument's call. With the electrics dead (the HUD dark) only advice shows: the
+  // radio altimeter's "50", "20" are an instrument, and it has no power.
+  callout(text, dur = 1.2, advice = false) { if (this._dark && !advice) return; this.calls.textContent = text; this.calls.classList.add('on'); this.callT = dur; }
   setHint(text) { if (!this.showHints) { this.hint.textContent = ''; return; } if (text !== this.lastHint) { this.hint.textContent = (this.touch ? touchify(text) : text) || ''; this.lastHint = text; } }
   setFailures(list) { this.fails.innerHTML = list.map((f) => `<span class="f">${f}</span>`).join(''); }
   set visible(v) { this.root.classList.toggle('hidden', !v); }
@@ -339,17 +341,18 @@ export class HUD {
     const dark = !!(fd && fd.dark);
     if (dark !== this._dark) { this._dark = dark; this.root.classList.toggle('dark', dark); }
     setStyle(this.iasFlag, 'display', fd && fd.iasFlag && !dark ? 'block' : 'none');
-    // the master caution: flashing while its blink runs, then steady until the annunciators have all gone out
-    let mc = '';
+    // the master caution: flashing while its blink runs, then steady until the annunciators have all gone out.
+    // As a number (0 off, 1 caution, 2 warning; +2 blinking), so a frame makes no string; the DOM changes with it.
+    let mc = 0;
     if (fd) {
       const c = fd.caution, lit = c.blink > 0 || fd.annun.length;
-      if (c.level && lit) mc = `${c.level}|${c.blink > 0 ? 1 : 0}`;
+      if (c.level && lit) mc = (c.level === 'warning' ? 2 : 1) + (c.blink > 0 ? 2 : 0);
     }
     if (mc !== this._mc) {
       this._mc = mc;
-      const [lvl, blink] = mc.split('|');
-      this.mcLight.className = mc ? `light ${lvl}${blink === '1' ? ' blink' : ''}` : 'light';
-      setHTML(this.mcLight, mc ? `<span class="m">MASTER</span><span>${lvl === 'warning' ? 'WARNING' : 'CAUTION'}</span>` : '');   // (a phone shows the second word only)
+      const warn = mc === 2 || mc === 4;
+      this.mcLight.className = mc ? `light ${warn ? 'warning' : 'caution'}${mc > 2 ? ' blink' : ''}` : 'light';
+      setHTML(this.mcLight, mc ? `<span class="m">MASTER</span><span>${warn ? 'WARNING' : 'CAUTION'}</span>` : '');   // (a phone shows the second word only)
     }
     if (textDue) setHTML(this.annun, fd ? fd.annun.map((a) => `<span class="${a.cls}">${a.text}</span>`).join('') : '');
     if (dark && textDue) this.drawStandby(ac, ias, alt);

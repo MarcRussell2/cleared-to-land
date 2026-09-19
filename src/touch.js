@@ -73,6 +73,7 @@ const TOUCH_WORDS = [
   ['then T / Y wind it by hand', 'then the TRIM buttons wind it by hand'],
   ['(press U)', '(tap FUEL CUT)'],
   ['press U', 'tap FUEL CUT'],
+  ['PRESS U AGAIN', 'TAP FUEL CUT AGAIN'],   // (the cutoff's guard above 300 ft, a HUD message)
   ['(press F once more)', '(tap FLAPS ▼ once more)'],
   ['Flaps 40: press F.', 'Flaps 40: tap FLAPS ▼.'],
   ['press K twice', 'tap SPLR twice'],

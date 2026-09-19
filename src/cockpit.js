@@ -27,6 +27,14 @@ import { buildCockpit as buildHornet } from './art/cockpits/hornet.js';
 
 export const COCKPIT_LAYER = 1;
 const BUILDERS = { skylark: buildSkylark, trailblazer: buildTrailblazer, condor: buildCondor, hornet: buildHornet };
+// The electric displays painted into an interior's instrument atlas, blanked while the electrics are dead
+// (prepareDeadDisplays): rectangles in atlas pixels (x0, y0, x1, y1; y down, as the canvas is painted) of a `size`
+// square atlas. The Skylark's are the three windows of its radio stack (src/art/cockpits/skylark.js tile 12: NAV/COMM 1,
+// NAV/COMM 2, the transponder); the Trailblazer has no radio faces, and only the propeller airplanes have the failure.
+// A repainted atlas that moves them needs these moved too (the art is not edited from here).
+const DEAD_DISPLAYS = {
+  skylark: { size: 2048, rects: [[31, 1600, 481, 1667], [31, 1751, 481, 1818], [31, 1902, 481, 1969]] },
+};
 
 // The state handed to cockpit.update() every frame. Allocated once; the same object is
 // updated in place, so a cockpit may keep a reference but must not keep a copy.
@@ -96,6 +104,7 @@ export class CockpitView {
     this._q = new THREE.Quaternion();
     this.failView = null;      // the flight's FailureRuntime (it sets and clears this itself): sensed readings, power
     this.crack = null;         // the cracked-windshield decal (prepareCrack / showCrack), per interior
+    this.dead = null;          // the blanks over the radio faces for dead electrics (prepareDeadDisplays), per interior
     this._dim = null;          // without electrical power: the interior's lit materials and what the art set them to
   }
   // Remember this world's lights, so the interior's copies can follow them every frame.
@@ -113,6 +122,7 @@ export class CockpitView {
     if (this.cockpit && this.cockpit.group.parent) this.cockpit.group.parent.remove(this.cockpit.group);
     if (this.cockpit && this.cockpit.dispose) this.cockpit.dispose();
     if (this.crack) { this.crack.mesh.geometry.dispose(); this.crack.mat.dispose(); this.crack.tex.dispose(); this.crack = null; }
+    if (this.dead) { this.dead.mesh.geometry.dispose(); this.dead.mat.dispose(); this.dead = null; }
     this._dim = null;
     this.cockpit = null; this.model = null; this.active = false; this.pass.enabled = false;
   }
@@ -190,9 +200,12 @@ export class CockpitView {
     const fv = this.failView;
     s.power = fv ? fv.power : 1;
     if (fv) {
+      const d = fv.display;
       if (fv.sensed && fv.sensed.ias != null) s.ias = fv.sensed.ias / KT;
-      if (fv.display && fv.display.noBall) s.meatball = null;
+      if (d && (d.noBall || d.dark)) s.meatball = null;
+      if (d && d.dark) { s.ils = null; s.ilsGs = 0; s.ilsLoc = 0; }   // the nav receivers are electric
     }
+    if (this.dead) this.dead.mat.opacity = s.power ? 0 : 0.96;
     // With the electrics dead the panel lights go out. The interiors light their panels (emissive) by the time of
     // day and know nothing of power, so what the art sets is scaled here, after its update, by what daylight alone
     // would give the panel (dayness squared: all of it by day, none at night), and put back before the next update so
@@ -219,6 +232,63 @@ export class CockpitView {
     return this._dim;
   }
 
+  // ---- dead radios (an electrical failure: src/systems/failureEffects.js) ----
+  // The dimmer above takes the panel lights, but a radio's digits are paint in the instrument atlas and still read by
+  // moonlight. So each electric display listed in DEAD_DISPLAYS gets a dark pane laid over it, a millimetre and a half
+  // toward the eye: made at the start of a flight that has the failure in it, clear (opacity 0) so it compiles with
+  // the rest of the interior, and made opaque in update() while s.power is 0 (a uniform: nothing recompiles). Where
+  // it goes is found from the atlas itself: the textured triangle whose UVs hold each display's middle gives the
+  // panel point of any atlas point, so the pane follows the face wherever the art puts it on the panel.
+  prepareDeadDisplays(def) {
+    const c = this.cockpit, spec = DEAD_DISPLAYS[def.id];
+    if (!c || !spec || this.dead) return;
+    const meshes = [];
+    c.group.traverse((o) => { const map = o.isMesh && o.material && o.material.map; if (map && map.image && map.image.width === spec.size && o.geometry.attributes.uv) meshes.push(o); });
+    const eye = new THREE.Vector3(def.eye.x, def.eye.y + (def.seatUp || 0), def.eye.z);
+    const out = [];
+    const P = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()], U = [new THREE.Vector2(), new THREE.Vector2(), new THREE.Vector2()];
+    const bary = (u, v) => {   // barycentric weights of (u, v) in the UV triangle U (outside it too: the face is affine)
+      const x0 = U[1].x - U[0].x, y0 = U[1].y - U[0].y, x1 = U[2].x - U[0].x, y1 = U[2].y - U[0].y, x2 = u - U[0].x, y2 = v - U[0].y;
+      const den = x0 * y1 - x1 * y0;
+      if (Math.abs(den) < 1e-12) return null;
+      const b = (x2 * y1 - x1 * y2) / den, g = (x0 * y2 - x2 * y0) / den;
+      return [1 - b - g, b, g];
+    };
+    const at = (w, o) => o.set(0, 0, 0).addScaledVector(P[0], w[0]).addScaledVector(P[1], w[1]).addScaledVector(P[2], w[2]);
+    for (const [x0, y0, x1, y1] of spec.rects) {
+      const uc = (x0 + x1) / 2 / spec.size, vc = 1 - (y0 + y1) / 2 / spec.size;   // (a canvas texture's v runs up)
+      let found = false;
+      for (const mesh of meshes) {
+        const m = new THREE.Matrix4();
+        for (let o = mesh; o && o !== c.group; o = o.parent) { o.updateMatrix(); m.premultiply(o.matrix); }
+        const pos = mesh.geometry.attributes.position, uv = mesh.geometry.attributes.uv, idx = mesh.geometry.index;
+        const n = idx ? idx.count : pos.count;
+        for (let i = 0; i + 2 < n && !found; i += 3) {
+          for (let k = 0; k < 3; k++) { const j = idx ? idx.getX(i + k) : i + k; U[k].fromBufferAttribute(uv, j); P[k].fromBufferAttribute(pos, j).applyMatrix4(m); }
+          const w = bary(uc, vc);
+          if (!w || w[0] < -1e-6 || w[1] < -1e-6 || w[2] < -1e-6) continue;
+          found = true;
+          const nrm = new THREE.Vector3().subVectors(P[1], P[0]).cross(new THREE.Vector3().subVectors(P[2], P[0])).normalize();
+          const mid = at(w, new THREE.Vector3());
+          if (nrm.dot(eye.clone().sub(mid)) < 0) nrm.negate();
+          const q = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(([x, y]) => at(bary(x / spec.size, 1 - y / spec.size), new THREE.Vector3()).addScaledVector(nrm, 0.0015));
+          for (const k of [0, 1, 2, 0, 2, 3]) out.push(q[k].x, q[k].y, q[k].z);
+        }
+        if (found) break;
+      }
+    }
+    if (!out.length) return;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(out, 3));
+    const mat = new THREE.MeshBasicMaterial({ color: 0x0b0e0d, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+    mat.name = 'cockpit:dead-displays'; mat.fog = false; mat.forceSinglePass = true;
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.name = 'dead-displays'; mesh.renderOrder = 7; mesh.layers.set(COCKPIT_LAYER);
+    mesh.castShadow = false; mesh.receiveShadow = false;
+    c.group.add(mesh);
+    this.dead = { mesh, mat };
+  }
+
   // ---- a cracked windshield (a bird strike: src/systems/failureEffects.js) ----
   // A decal laid on the windshield pane straight ahead of the pilot: a ray from the eye (raised by def.seatUp, as the
   // camera is) a few degrees up and to one side finds parts.windshield, and the decal lies on the glass there, a few
@@ -226,10 +296,12 @@ export class CockpitView {
   // pane. prepareCrack() makes it at the start of a flight that has a bird strike in it, blank and visible, so it
   // compiles with the rest of the interior; showCrack() draws the crack into it (one canvas upload, no compile).
   // It is not lit: its colour follows the daylight (update()), so a crack glints by day and is a dark web at night.
+  // 512 square: 1.3 MB with its mipmaps (a 1024 one was 5.3 MB on a cockpit already over its texture budget, and a
+  // 4 MB upload at the moment of the strike); showCrack() scales its strokes to the canvas.
   prepareCrack(def, rng) {
     const c = this.cockpit;
     if (!c || this.crack || typeof document === 'undefined') return;
-    const S = 1024, canvas = document.createElement('canvas');
+    const S = 512, canvas = document.createElement('canvas');
     canvas.width = canvas.height = S;
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
@@ -277,7 +349,7 @@ export class CockpitView {
   showCrack(pattern) {
     const k = this.crack;
     if (!k || !pattern) return;
-    const S = k.canvas.width, g = k.canvas.getContext('2d'), h = S / 2, sc = h * 0.98;
+    const S = k.canvas.width, g = k.canvas.getContext('2d'), h = S / 2, sc = h * 0.98, px = S / 1024;   // (strokes drawn for 1024)
     const X = (v) => h + v * sc;
     g.clearRect(0, 0, S, S);
     // the smear of the bird, and a frosted star where it hit
@@ -297,8 +369,8 @@ export class CockpitView {
     };
     g.lineCap = 'round'; g.lineJoin = 'round';
     for (const pass of [['rgba(6,8,10,0.5)', 1.35, 2, 2.6], ['rgba(240,245,248,0.88)', 1, 0, 0]]) {
-      for (const q of pattern.paths) stroke(q.pts, q.w * 2.8 * pass[1], pass[0], pass[2], pass[3]);
-      for (const a of pattern.arcs) stroke(a, 2.2 * pass[1], pass[0], pass[2], pass[3]);
+      for (const q of pattern.paths) stroke(q.pts, Math.max(1, q.w * 2.8 * pass[1] * px), pass[0], pass[2] * px, pass[3] * px);
+      for (const a of pattern.arcs) stroke(a, Math.max(1, 2.2 * pass[1] * px), pass[0], pass[2] * px, pass[3] * px);
     }
     k.tex.needsUpdate = true;
     k.on = true;
