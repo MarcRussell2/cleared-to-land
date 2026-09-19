@@ -6,14 +6,18 @@
 // read by src/world/obstacles.js after each step, swept from the previous frame's pose to this one. Measured
 // from the procedural airframes that ship (src/art/airframes/*.js: the wing, fin and tailplane formulas are
 // copied from there and named below) and cross-checked by tools/test-obstacles.mjs, which builds each airframe
-// in Node, samples its surface and requires every sample to lie inside (or within a few decimetres of) a probe.
+// in Node, samples its surface and requires every sample to lie inside, or within 0.35 m (Skylark, Trailblazer)
+// or 0.4 m (Condor, Hornet) of, a probe: the worst are the Condor's pylon fairing (0.39 m) and the Skylark's
+// rudder (0.32 m).
 //
 // Rules the table keeps:
 //   - consecutive probes along a line overlap (spacing <= 1.4 x radius), so the union is a solid tube: a 2 m
 //     mast cannot pass between two probes on the Condor's wing, and a 0.1 m cable cannot either;
 //   - a probe's radius is about the local half-thickness plus a little: the Condor's wing root is 0.8 m deep,
-//     its probes 0.78 m; the light wings 0.2 m deep, their probes about 0.45 m. A cable that misses the skin by
-//     less than that counts as a hit: conservative by a few decimetres, never permissive;
+//     its probes 0.78 m; the light wings 0.2 m deep, their probes about 0.45 m. So the probes match the skin to
+//     within about 0.4 m either way: mostly a little generous (a cable that misses a wing by a few decimetres
+//     counts as a hit), and in a few places (the fairings and the rudder above) the skin stands up to 0.4 m
+//     outside them;
 //   - flap probes carry `fy`/`fz` (metres at full flap): added times ac.ctl.flap, so an extended flap is covered
 //     where it hangs;
 //   - wheels come from def.gear (hullProbes() below) and count only while the gear is down (ctl.gear > 0.3),

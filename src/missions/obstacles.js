@@ -12,23 +12,19 @@
 // its threshold). tools/test-obstacles.mjs prints the numbers each description quotes, and checks them.
 
 // ------------------------------------------------------------------ the Moose Creek Notch site
-// The gravel bar of Moose Creek (SITES.gravelbar: the same valley, bar and scattered spruce), with its tree wall
-// grown into a forest edge: three rows of spruce half again as tall as the bar's (37 m, on ground 5-7 m above the
-// bar), 220 m wide, and one notch cut through it 16 m left of the centreline. All of it is course trees: one
-// instanced draw, swept collision against the trunk and the crown as drawn.
+// The gravel bar of Moose Creek (SITES.gravelbar: the same valley, bar and scattered spruce) without its 24 m tree
+// wall across short final. The Notch mission grows that wall into a forest edge in its own course (below), so the
+// site on its own is just the bar: nothing else that flies here (free flight, Autoland, the look and perf tools)
+// meets a wall it cannot see a way through. `missionOnly`: a site that exists for a mission; the free-flight picker
+// should leave it out (the new home menu honours it; the old menu lists every site).
 const NOTCH_V = -16, NOTCH_W = 30, NOTCH_U = -152;
 const notchbar = {
-  id: 'notchbar', name: 'Moose Creek Notch', kind: 'bush',
+  id: 'notchbar', name: 'Moose Creek Notch', kind: 'bush', missionOnly: true,
   terrain: { style: 'mountain', seed: 61, size: 14000, res: 400, elevation: 520, waterLevel: 516, valleyWidth: 1400, trees: 0.9, treeArea: 4500, snowLine: 1900 },
   runways: [{ x: 0, z: 0, heading: 0, length: 340, width: 14, surface: 'gravel', elevation: 520, name: '36', nameRecip: '18', papi: false, ils: false, lights: false, windsock: true, markers: true, aimDistance: 50, flatWidth: 60, flatMargin: 120 }],
   course: {
-    obstacles: [
-      { kind: 'treeWall', u: NOTCH_U, from: -110, to: 110, step: 9, scale: 1.5, rows: 3, rowGap: 13, jitter: 3, seed: 7, gap: { v: NOTCH_V, w: NOTCH_W } },
-      // the valley's scattered spruce, where Moose Creek Bar has them (its x -> v, z -> -u)
-      ...[[-34, 260, 1.1], [45, 320, 1.2], [22, 420, 1.0], [-48, 470, 1.1], [-25, -420, 1.2], [40, -380, 1.1]].map(([x, z, s]) => ({ kind: 'tree', u: -z, v: x, scale: s })),
-    ],
-    // keep the decorative forest off the line through the notch and the drop to the bar
-    clear: [{ u: -120, v: -10, r: 40 }, { u: -80, v: -4, r: 35 }],
+    // the valley's scattered spruce, where Moose Creek Bar has them (its x -> v, z -> -u)
+    obstacles: [[-34, 260, 1.1], [45, 320, 1.2], [22, 420, 1.0], [-48, 470, 1.1], [-25, -420, 1.2], [40, -380, 1.1]].map(([x, z, s]) => ({ kind: 'tree', u: -z, v: x, scale: s })),
   },
 };
 
@@ -76,6 +72,9 @@ const powerLines = {
 };
 
 // ------------------------------------------------------------------ 37: The Notch
+// Moose Creek Notch (above) with the forest edge across short final: three rows of spruce half again as tall as the
+// bar's (37 m, on ground 5-7 m above the bar), 220 m wide, and one notch cut through it 16 m left of the centreline.
+// All of it is course trees: one instanced draw, swept collision against the trunk and the crown as drawn.
 const theNotch = {
   id: 'the-notch', n: 37, title: 'The Notch', group: 'obstacles', difficulty: 4, tags: ['obstacles', 'bush'],
   aircraft: 'trailblazer', site: 'notchbar', time: 8.6, vis: 30000,
@@ -89,7 +88,12 @@ const theNotch = {
   spawn: { u: -850, v: -12, alt: 62, gamma: -3, flap: 1, speedKt: 52, fixed: true },
   failures: [], scoring: { type: 'bush' },
   course: {
+    obstacles: [
+      { kind: 'treeWall', u: NOTCH_U, from: -110, to: 110, step: 9, scale: 1.5, rows: 3, rowGap: 13, jitter: 3, seed: 7, gap: { v: NOTCH_V, w: NOTCH_W } },
+    ],
     gates: [{ u: NOTCH_U - 13, v: NOTCH_V, y: 17, w: 20, h: 16, name: 'the notch', required: true }],
+    // keep the decorative forest off the line through the notch and the drop to the bar
+    clear: [{ u: -120, v: -10, r: 40 }, { u: -80, v: -4, r: 35 }],
   },
   route: [
     { u: -520, v: NOTCH_V, alt: 34, kt: 52 },
@@ -123,7 +127,7 @@ const theNotch = {
 // The approach is flown up the harbor along a lane 1 km right of the runway, through the entrance and exit gates.
 // The fourth crane has its boom lowered right across the lane (its underside 50 m above the water, its stays above
 // it, its tip 7 m past the middle of the lane); under it is a bonus gate. Then a left turn out of the harbor onto
-// a final of about four kilometres.
+// the centreline about three kilometres out, and a climb onto the glideslope, which meets 500 ft at about 2.5 km.
 const LANE = 1000;           // the lane up the harbor, metres right of the runway centreline
 const QUAY_FACE = 930;       // the quay's seaward face
 const BOOM_U = -5500;        // the crane with its boom lowered across the lane
@@ -134,7 +138,7 @@ const harborCranes = {
   tips: [
     'Fly the lane up the harbor through both gates, 200 ft over the water, flaps 30, gear down, about 150 kt. Small bank angles: your wingtips are 17 m out.',
     'The lowered boom: over it means 300 ft or more, clear of its stays; under it means 100 ft or less, because your fin is 9 m tall. Under it is worth 10 points.',
-    'After the exit gate, turn left and climb gently to 500 ft; the glideslope comes down to meet you about four kilometres out. Arm the spoilers (K) and set autobrake (L).',
+    'After the exit gate, turn left and climb gently to 500 ft; the glideslope comes down to meet you about two and a half kilometres out. Arm the spoilers (K) and set autobrake (L).',
   ],
   wind: { rel: 70, speed: 8, turb: 0.15 }, weight: 'normal',
   spawn: { u: -8000, v: 1320, hdg: -12, alt: 60, gamma: 0, flap: 0.75, speedKt: 150, fixed: true },
@@ -154,7 +158,7 @@ const harborCranes = {
     ],
     gates: [
       { u: -6550, v: LANE, y: 52, w: 120, h: 90, name: 'the harbor entrance', required: true },
-      { u: BOOM_U, v: LANE, y: 18, w: 40, h: 24, name: 'under the boom', required: false, bonus: 10 },
+      { u: BOOM_U, v: LANE, y: 18, w: 40, h: 24, name: 'the gap under the boom', required: false, bonus: 10 },
       { u: -5100, v: LANE, y: 52, w: 120, h: 90, name: 'the harbor exit', required: true },
     ],
   },

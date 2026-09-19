@@ -17,7 +17,8 @@
 // clear: [{ u, v, r }] }. Every obstacle has `kind`, a position, `rot` (degrees, clockwise seen from above; at 0
 // its local +X points right of the runway and its local -Z down the runway) and an optional `name` (the crash
 // reads "Hit " + name, so give it its article). Heights `h` are above the local ground (or the water for ships);
-// `y0`/`y1`/`top` are above the threshold elevation. Kinds:
+// `y0`/`y1`/`top`/`base` are above the threshold elevation, EXCEPT a quay's `top`, which is above the water (like a
+// ship's waterline), and `deck`, which puts any compound's base that far above the water. Kinds:
 //   box       { u, v, w, d, h | y0,y1, rot, tilt, look, color, name }   any solid block (tilt: degrees about local Z)
 //   tower     { u, v, w, d, h, rot, color, antenna, name }   an office tower: windows, roof, obstacle lights
 //   block     { ...tower }   a lower building (warehouse, flats): the same facade, fewer lights
@@ -28,13 +29,15 @@
 //   bridge    { u, v, rot, length, deckY, deckW, deckT, towerH, name }   deck from local x -length/2..+length/2
 //   crane     { type:'sts'|'tower', u, v, rot, boom, h, outreach, backreach, gauge, legSpan, jib, color, name }
 //   ship      { type:'container'|'tall', u, v, rot, length, beam, seed, name }   bow along local +X, on the water
-//   quay      { u, v, rot, w, d, top, name }   a concrete slab from the seabed to `top` (a pier, a quay)
+//   quay      { u, v, rot, w, d, top, depth, name }   a concrete slab from `depth` under the water to `top` ABOVE THE
+//             WATER (a pier, a quay; Harbor City's water is 8 m under its threshold, so top: 4 is base: -4)
 //   containers{ u, v, rot, rows, cols, tiers, seed }   a container yard, one solid per stack
 //   tree      { u, v, scale }   one obstacle spruce (the bush trees' look and size, OBSTACLE_TREE)
 //   treeWall  { u, from, to, step, scale, rows, rowGap, jitter, gap:{v, w} }   rows across the approach with a notch
 // Gates: { u, v, y, w, h, rot, name, required (default true), bonus (points, default 0; 5 for a bonus gate) }
 // - a rectangle w x h centred y above the threshold elevation, flown through along rot (0 = down the runway).
-// Gates are markers, not solids: the frame is drawn but never collides.
+// Gates are markers, not solids: the frame is drawn but never collides. They are flown in array order (gatesStep()
+// below has the rules: passes, misses, skips, a go-around mending a miss).
 //
 // Resolved course (plan() output): { prims, gates, lights, keepOut, center, radius }. A prim is one collision
 // volume: { shape:'box', cx,cy,cz, hx,hy,hz, X,Y,Z (unit axes) } | { shape:'cyl', x,z, y0,y1, r0,r1 } |
@@ -58,8 +61,10 @@ import * as look from '../art/terrain-look.js';
 
 const CELL = 48;          // broadphase grid cell, metres
 const NEAR = 15;          // near-miss bookkeeping reach beyond the hull, metres (the debrief quotes passes under 15 m)
+const CLOSE = 5;          // a pass closer than this gets the in-flight callout, once the airframe is past it
 const CLUSTER = 4;        // probes are tested in clusters binned on a grid this size in the body frame, metres
-const GATE_REACH = 900;   // a gate plane crossed farther than this outside the frame is not "the gate"
+// A gate's plane crossed farther than this outside its frame is another part of the flight, not a miss of the gate.
+const gateReach = (g) => Math.max(3 * g.w, 150);
 
 // ---------------------------------------------------------------- resolving a course
 // The runway frame of runways[0] (the same maths as Airport.point, available before the airport is built).
@@ -679,6 +684,12 @@ export class ObstacleField {
     this.events = [];          // { type: 'gate', gate, passed } and { type: 'close', name, d }: MissionRuntime reads and clears
     this.closestD = Infinity;  // the closest the airframe came to any solid this flight (metres, skin to surface)...
     this.closestName = '';     // ...and what it was (the near-miss line in the debrief)
+    // near misses per obstacle (a prim's `group`: one pylon, one crane, one tree): the closest pass so far, this
+    // step's clearance, whether it has been called out, and the ones inside CLOSE still waiting to be passed
+    const G = Math.max(course.groups || 0, 1);
+    this.gMin = new Float32Array(G); this.gNow = new Float32Array(G); this.gStamp = new Uint32Array(G);
+    this.gTold = new Uint8Array(G); this.gName = new Array(G).fill(''); this.watch = [];
+    this.gMin.fill(1e9);
     this.lastHit = null;       // { name, part } of the hit that ended the flight
     this.look = null;
     // broadphase: a uniform grid of cells holding prim indices
@@ -694,7 +705,6 @@ export class ObstacleField {
     this.stamp = new Uint32Array(this.prims.length);
     this.tick = 0;
     this.cand = [];
-    this.minD = new Float32Array(this.prims.length).fill(1e9);   // per prim: the closest pass so far
     this.prev = { x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 1, flap: 0, gear: 1 };
     this.probes = null;
   }
@@ -712,8 +722,9 @@ export class ObstacleField {
     this.clusters = clusterProbes(this.hull);
     this.c0 = new Float32Array(this.clusters.length * 3); this.c1 = new Float32Array(this.clusters.length * 3);
     this.remember(ac);
-    for (const g of this.gates) { g.state = 'pending'; g.at = null; }
-    this.events.length = 0; this.closestD = Infinity; this.closestName = ''; this.lastHit = null; this.minD.fill(1e9);
+    for (const g of this.gates) { g.state = 'pending'; g.at = null; g.skipped = false; }
+    this.events.length = 0; this.closestD = Infinity; this.closestName = ''; this.lastHit = null;
+    this.gMin.fill(1e9); this.gTold.fill(0); this.watch.length = 0;
   }
 
   remember(ac) {
@@ -802,33 +813,70 @@ export class ObstacleField {
             if (wantNear && d < dmin) dmin = d;
           }
         }
-        if (!p.ground && dmin < this.minD[i]) {
-          const was = this.minD[i];
-          this.minD[i] = dmin;
-          if (dmin < this.closestD) { this.closestD = dmin; this.closestName = p.name; }
-          if (dmin < 5 && was >= 5 && !hit) this.events.push({ type: 'close', name: p.name, d: dmin });
+        if (!p.ground) {
+          // near misses, per obstacle (its group): this step's clearance and the closest pass so far
+          const gi = p.group | 0;
+          if (this.gStamp[gi] !== st) { this.gStamp[gi] = st; this.gNow[gi] = dmin; } else if (dmin < this.gNow[gi]) this.gNow[gi] = dmin;
+          if (dmin < this.gMin[gi]) {
+            this.gMin[gi] = dmin; this.gName[gi] = p.name;
+            if (dmin < this.closestD) { this.closestD = dmin; this.closestName = p.name; }
+            if (dmin < CLOSE && !this.gTold[gi] && !this.watch.includes(gi)) this.watch.push(gi);
+          }
         }
         if (hit) break;
       }
+    }
+    // A near miss is called out once the airframe is past it - its clearance to that obstacle growing again, or the
+    // obstacle out of reach - so the callout means "you made it", never "you are about to hit it". Nothing after a hit.
+    if (hit) this.watch.length = 0;
+    for (let k = this.watch.length - 1; k >= 0; k--) {
+      const gi = this.watch[k];
+      if (this.gStamp[gi] === st && this.gNow[gi] <= this.gMin[gi] + 0.3) continue;
+      this.gTold[gi] = 1; this.watch[k] = this.watch[this.watch.length - 1]; this.watch.length--;
+      this.events.push({ type: 'close', name: this.gName[gi], d: this.gMin[gi] });
     }
     this.remember(ac);
     return hit ? hit.name : null;
   }
 
-  // Gates: the CG's segment through each pending gate's plane, in the gate's direction.
+  // Gates, flown in order (the course's array order). One step of the CG from A to B, against each gate's plane:
+  //   - crossed in the gate's direction INSIDE its frame: the gate is PASSED, whether it was pending or already missed
+  //     (a go-around mends a miss). One gate per crossing, the first in order not yet passed, so two gates on the same
+  //     spot take two passes. Gates before it still pending were skipped: they are missed now.
+  //   - crossed in its direction OUTSIDE the frame, within gateReach() of it: MISSED, but only if the gate is due -
+  //     every required gate before it passed or missed. A later gate's plane is ignored until then, so a circuit that
+  //     crosses the final gate's plane on the way out does not miss it. Bonus gates never hold the sequence up.
+  //   - crossed the wrong way, or far outside the frame: nothing.
   gatesStep(ax, ay, az, bx, by, bz) {
-    for (const g of this.gates) {
-      if (g.state !== 'pending') continue;
-      const s0 = (ax - g.x) * g.n[0] + (az - g.z) * g.n[2], s1 = (bx - g.x) * g.n[0] + (bz - g.z) * g.n[2];
-      if (!(s0 < 0 && s1 >= 0)) continue;
-      const t = s0 / (s0 - s1);
-      const x = ax + (bx - ax) * t, y = ay + (by - ay) * t, z = az + (bz - az) * t;
-      const lat = (x - g.x) * g.r[0] + (z - g.z) * g.r[2], up = y - g.y;
-      const inside = Math.abs(lat) <= g.w / 2 && Math.abs(up) <= g.h / 2;
-      if (!inside && (Math.abs(lat) > g.w / 2 + GATE_REACH || Math.abs(up) > g.h / 2 + GATE_REACH)) continue;
-      g.state = inside ? 'passed' : 'missed';
-      g.at = { lat, up };
-      this.events.push({ type: 'gate', gate: g, passed: inside });
+    const gates = this.gates;
+    let due = true, took = false;
+    for (let k = 0; k < gates.length; k++) {
+      const g = gates[k];
+      if (g.state !== 'passed') {
+        const s0 = (ax - g.x) * g.n[0] + (az - g.z) * g.n[2], s1 = (bx - g.x) * g.n[0] + (bz - g.z) * g.n[2];
+        if (s0 < 0 && s1 >= 0) {
+          const t = s0 / (s0 - s1);
+          const x = ax + (bx - ax) * t, y = ay + (by - ay) * t, z = az + (bz - az) * t;
+          const lat = (x - g.x) * g.r[0] + (z - g.z) * g.r[2], up = y - g.y;
+          const inside = Math.abs(lat) <= g.w / 2 && Math.abs(up) <= g.h / 2;
+          const reach = gateReach(g);
+          if (inside && !took) {
+            took = true;
+            for (let j = 0; j < k; j++) {
+              const e = gates[j];
+              if (e.state !== 'pending') continue;
+              e.state = 'missed'; e.skipped = true;
+              this.events.push({ type: 'gate', gate: e, passed: false });
+            }
+            g.state = 'passed'; g.at = { lat, up };
+            this.events.push({ type: 'gate', gate: g, passed: true });
+          } else if (!inside && due && g.state === 'pending' && Math.abs(lat) <= g.w / 2 + reach && Math.abs(up) <= g.h / 2 + reach) {
+            g.state = 'missed'; g.at = { lat, up };
+            this.events.push({ type: 'gate', gate: g, passed: false });
+          }
+        }
+      }
+      if (g.required && g.state === 'pending') due = false;
     }
   }
 

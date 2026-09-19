@@ -54,10 +54,16 @@ const COLORS = {
   insulator: [0.30, 0.32, 0.30], crane: [0.58, 0.12, 0.025], craneBlue: [0.04, 0.12, 0.30], craneWhite: [0.66, 0.66, 0.64],
   towercrane: [0.62, 0.42, 0.03], house: [0.66, 0.66, 0.64], funnel: [0.40, 0.05, 0.03],
   hullBlue: [0.025, 0.05, 0.12], hullWhite: [0.62, 0.62, 0.60], hullRed: [0.30, 0.04, 0.03],
-  markers: [[0.85, 0.24, 0.02], [0.78, 0.78, 0.76]], gate: [0.88, 0.20, 0.02], gateWhite: [0.80, 0.80, 0.78],
+  // (gate frames: a face square to a low sun lights to about 1.45 x its albedo here - measured on the harbor's
+  // entrance gate at 17:12 - so the white is 0.55 to stay at sunlit white's 0.8, under the 0.92 bloom threshold)
+  markers: [[0.85, 0.24, 0.02], [0.78, 0.78, 0.76]], gate: [0.72, 0.16, 0.02], gateWhite: [0.55, 0.55, 0.53],
   buildings: [[0.30, 0.30, 0.29], [0.36, 0.33, 0.28], [0.20, 0.23, 0.26], [0.42, 0.40, 0.36], [0.26, 0.20, 0.16], [0.14, 0.16, 0.18]],
-  containers: [[0.04, 0.16, 0.34], [0.42, 0.05, 0.03], [0.05, 0.20, 0.07], [0.60, 0.20, 0.03], [0.28, 0.28, 0.28], [0.58, 0.44, 0.05], [0.60, 0.60, 0.58], [0.20, 0.08, 0.04]],
+  // weathered shipping-line paint: navy, grey, rust red, brown, orange, off-white, green, ochre (in the order of
+  // CONTAINER_SHARE, most common first; a real yard is mostly two or three lines' colours)
+  containers: [[0.055, 0.12, 0.22], [0.25, 0.25, 0.24], [0.28, 0.075, 0.045], [0.17, 0.085, 0.05], [0.38, 0.15, 0.045], [0.48, 0.48, 0.46], [0.075, 0.15, 0.095], [0.38, 0.30, 0.09]],
 };
+const CONTAINER_SHARE = [0.30, 0.22, 0.18, 0.10, 0.07, 0.06, 0.04, 0.03];
+const CONTAINER_MEAN = [0, 1, 2].map((k) => COLORS.containers.reduce((s, c, i) => s + c[k] * CONTAINER_SHARE[i], 0));
 const STYLE = { plain: 0, concrete: 0, quay: 0, building: 1, container: 2, gate: 3, hull: 4, truss: 5, white: 6, wood: 7, wire: 8, steel: 9, insulator: 9, marker: 0, trunk: 7 };
 const THIN = new Set(['wire', 'steel', 'insulator']);
 
@@ -82,7 +88,12 @@ function solidsMaterial(night) {
     ctNight: { value: night ? 1 : 0 },
     ctWire: { value: 0.0006 },
     ctPal: { value: COLORS.containers.map((c) => new THREE.Vector3(...c)) },
+    ctPalMean: { value: new THREE.Vector3(...CONTAINER_MEAN) },
+    ctGate: { value: [new THREE.Vector3(...COLORS.gate), new THREE.Vector3(...COLORS.gateWhite)] },
   };
+  // the palette's cumulative shares, for the shader's weighted pick (baked in as constants)
+  let acc = 0;
+  const cut = CONTAINER_SHARE.slice(0, 7).map((s) => (acc += s).toFixed(3));
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = shader.vertexShader
@@ -110,12 +121,15 @@ if (ctBox.w > 7.5) {
       .replace('#include <common>', `#include <common>
 uniform float ctNight;
 uniform vec3 ctPal[8];
+uniform vec3 ctPalMean;
+uniform vec3 ctGate[2];
 varying vec3 ctLocal;
 varying vec3 ctNrm;
 varying vec2 ctInfo;
 float ctHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
 float ctGloss = 0.0;
+float ctMatte = 0.0;
 vec3 ctEmit = vec3(0.0);
 {
   float style = floor(ctInfo.x + 0.5), seed = ctInfo.y;
@@ -144,21 +158,29 @@ vec3 ctEmit = vec3(0.0);
       diffuseColor.rgb *= 0.62;
     }
   } else if (style == 2.0) {
-    // container stacks: every container (a 2.6 m tier by a 2.44 m row) its own colour, ribbed along its length,
-    // dark seams between them; the ribs and seams fade out where they get finer than a pixel (no moire at range)
-    vec2 q = vec2(p.y / 2.6, p.z / 2.44);
-    diffuseColor.rgb = ctPal[int(mod(floor(ctHash(floor(q) + seed) * 8.0), 8.0))];
+    // container stacks (a 2.6 m tier by a 2.44 m row): a run of three rows shares one line's colour, with one box in
+    // four an odd one out, from a muted palette weighted to navy, grey and rust (CONTAINER_SHARE); ribbed along the
+    // length, dark seams between boxes. Where a box gets smaller than about three pixels the stack fades to the
+    // palette's average colour, and the ribs and seams fade out, so a yard at range is a quiet block, not confetti.
+    vec2 q = vec2(p.y / 2.6, p.z / 2.44), cq = floor(q);
+    float h = ctHash(vec2(floor(cq.y / 3.0) + 0.37, seed));
+    if (ctHash(cq + seed * 1.7 + 11.0) < 0.25) h = ctHash(cq + seed + 5.3);
+    int ci = h < ${cut[0]} ? 0 : h < ${cut[1]} ? 1 : h < ${cut[2]} ? 2 : h < ${cut[3]} ? 3 : h < ${cut[4]} ? 4 : h < ${cut[5]} ? 5 : h < ${cut[6]} ? 6 : 7;
+    vec2 fq = fract(q), wq = fwidth(q);
+    diffuseColor.rgb = mix(ctPal[ci], ctPalMean, clamp(3.0 * max(wq.x, wq.y) - 0.8, 0.0, 1.0));
     float fr = clamp(1.0 - 2.0 * fwidth(p.x / 0.3), 0.0, 1.0);
     float rib = abs(n.z) > 0.5 ? mix(0.93, 0.86 + 0.14 * step(0.5, fract(p.x / 0.3)), fr) : 0.92;
-    vec2 fq = fract(q), wq = fwidth(q);
     float seam = min(smoothstep(0.0, 0.05 + wq.x, fq.x), abs(n.x) > 0.5 ? smoothstep(0.0, 0.04 + wq.y, fq.y) : 1.0);
     seam = mix(0.85, seam, clamp(1.0 - 2.5 * max(wq.x, wq.y), 0.0, 1.0));
     diffuseColor.rgb *= rib * mix(0.35, 1.0, seam);
   } else if (style == 3.0) {
-    // gate frames: orange and white bands along the bar, lit a little so they read at dusk
+    // gate frames: orange and white bands along the bar, matte (a painted marker has no sheen: at a grazing sun a
+    // glossier white read brighter), the white at 0.55 (see COLORS), a touch of their own light by day (0.04)
+    // and a glow at night
     float band = step(0.5, fract((p.x + p.y + p.z) / 5.0));
-    diffuseColor.rgb = mix(vec3(0.88, 0.20, 0.02), vec3(0.80, 0.80, 0.78), band);
-    ctEmit = diffuseColor.rgb * (0.18 + 0.5 * ctNight);
+    diffuseColor.rgb = mix(ctGate[0], ctGate[1], band);
+    ctEmit = diffuseColor.rgb * (0.04 + 0.5 * ctNight);
+    ctMatte = 1.0;
   } else if (style == 4.0) {
     // hull: anti-fouling red below the waterline (seed = its local height), a white boot-top, the paint above,
     // and the deck on top (wood on a white hull, deck green on a dark one)
@@ -183,7 +205,7 @@ vec3 ctEmit = vec3(0.0);
   }
 }`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
-roughnessFactor = mix(roughnessFactor, 0.18, ctGloss);`)
+roughnessFactor = mix(mix(roughnessFactor, 0.18, ctGloss), 1.0, ctMatte);`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
 totalEmissiveRadiance += ctEmit;
 // by day the glass gives back a little of the sky, most at a glancing angle (a modest stand-in for a reflection:
@@ -193,7 +215,7 @@ if (ctGloss > 0.0) {
   totalEmissiveRadiance += ctGloss * (1.0 - ctNight) * mix(0.06, 0.55, ctF) * vec3(0.30, 0.36, 0.44);
 }`);
   };
-  m.customProgramCacheKey = () => 'ctl-course-solids-v5';
+  m.customProgramCacheKey = () => 'ctl-course-solids-v6';
   return m;
 }
 

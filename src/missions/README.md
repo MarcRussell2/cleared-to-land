@@ -136,18 +136,39 @@ course: {
   (`container` or `tall`), `quay`, `containers` (a yard), `tree` and `treeWall` (the bush strips' spruce, with a
   `gap` notch). Parameters: the header of `src/world/obstacles.js`.
 - **Heights**: `h` is above the local ground (or the water for ships and quays); `y`, `y0`, `y1`, `top` and `base`
-  are above the threshold elevation. A route's `alt` is the **CG's** height above the threshold elevation. The
-  ground under an approach is rarely at the threshold's height (Moose Creek's notch stands 6 m above the bar,
-  Harbor City's water is 8 m below its runway): quote heights in a description only after the suite prints them.
+  are above the threshold elevation, **except a quay's `top`, which is above the water**, and `deck`, which sets
+  any compound's base that far above the water (the harbor's `quay top: 4` and its cranes' `base: -4` are the same
+  height only because Harbor City's water is 8 m below its threshold). A route's `alt` is the **CG's** height above
+  the threshold elevation. The ground under an approach is rarely at the threshold's height (Moose Creek's notch
+  stands 6 m above the bar): quote heights in a description only after the suite prints them.
 - **Names** read "Hit " + name in the debrief: give them their article (`'the lowered crane boom'`, `'a pylon'`).
 - **A new kind** is one function in `BUILD` using the `Placer` (`box`, `beam`, `cyl`, `cap`, `wire`, `light`,
   `keep`); the look draws whatever volumes it makes, by their `look` (`building`, `plain`, `hull`, `container`,
   `steel`, `wire`, `marker`, `tree`, `trunk`, `truss`, `concrete`, `white`, `wood`, `insulator`), and the suite's
   "drawn = collides" check covers it with no new test code.
-- **Gates** are markers (drawn, never solid): passed when the CG crosses the plane inside the frame in the gate's
-  direction, missed when it crosses outside (within 900 m of the frame). A required gate missed or never reached
-  caps the landing at `MISSION_CAP` (30) with the grade `MISSED GATE`; a bonus gate adds its points; the total is
-  clamped to 100. The HUD status line reads `Gates 1/3 · the harbor exit 1.2 km`.
+- **Gates** are markers (drawn, never solid), **flown in array order** (`ObstacleField.gatesStep`):
+  - **passed** when the CG crosses the plane in the gate's direction inside the frame - also a gate already missed
+    (a go-around mends a miss). One gate per crossing, the first in order not yet passed, so two gates on the same
+    spot (an arch flown twice) take two passes. Gates before it that are still pending were skipped: missed now.
+  - **missed** when the CG crosses the plane in its direction outside the frame but within `max(3 x w, 150 m)` of
+    it - and only when the gate is **due** (every required gate before it passed or missed). A later gate's plane
+    is ignored until then, so a circuit whose upwind leg crosses the final gate's plane does not miss it. Bonus
+    gates never hold the sequence up.
+  - Give the gates in the order they are flown, and never route an earlier leg through a later gate in that gate's
+    direction (it would be passed early and the gates between marked skipped).
+  A required gate missed or never reached caps the landing at `MISSION_CAP` (30) with the grade `MISSED GATE`; a
+  bonus gate adds its points; the total is clamped to 100. The HUD status line reads `Gates 1/3 · the harbor exit
+  1.2 km` (the next pending gate). Name a gate so "Through " + name reads well (`'the gap under the boom'`).
+- **Near misses**: a pass within 5 m of an obstacle (a prim's `group`: one pylon, one crane, one tree) gets an
+  in-flight callout ("3.2 m") once the airframe is past it, and the debrief quotes the closest pass under 15 m
+  ("Closest shave"), not after a crash. The clearance is taken at each frame's pose (the hit test is swept, this
+  is not): within a metre at 60 fps; at the harness's 25 fps and 150 kt, within about 1.5 m, never closer than true.
+- **Hints**: `sc.hint(ctx)` is not asked while the stall warning sounds above the flare zone: the game's own stall
+  hint shows instead.
+- **A site of your own** (`OBSTACLES_SITES`, `CITY_SITES`): keep what only the mission is about in the mission's
+  `course`, not the site's, so free flight, Autoland and the look and perf tools at that site meet nothing they
+  cannot fly; mark a site that exists only for a mission `missionOnly: true` (the new home menu's free-flight
+  picker leaves it out; Moose Creek Notch is one).
 
 ### Collision: what it is and is not
 
@@ -173,13 +194,22 @@ the point (a gate, a notch) instead of cutting the corner; `kt` is the indicated
 (default 30/32/25/30 degrees). After the last waypoint it joins the extended centreline and Autoland's own glide
 path (3 degrees, 5 for the Trailblazer) and hands over once lined up, on the path, on speed and wings level for
 3 s, or at the latest six seconds before the aim point. `game.setAutopilot(true)` uses it whenever the scenario
-has a route.
+has a route. At the start of a flight it flies the whole route (a first leg may head away from the runway: a
+downwind, a teardrop); switched on mid-flight it resumes at the leg the airplane is on, by progress along the
+route and the airplane's track, not by `u`.
+
+**The handover decides the landing.** Autoland (physics-owned, not edited, and nothing inside it is written) holds
+the pitch it is handed and flies a proportional pitch loop, so the trim it inherits sets how the flare goes. The
+Condor is handed the trim a stock approach starts with (Vref on the glide path, flaps 30), blended in during the
+join: Harbor Cranes over ten seeds landed at 383-768 fpm (median 535) with the route's own trim and 189-679
+(median 374) with the approach trim, against 283-529 (median 424) for a stock straight-in Autoland in the same
+wind. The Skylark and the Trailblazer keep the spawn's trim (the approach trim made the Skylark land harder and the
+Trailblazer float 150-200 m into Moose Creek's 340 m bar). The Condor still wants a straight final of 2 km or more
+after the last obstacle for its best landings.
 
 What the suite proves it flies: the three missions on two seeds each; and, over a tower, a mast or a tree line
 standing on the straight-in path, a descent of 7-10 degrees onto the final in the Condor (a 150 m tower, 7.5
-degrees at 155 kt), the Skylark and the Trailblazer. Autoland's own Condor flare lands firm to hard (470-730 fpm)
-whatever hands it over; it is physics-owned and not edited. Give the Condor a straight final of 2 km or more
-after the last obstacle if its landing should score well.
+degrees at 155 kt), the Skylark and the Trailblazer.
 
 ### Proving a mission
 
@@ -208,6 +238,15 @@ after the last obstacle if its landing should score well.
   1,226 volumes in 5 draws). Two "shadow primers" ride with the aircraft for the first half second and are then
   hidden: the engine compiles the world up front but not the shadow pass, so the first instanced caster to reach
   the sun's shadow box would otherwise compile a depth program mid-approach. A course without trees costs one
-  extra program for that (the harbor: 62 of the 70 allowed).
+  extra program for that.
+- **Culling a big course**: each of those draws is ONE InstancedMesh with one bounding sphere round the whole
+  course, straight in the scene (the engine chunks only the terrain's own instanced meshes), so neither the camera
+  nor the 180 m shadow box can skip part of it: fine for three missions of a kilometre or two, not for a city. A
+  course spread over several kilometres should be drawn one InstancedMesh per district: a chunking step inside
+  `buildCourse` (calling it once per district would share the program but add two shadow primers per call).
+  `geom.js chunkInstanced` does not fit as it is: the course meshes carry per-instance attributes (`ctBox`,
+  `ctSeed`, `ctTaper`) on the shared geometry, so a chunk needs its own geometry with those attributes re-packed.
+- **Programs**: the limit is 70 with the cockpit showing, not just the chase view: harbor-cranes compiles 62 in the
+  chase view and 67 once the Condor's cockpit has been shown. Count a new course with `perf-probe --camera cockpit`.
 - **Leaderboard**: every new mission raises the most a career can score; the site's `src/games/lib/games.js`
   (`max: 2000`) and its Worker must follow, or careers above the cap are silently rejected. A site-session job.

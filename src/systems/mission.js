@@ -9,9 +9,11 @@
 //     (the landing still shows its own lines: you did land, and how well);
 //   - a BONUS gate passed adds its `bonus` points (the default is 5; one in the harbor is worth 10);
 //   - the closest the airframe came to any solid is a debrief line ("Closest shave: 3.1 m from the crane boom"; not
-//     after a crash, which says what was hit), and a pass within 5 m gets a callout in flight. Flavor only.
+//     after a crash, which says what was hit), and a pass within 5 m gets a callout in flight once the airframe is
+//     past it (the field only reports it then; a crash straight after clears it). Flavor only.
 // status() is the HUD status line ("Gates 1/3 · the harbor exit 1.2 km"); hint() the scenario's own hint
-// function, handed { ac, ra (ft), d (m to the threshold), t, u, v (runway frame), mission }.
+// function, handed { ac, ra (ft), d (m to the threshold), t, u, v (runway frame), mission } - except while the stall
+// warning sounds above the flare zone, when it returns null so the game's own stall hint shows.
 //
 // score(result, ac, approach) returns a NEW result ({ points, grade, gradeIdx, lines, headline }), clamped
 // 0..100. A crash or a flight with no touchdown keeps its 0 points and gets the gate lines for the record.
@@ -32,10 +34,17 @@ export class MissionRuntime {
     this._ctx = { ac: null, ra: 0, d: 0, t: 0, u: 0, v: 0, mission: this };
     this._next = { gate: null, dist: 0 };
     this.pos = null;
+    this.calledAt = -1e9;      // when the last near-miss callout went up
+    this.crashSeen = false;
   }
 
   update(dt, t, ac) {
     this.pos = ac.pos;
+    // a crash takes down a near-miss callout still showing (the banner says what was hit)
+    if (ac.crashed && !this.crashSeen) {
+      this.crashSeen = true;
+      if (this.hud && t - this.calledAt < 1.5) this.hud.callout('', 0.01);
+    }
     const f = this.field;
     if (!f || !f.events.length) return;
     for (const e of f.events) {
@@ -51,6 +60,7 @@ export class MissionRuntime {
         }
       } else if (e.type === 'close' && !ac.crashed && this.hud) {
         this.hud.callout(`${Math.max(0, e.d).toFixed(1)} m`, 1.4);
+        this.calledAt = t;
       }
     }
     f.events.length = 0;
@@ -73,6 +83,8 @@ export class MissionRuntime {
   hint(ctx) {
     if (typeof this.sc.hint !== 'function') return null;
     const c = this._ctx, ac = ctx.ac;
+    // the stall warning outranks any mission hint (main.js shows its own above the flare zone)
+    if (ac.aero && ac.aero.warning && !ac.onGround && ac.radioAlt > (ac.flareZone ? ac.flareZone() : 0)) return null;
     c.ac = ac; c.ra = ctx.ra; c.d = ctx.d; c.t = ctx.t; this.pos = ac.pos;
     const rw = this.world && this.world.runway;
     if (rw) {

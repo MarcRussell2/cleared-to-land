@@ -18,8 +18,12 @@
 //   7. flights with the real physics (tools/fly-mission.mjs simulate(), the same code the page runs): each mission
 //      landed by RoutePilot on two seeds, deterministic, and a deliberately bad path crashing into what the mission
 //      is about (so the challenge is real), plus the over-the-top line through the notch failing its gate;
+//   5b/5c. gates flown in order (a circuit, a skipped gate, a go-around, an arch flown twice, bonus gates, the reach);
+//      near misses called out once past and never on the way into a hit; the stall warning outranks mission hints;
 //   8. RoutePilot over an obstacle on the glide path and then steeply down (7-10 degrees) to a landing, in the
-//      Condor, the Skylark and the Trailblazer, and the same courses flown straight in hitting the obstacle.
+//      Condor, the Skylark and the Trailblazer, and the same courses flown straight in hitting the obstacle;
+//   9. RoutePilot's resume mid-flight by progress along the route (and the whole route at the start), and free
+//      flight at the mission-only Moose Creek Notch landing straight in.
 import { installDomStub } from './dom-stub.mjs';
 installDomStub();
 const THREE = await import('three');
@@ -429,6 +433,124 @@ const EVERY_KIND = { id: 'every-kind', site: 'harbor', course: {
   ok(plain.score({ points: 77, grade: 'g', gradeIdx: 1, lines: [], headline: '' }, acOk, {}).points === 77, 'a mission without a course scores exactly as scoreLanding');
   say('gates: pass, miss, wrong way, far away; the runtime: lines, cap, bonus, clamp, crash, status');
 }
+// ---- 5b. gates are flown in order
+{
+  // Bayfield: world x = v, z = -u. fly() walks the CG along a polyline in 13 m steps (250 kt at the 0.1 s frame).
+  const fly = (f, pts) => {
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1], b = pts[i], n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) / 13));
+      for (let k = 0; k < n; k++) {
+        const p = (t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+        f.gatesStep(...p(k / n), ...p((k + 1) / n));
+      }
+    }
+  };
+  const field = (gates) => new ObstacleField(resolveCourse(SITES.bayfield, { course: { gates } }));
+  const states = (f) => f.gates.map((g) => g.state).join(',');
+  const misses = (f) => f.events.filter((e) => e.type === 'gate' && !e.passed).map((e) => e.gate.name);
+  // (a) a circuit: the upwind leg crosses the final gate's plane 120 m right of its frame - inside its 180 m reach, so
+  // only the order saves it - before the downwind gate is flown; then downwind, base, and final through it
+  {
+    const f = field([{ u: -1500, v: 800, y: 100, w: 60, h: 40, rot: 180, name: 'the downwind gate' }, { u: -3000, v: 0, y: 100, w: 60, h: 40, name: 'the final gate' }]);
+    const y = f.gates[0].y;
+    fly(f, [[120, y, 3500], [120, y, 1000]]);
+    ok(f.gates[1].state === 'pending' && misses(f).length === 0, `a circuit: the final gate's plane crossed 120 m outside it on the upwind leg, before its turn, is not a miss (${states(f)})`);
+    fly(f, [[120, y, 1000], [800, y, 1000], [800, y, 3500], [0, y, 3500], [0, y, 0]]);
+    ok(states(f) === 'passed,passed' && misses(f).length === 0, `a circuit: downwind gate, then the final gate, both passed and nothing missed on the way (${states(f)}; missed ${misses(f).join(', ') || 'none'})`);
+  }
+  // (b) a skipped gate: through A, 400 m round B (beyond its reach: no miss yet), through C: B is missed then, C passed
+  {
+    const f = field([-3000, -2000, -1000].map((u, i) => ({ u, v: 0, y: 60, w: 60, h: 40, name: 'Gate ' + 'ABC'[i] })));
+    const y = f.gates[0].y;
+    fly(f, [[0, y, 3100], [0, y, 2900], [400, y, 2400], [400, y, 1600], [0, y, 1100], [0, y, 900]]);
+    ok(states(f) === 'passed,missed,passed' && f.gates[1].skipped, `a skipped gate is missed when the next one is passed (${states(f)})`);
+    const order = f.events.filter((e) => e.type === 'gate').map((e) => e.gate.name + (e.passed ? '+' : '-')).join(' ');
+    ok(order === 'Gate A+ Gate B- Gate C+', `...and the HUD hears it in order (${order})`);
+  }
+  // (c) a go-around mends a miss: A crossed 50 m outside (a miss), round again and through it; the runtime counts it
+  {
+    const f = field([{ u: -2000, v: 0, y: 60, w: 60, h: 40, name: 'Gate A' }]);
+    const y = f.gates[0].y;
+    fly(f, [[80, y, 2200], [80, y, 1800]]);
+    ok(f.gates[0].state === 'missed', 'a crossing 50 m outside the frame misses the gate');
+    const mr = new MissionRuntime({ id: 't', course: {} }, { world: { obstacles: f } });
+    mr.update(0.04, 1, { pos: new THREE.Vector3(), crashed: false });
+    fly(f, [[80, y, 1800], [600, y, 1800], [600, y, 2600], [0, y, 2600], [0, y, 1500]]);
+    mr.update(0.04, 2, { pos: new THREE.Vector3(), crashed: false });
+    const r = mr.score({ points: 90, grade: 'SMOOTH', gradeIdx: 1, lines: [], headline: '' }, { crashed: false, stats: { touchdown: { vs: 1 } } }, {});
+    ok(f.gates[0].state === 'passed' && mr.passed === 1 && r.points === 90 && r.grade === 'SMOOTH', `a go-around through the gate mends the miss (${f.gates[0].state}, ${r.points} ${r.grade})`);
+  }
+  // (d) the same arch twice: one crossing is one gate
+  {
+    const arch = { u: -2000, v: 0, y: 60, w: 60, h: 40 };
+    const f = field([{ ...arch, name: 'the arch' }, { ...arch, name: 'the arch again' }]);
+    const y = f.gates[0].y;
+    fly(f, [[0, y, 2200], [0, y, 1800]]);
+    ok(states(f) === 'passed,pending', `an arch flown once passes the first of its two gates only (${states(f)})`);
+    fly(f, [[0, y, 1800], [700, y, 1800], [700, y, 2600], [0, y, 2600], [0, y, 1800]]);
+    ok(states(f) === 'passed,passed', `...and the second pass takes the second (${states(f)})`);
+  }
+  // (e) a bonus gate does not hold the sequence up; reach is max(3 w, 150 m)
+  {
+    const f = field([{ u: -2000, v: 0, y: 60, w: 40, h: 30, name: 'the bonus arch', required: false }, { u: -1000, v: 0, y: 60, w: 60, h: 40, name: 'Gate Y' }]);
+    const y = f.gates[0].y;
+    fly(f, [[400, y, 2200], [400, y, 1800], [70, y, 1200], [70, y, 800]]);
+    ok(states(f) === 'pending,missed', `a pending bonus gate does not stop the next required one being missed (${states(f)})`);
+    const g = field([{ u: -1000, v: 0, y: 60, w: 60, h: 40, name: 'Gate Z' }]);
+    fly(g, [[240, y, 1200], [240, y, 800]]);
+    ok(g.gates[0].state === 'pending', 'a crossing 210 m outside a 60 m gate (beyond its 180 m reach) is another part of the flight');
+    fly(g, [[190, y, 1200], [190, y, 800]]);
+    ok(g.gates[0].state === 'missed', 'a crossing 160 m outside it (within reach) is a miss');
+  }
+  say('gate order: a circuit, a skipped gate, a go-around, an arch flown twice, bonus gates, the reach');
+}
+
+// ---- 5c. near misses are called out once past; a crash clears the callout; the stall warning outranks hints
+{
+  const CLOSE_M = 5;   // src/world/obstacles.js CLOSE
+  // (the near-miss clearance is taken at each frame's pose, so this flies at a real frame rate: 250 kt at 60 fps;
+  // the swept hit test is what must hold at 13 m steps, and section 1 proves it)
+  const step = 250 * KT / 60;
+  const run = (v) => {
+    const f = new ObstacleField(resolveCourse(SITES.bayfield, { course: { obstacles: [{ kind: 'mast', u: -100, v, h: 60, r: 0.3, name: 'the test mast' }] } }));
+    const ac = fakeAc('condor', 0, f.prims[0].y0 + 30, 100 + 20 * step);
+    f.reset(ac);
+    const log = [];
+    for (let i = 0; i < 60; i++) {
+      ac.pos.z -= step;
+      const hit = f.hit(ac);
+      for (const e of f.events) if (e.type === 'close') log.push({ z: ac.pos.z, d: e.d });
+      f.events.length = 0;
+      if (hit) { log.push({ hit }); break; }
+    }
+    return { f, log };
+  };
+  // the Condor's wingtip passes about 3 m from a mast 21 m off the centreline: one callout, and its number is the
+  // closest pass of the whole flight (so it came once the tip was past the mast, not on the way in)
+  const near = run(21);
+  const calls = near.log.filter((e) => e.d != null);
+  ok(calls.length === 1 && calls[0].z < 100 && calls[0].d > 2 && calls[0].d < 4 && Math.abs(calls[0].d - near.f.closestD) < 1e-6, `a 3 m pass is called out once, after the closest point (${JSON.stringify(near.log)}; closest ${near.f.closestD.toFixed(2)})`);
+  ok(near.f.closestD < CLOSE_M && near.f.closestName === 'the test mast', 'and it is the closest shave on record');
+  // straight into a mast 16.4 m off: a hit, and no callout on the way in
+  const into = run(16.4);
+  ok(into.log.length === 1 && into.log[0].hit === 'the test mast', `flying into a mast calls out nothing before the hit (${JSON.stringify(into.log)})`);
+  // the runtime: a callout still up when the airplane crashes is taken down
+  const hud = { calls: [], message() {}, callout(t, d) { this.calls.push([t, d]); } };
+  const f = new ObstacleField(resolveCourse(SITES.bayfield, { course: { obstacles: [{ kind: 'mast', u: -100, v: 30, h: 60 }] } }));
+  f.events.push({ type: 'close', name: 'the test mast', d: 2.2 });
+  const mr = new MissionRuntime({ id: 't', course: {} }, { world: { obstacles: f }, hud });
+  const ac = { pos: new THREE.Vector3(), crashed: false };
+  mr.update(0.04, 10, ac);
+  ac.crashed = true; mr.update(0.04, 10.5, ac);
+  ok(hud.calls.length === 2 && hud.calls[0][0] === '2.2 m' && hud.calls[1][0] === '', `a crash takes the near-miss callout down (${JSON.stringify(hud.calls)})`);
+  // the stall warning outranks a mission hint (above the flare zone)
+  const mh = new MissionRuntime({ id: 't', hint: () => 'the mission hint' }, { world: {} });
+  const hac = (warning, ra) => ({ pos: new THREE.Vector3(), aero: { warning }, onGround: false, radioAlt: ra, flareZone: () => 4 });
+  ok(mh.hint({ ac: hac(false, 50), ra: 164, d: 1000, t: 1 }) === 'the mission hint', 'a mission hint shows normally');
+  ok(mh.hint({ ac: hac(true, 50), ra: 164, d: 1000, t: 1 }) === null, 'the stall warning outranks the mission hint');
+  ok(mh.hint({ ac: hac(true, 2), ra: 6.6, d: 10, t: 1 }) === 'the mission hint', '...but not in the flare zone, where the horn is part of the landing');
+  say('near misses: called out once past, never on the way into a hit, taken down by a crash; the stall hint first');
+}
 
 // ============================================================ 6. the mission data
 {
@@ -551,6 +673,43 @@ const EVERY_KIND = { id: 'every-kind', site: 'harbor', course: {
     ok(straight.crashed && straight.reason === hit, `${sc.id}: flown straight in by Autoland it must end "${hit}" (got ${straight.crashed ? straight.reason : 'no crash'})`);
   }
   say('RoutePilot: over a tower, a mast and a tree line, then 7-10 degrees down to a landing, in the Condor, Skylark and Trailblazer; straight in, each obstacle is hit');
+}
+
+// ============================================================ 9. RoutePilot's resume; the mission-only site
+{
+  const { RoutePilot } = await import('../src/systems/routepilot.js');
+  const { Aircraft } = await import('../src/physics/aircraft.js');
+  const { makeFreeFlight } = await import('../src/systems/scenarios.js');
+  // Bayfield's runway frame (heading north at the origin: u = -z, v = x), enough for the route pilot
+  const d = SITES.bayfield.runways[0];
+  const rw = { heading: 0, elevation: d.elevation, threshold: new THREE.Vector3(d.x, d.elevation, d.z), dir: new THREE.Vector3(0, 0, -1), right: new THREE.Vector3(1, 0, 0), aimDistance: 400, aim: new THREE.Vector3(d.x, d.elevation, d.z - 400) };
+  const world = { runway: rw, carrier: null };
+  // a circuit flown from abeam the field: downwind (away from the runway), base, then the final
+  const route = [{ u: -1500, v: -800, alt: 300 }, { u: -3000, v: -800, alt: 300 }, { u: -3500, v: 0, alt: 250 }, { u: -2500, v: 0, alt: 150 }];
+  const pilotAt = (u, v, heading, time) => {
+    const ac = new Aircraft(AIRCRAFT.skylark, {});
+    ac.pos.set(rw.threshold.x + v, rw.elevation + 300, rw.threshold.z - u);
+    ac.trim(heading, 70 * KT, 0, 0.333, null);
+    ac.time = time;
+    return new RoutePilot(ac, world, { id: 't', route, scoring: { type: 'runway' } });
+  };
+  const start = pilotAt(-1000, -800, Math.PI, 0);
+  ok(start.wps.length === 4 && start.phase === 'route', `at the start of a flight the whole route is flown, even legs heading away from the runway (${start.wps.length} of 4 waypoints)`);
+  const down = pilotAt(-2200, -800, Math.PI, 60);
+  ok(down.wps.length === 3 && down.wps[0].u === -3000, `switched on mid-flight on the downwind leg: resume at its end (${down.wps.map((w) => w.u).join(', ')})`);
+  const base = pilotAt(-3350, -300, Math.PI / 2 + 0.3, 60);
+  ok(base.wps.length === 2 && base.wps[0].u === -3500, `...on the base leg: resume at the turn onto final (${base.wps.map((w) => w.u).join(', ')})`);
+  const fin = pilotAt(-1500, 0, 0, 60);
+  ok(fin.wps.length === 0 && fin.phase === 'join', `...on the final past the last waypoint: straight to the join (${fin.wps.length} left, ${fin.phase})`);
+  const early = pilotAt(-800, -800, Math.PI, 60);
+  ok(early.wps.length === 4, `...before the first waypoint, heading for it: the whole route (${early.wps.length})`);
+  // Moose Creek Notch on its own is just the bar: free flight there, straight in on Autoland, lands
+  const site = SITES.notchbar;
+  ok(site.missionOnly === true && !(site.course.obstacles || []).some((o) => o.kind === 'treeWall'), 'Moose Creek Notch is mission-only and its tree wall belongs to the mission');
+  const free = makeFreeFlight({ site: 'notchbar', aircraft: 'trailblazer', time: 9, vis: 30000, windDir: 0, windSpeed: 4, windGust: 0, turb: 0.1, weight: 'normal', dist: 900, failures: [] });
+  const r = await simulate('free', { scenario: free, seed: 307 });
+  ok(!r.crashed && r.touchdown, `free flight at Moose Creek Notch, straight in on Autoland, lands (${r.crashed ? r.reason : r.points + ' ' + r.grade})`);
+  say(`RoutePilot resumes by progress along the route; free flight at the mission-only site lands (${r.points} ${r.grade})`);
 }
 
 console.log(fails ? `\n${fails} of ${checks} obstacle checks FAILED` : `\nall ${checks} obstacle checks passed`);

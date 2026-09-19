@@ -20,7 +20,7 @@
 //   bank   bank limit on this leg, degrees (default per aircraft); a slalom may ask for more
 // After the last waypoint: `join` - L1 onto the extended centreline, and down (or up) onto Autoland's glide path
 // (hDes = aim + distance x tan(glideslope) + CG height) at Vref; hand over when lined up (|v| and track error
-// small, on the path, on speed, wings level, for two seconds), or at the latest six seconds before the aim point
+// small, on the path, on speed, wings level, for three seconds), or at the latest six seconds before the aim point
 // or near the flare height (or on touchdown).
 //
 // The laws:
@@ -32,25 +32,47 @@
 //             turned into a pitch attitude (flight path + the slowly filtered angle of attack x cos(bank)) plus a
 //             proportional and integral term on the flight-path error;
 //   speed     throttle PI plus a flight-path feed-forward (it takes thrust to climb), speedbrakes on the Condor
-//             when it is fast at idle, stall protection as in Autoland. The trim is left where the spawn set it,
-//             as Autoland leaves it (with a jammed elevator both pitch with the trim alone). Trimming the force out
-//             on the way was tried: the landings Autoland then flew came out no better and sometimes worse, because
-//             its flare is tuned around the stock approach's untrimmed elevator.
-// A route flown from mid-way (the autopilot switched on late) starts at the first waypoint still ahead.
+//             when it is fast at idle, stall protection as in Autoland (with a jammed elevator both pitch with the
+//             trim alone).
+// The handover is what decides the landing: Autoland (not edited) holds the pitch it is handed as its reference and
+// flies a proportional pitch loop, so the elevator trim it inherits sets how far its pitch lags in the flare.
+//   - The Condor gets the trim a stock approach starts with (main.js spawn(): trimmed at Vref on the glide path with
+//     the approach flap), blended in during the join. The route's trim was set at the spawn's 150 kt: Harbor Cranes
+//     over ten seeds landed at 383-768 fpm (median 535) with it, and at 189-679 (median 374) with the approach trim,
+//     against 283-529 (median 424) for a stock straight-in Autoland in the same wind (2026-09-18).
+//   - The Skylark and the Trailblazer keep the spawn's trim: with the approach trim the Skylark landed harder (Power
+//     Lines median 196 -> 429 fpm, the same as a stock straight-in) and the Trailblazer floated 150-200 m into the
+//     340 m bar instead of about 50 m.
+//   - Autoland's own internal state is never written (it used to be handed a pitch reference; ten seeds of each
+//     mission landed as well or better without it: The Notch median 485 -> 321 fpm).
+// A route engaged mid-flight (the autopilot switched on late) resumes at the leg the airplane is on, by progress
+// along the route; at the start of a flight the whole route is flown, even a leg that heads away from the runway.
 // Deterministic: no randomness at all.
 import { KT, DEG, clamp, wrapPi } from '../config.js';
+import { Aircraft } from '../physics/aircraft.js';
 import { Autoland } from './autopilot.js';
 import { vrefFor } from './scoring.js';
 
 // Per aircraft: bank limit (deg), L1 period (s), pitch loop gains, throttle gains, vertical speed limits (m/s),
-// the margin over Vref flown on the route (kt), the approach flap for the final, and the join tolerances
-// (lateral metres, track degrees, height metres).
+// the margin over Vref flown on the route (kt), the approach flap for the final, the join tolerances (lateral
+// metres, track degrees, height metres), and apTrim: hand over with the stock approach's trim (see above).
 const TUNE = {
-  skylark: { bank: 30, L1: 5.0, kp: 3.0, kd: 1.0, kt: 0.06, ki: 0.03, kg: 2.4, down: 5, up: 3.5, extra: 6, flap: 0.667, jv: 6, jt: 5, jh: 4, kh: 0.25, la: 2.5, ta: 3, gp: 1.0, gi: 0.3 },
-  trailblazer: { bank: 32, L1: 4.0, kp: 3.0, kd: 1.0, kt: 0.06, ki: 0.03, kg: 2.4, down: 6, up: 3.5, extra: 4, flap: 1, jv: 4, jt: 6, jh: 3, kh: 0.3, la: 2, ta: 3, gp: 1.0, gi: 0.3 },
-  condor: { bank: 25, L1: 7.0, kp: 4.5, kd: 2.5, kt: 0.035, ki: 0.012, kg: 2.0, down: 8, up: 7, extra: 12, flap: 0.75, jv: 10, jt: 4, jh: 8, kh: 0.15, la: 3, ta: 4, gp: 1.0, gi: 0.2 },
-  hornet: { bank: 30, L1: 6.0, kp: 4.5, kd: 2.5, kt: 0.035, ki: 0.012, kg: 1.5, down: 9, up: 9, extra: 10, flap: 1, jv: 10, jt: 4, jh: 8, kh: 0.2, la: 2.5, ta: 3, gp: 1.0, gi: 0.2 },
+  skylark: { bank: 30, L1: 5.0, kp: 3.0, kd: 1.0, kt: 0.06, ki: 0.03, kg: 2.4, down: 5, up: 3.5, extra: 6, flap: 0.667, jv: 6, jt: 5, jh: 4, kh: 0.25, la: 2.5, ta: 3, gp: 1.0, gi: 0.3, apTrim: false },
+  trailblazer: { bank: 32, L1: 4.0, kp: 3.0, kd: 1.0, kt: 0.06, ki: 0.03, kg: 2.4, down: 6, up: 3.5, extra: 4, flap: 1, jv: 4, jt: 6, jh: 3, kh: 0.3, la: 2, ta: 3, gp: 1.0, gi: 0.3, apTrim: false },
+  condor: { bank: 25, L1: 7.0, kp: 4.5, kd: 2.5, kt: 0.035, ki: 0.012, kg: 2.0, down: 8, up: 7, extra: 12, flap: 0.75, jv: 10, jt: 4, jh: 8, kh: 0.15, la: 3, ta: 4, gp: 1.0, gi: 0.2, apTrim: true },
+  hornet: { bank: 30, L1: 6.0, kp: 4.5, kd: 2.5, kt: 0.035, ki: 0.012, kg: 1.5, down: 9, up: 9, extra: 10, flap: 1, jv: 10, jt: 4, jh: 8, kh: 0.2, la: 2.5, ta: 3, gp: 1.0, gi: 0.2, apTrim: false },
 };
+const TRIM_RATE = 0.05;   // trim units per second while blending to the approach trim in the join
+const RESUME_PENALTY = 1500;   // metres added to a leg that runs against the airplane's track when resuming
+
+// The trim a stock approach starts with (main.js spawn(): trimmed at Vref on the glide path with the approach flap),
+// from a scratch airframe of the same mass. Computed once, at the start of the join.
+function approachTrim(ac, rw, vrefKt, flap) {
+  const s = new Aircraft(ac.def, { mass: ac.mass });
+  s.pos.set(rw.threshold.x, rw.elevation + 150, rw.threshold.z);
+  const gs = rw.gsAngle ? rw.gsAngle * DEG : ac.def.approach.glideslope;
+  return s.trim(rw.heading, vrefKt * KT, -gs, flap, null).trim;
+}
 
 export class RoutePilot {
   constructor(ac, world, sc) {
@@ -71,9 +93,8 @@ export class RoutePilot {
           y: rw.elevation + w.alt, u: w.u, kt: w.kt, over: !!w.over, flap: w.flap, gear: w.gear, bank: w.bank,
         });
       }
-      // switched on mid-way: skip what is already behind
-      const u = this.uv().u;
-      while (this.wps.length && this.wps[0].u < u + 30) this.wps.shift();
+      // switched on mid-flight (not at the start of a flight): resume where the airplane is along the route
+      if (ac.time > 1) this.wps = this.wps.slice(this.resumeAt());
     }
     this.i = 0;
     this.start = { x: ac.pos.x, z: ac.pos.z, y: ac.pos.y };
@@ -81,6 +102,8 @@ export class RoutePilot {
     this.g0 = ac.gs > 1 ? Math.atan2(ac.vs, ac.gs) : 0;
     this.alphaF = ac.aero.alpha || 0;
     this.pInt = 0; this.tInt = 0;
+    this.trimApp = undefined;                     // the approach trim (apTrim aircraft), computed when the join starts
+    this.dbg = { hDes: 0, vsDes: 0, pitchCmd: 0, gDes: 0 };
     if (!rw) this.handOver();                     // the carrier: nothing to route, Autoland flies it
     else if (!this.wps.length) this.phase = 'join';
   }
@@ -93,19 +116,45 @@ export class RoutePilot {
     return o;
   }
 
+  // Where to join a route already under way: the index of the first waypoint to fly (wps.length: none, straight to
+  // the join). Each candidate costs its horizontal distance plus RESUME_PENALTY x (1 - cos) / 2 of the angle between
+  // its direction and the airplane's track (nothing for a leg flown the airplane's way, the whole penalty for one
+  // flown against it): the first waypoint itself (the route has not begun), every leg the airplane has not passed the
+  // end of (resume at that leg's end), and the join (only once past the last waypoint: the distance to the extended
+  // centreline, along the runway heading). The cheapest wins.
+  resumeAt() {
+    const p = this.ac.pos, w = this.wps, n = w.length, rw = this.rw;
+    if (!n) return 0;
+    const tx = Math.sin(this.ac.track), tz = -Math.cos(this.ac.track);
+    const turn = (dx, dz) => RESUME_PENALTY * (1 - (dx * tx + dz * tz) / (Math.hypot(dx, dz) || 1)) / 2;
+    let best = 0, bestCost = Math.hypot(w[0].x - p.x, w[0].z - p.z) + turn(w[0].x - p.x, w[0].z - p.z);
+    let past = n === 1 && (w[0].x - p.x) * tx + (w[0].z - p.z) * tz < 0;
+    for (let j = 1; j < n; j++) {
+      const a = w[j - 1], b = w[j];
+      const dx = b.x - a.x, dz = b.z - a.z, L = Math.hypot(dx, dz) || 1;
+      const s = ((p.x - a.x) * dx + (p.z - a.z) * dz) / L;
+      if (s >= L) { if (j === n - 1) past = true; continue; }
+      const c = Math.max(s, 0) / L;
+      const cost = Math.hypot(a.x + dx * c - p.x, a.z + dz * c - p.z) + turn(dx, dz);
+      if (cost < bestCost) { bestCost = cost; best = j; }
+    }
+    if (past) {
+      const { v } = this.uv();
+      if (Math.abs(v) + turn(rw.dir.x, rw.dir.z) < bestCost) best = n;
+    }
+    return best;
+  }
+
   handOver() {
     const ac = this.ac, inp = ac.input;
     inp.spoiler = 0;
     if (this.def.spoilers && !this.world.carrier) inp.spoilerArmed = true;
     if (this.def.gearRetract) inp.gearCmd = 1;
     if (inp.flapCmd < this.tune.flap - 1e-3 && !ac.failures.has('flapsStuck')) inp.flapCmd = this.tune.flap;
+    if (this.trimApp != null && !ac.failures.has('elevatorJam') && !ac.onGround) inp.trim = this.trimApp;
+    // Autoland takes the airplane as it is (its pitch reference is the pitch this instant): the join makes that a
+    // steady state on its glide path, and nothing inside Autoland is written.
     this.final = new Autoland(ac, this.world, this.sc);
-    // Autoland keeps the pitch it is handed as its reference and trims the rest out with a slow integrator; hand it
-    // the pitch that holds its glide path at this angle of attack instead of whatever the pitch is this instant.
-    if (this.rw && !ac.onGround) {
-      const gs = this.rw.gsAngle ? this.rw.gsAngle * DEG : this.def.approach.glideslope;
-      this.final.pitchRef = this.alphaF * Math.cos(ac.euler.roll) - gs;
-    }
     this.phase = 'final';
   }
 
@@ -183,6 +232,9 @@ export class RoutePilot {
     const inp = ac.input;
     if (def.gearRetract) inp.gearCmd = 1;
     if (inp.flapCmd < T.flap - 1e-3 && !ac.failures.has('flapsStuck')) inp.flapCmd = T.flap;
+    // the approach trim (apTrim aircraft), blended in while the airplane settles onto the path
+    if (this.trimApp === undefined) this.trimApp = T.apTrim ? approachTrim(ac, rw, this.vref, ac.failures.has('flapsStuck') ? ac.ctl.flap : T.flap) : null;
+    if (this.trimApp != null && !ac.failures.has('elevatorJam')) inp.trim += clamp(this.trimApp - inp.trim, -TRIM_RATE * dt, TRIM_RATE * dt);
   }
 
   // One step of the three laws: steer for the point `tgt` ({ x, z }: pure pursuit, the lateral acceleration
@@ -224,6 +276,7 @@ export class RoutePilot {
     } else {
       inp.pitch = clamp(T.kp * (pitchCmd - ac.euler.pitch) - T.kd * ac.omega.x, -1, 1);
     }
-    this.dbg = { hDes, vsDes, pitchCmd, gDes };
+    const dbg = this.dbg;   // (for tools/fly-mission.mjs --track --debug; one object, reused every frame)
+    dbg.hDes = hDes; dbg.vsDes = vsDes; dbg.pitchCmd = pitchCmd; dbg.gDes = gDes;
   }
 }
