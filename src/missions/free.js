@@ -190,7 +190,8 @@ function failureTrigger(when, o, prof, useWindow, bush) {
       return { type: 'alt', value: below(ft * (0.2 + 0.6 * optsHash(o))) };
     case 'approach':
     default:
-      if (useWindow) return { type: 'window', from: 5, to: Math.max(8, Math.round(T * 0.55)) };
+      // an altitude, even where a seeded window exists: "on approach" promises above short final and below the start,
+      // and a time window cannot keep that promise on a short bush approach (2026-09-18, merge with the failures work)
       return { type: 'alt', value: below(Math.min(1500, ft * (bush ? 0.72 : 0.6))) };
   }
 }
