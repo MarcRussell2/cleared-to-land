@@ -11,7 +11,8 @@
 //     the rim by only a few metres (the challenge is real, and fair: Autoland lands every one of them);
 //   - friction: packed snow and lake ice brake at about a third and an eighth of dry asphalt;
 //   - the missions' data: ids, n, group, fields, tips that name keys have a touch wording; the visibility each
-//     briefing names is what the pilot sees through the weather (src/missions/README.md "Visibility"); Hill
+//     briefing names is the kneeboard's `vis` and what the pilot sees through the weather (src/missions/README.md
+//     "Visibility"); Hill
 //     Hop's push-over hint comes only once the col is behind, where taking it at its word still clears the ridge;
 //   - the look builds in Node: the biome forests, boulders and site props, with named materials and budgets.
 import { installDomStub } from './dom-stub.mjs';
@@ -176,16 +177,19 @@ for (const sc of MAPS_MISSIONS) {
     for (const e of sc.weather.events || []) ok(['visDrop', 'turbBurst', 'gustFront', 'windShift'].includes(e.type) && e.at && e.at.type, `${tag}: weather event ${e.type} with a trigger`);
   }
 }
-// What the pilot sees (README "Visibility"): the sky's air for `vis` (clearExtinction), thickened by the weather
-// look by 1 + 0.8 snow + 1.6 dust (src/art/weather-look.js on m-weather 5b06abe; change both together).
-const seenVis = (vis, wx) => VISIBILITY_EXTINCTION / (clearExtinction(vis) * (1 + 0.8 * (wx.snow || 0) + 1.6 * (wx.dust || 0)));
+// What the pilot sees (README "Visibility"): the sky's air for `vis` (clearExtinction: exact at 900 m and below,
+// clearer above). The snow and dust a mission asks for are already in its `vis`: the weather look thickens the air
+// only for precipitation above the spec's own (src/art/weather-look.js; change both together).
+const seenVis = (vis) => VISIBILITY_EXTINCTION / clearExtinction(vis);
+// the kneeboard's wording of a visibility (src/ui/menus.js visText)
+const card = (v) => (v >= 9500 ? `${Math.round(v / 1000)} km` : v >= 1000 ? `${(v / 1000).toFixed(1).replace(/\.0$/, '')} km` : `${Math.round(v / 50) * 50} m`);
 {
   const wo = MAPS_MISSIONS.find((s) => s.id === 'whiteout'), dw = MAPS_MISSIONS.find((s) => s.id === 'dust-wall');
-  const a = seenVis(wo.vis, wo.weather);
-  ok(wo.weather.snow >= 0.8 && a > 850 && a < 950 && /900 metres of visibility/.test(wo.desc), `whiteout: heavy snow, and the pilot sees ${a.toFixed(0)} m, as the briefing's 900 metres says (vis ${wo.vis})`);
+  const a = seenVis(wo.vis);
+  ok(wo.weather.snow >= 0.8 && Math.abs(a - 900) < 1 && card(wo.vis) === '900 m' && /900 metres of visibility/.test(wo.desc), `whiteout: heavy snow; the briefing's 900 metres, the kneeboard's ${card(wo.vis)} and the ${a.toFixed(0)} m the pilot sees agree`);
   const drop = dw.weather.events.find((e) => e.type === 'visDrop');
-  const b0 = seenVis(dw.vis, dw.weather), b1 = seenVis(drop.vis, dw.weather);
-  ok(b0 > 6300 && b0 < 7700 && b1 > 900 && b1 < 1250 && /from seven kilometres to one/.test(dw.desc), `dust-wall: the pilot sees ${(b0 / 1000).toFixed(1)} km, then ${(b1 / 1000).toFixed(2)} km after the drop, as "from seven kilometres to one" says`);
+  const b0 = seenVis(dw.vis), b1 = seenVis(drop.vis);
+  ok(card(dw.vis) === '7 km' && b0 >= 7000 && b1 > 950 && b1 < 1200 && /from seven kilometres to one/.test(dw.desc), `dust-wall: the kneeboard's ${card(dw.vis)} and "from seven kilometres to one" (the pilot sees at least ${(b0 / 1000).toFixed(0)} km before the wall, ${(b1 / 1000).toFixed(2)} km after the drop)`);
   // every other map mission is in clear air: its vis is what the sky draws, and the text names no visibility
   for (const sc of MAPS_MISSIONS) if (!sc.weather) ok(sc.vis >= 30000 && !/visibility/.test(sc.desc), `${sc.id}: clear air (vis ${sc.vis})`);
 }

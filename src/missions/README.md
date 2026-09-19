@@ -79,17 +79,18 @@ has `rwToWorld(site, u, v, y)`.
 `turbBurst`, `squall` (rain and wind jump together), `visDrop` (visibility falls to `vis` metres).
 
 ### Visibility
-*(Added by the maps area, 2026-09-18, from the look as it stands on m-weather 5b06abe; the weather area owns it.)*
-A scenario's `vis`, and a `visDrop`'s `vis`, is the number the sky and the weather model are given
-(`weather.state.vis`, and what the briefing card shows). What the pilot sees is the 2%-contrast distance of
-the air the look draws: `3.912 / (clearExtinction(vis) × m)`. `clearExtinction` (src/art/world-atmosphere.js)
-is exact at 900 m and below and draws the air clearer above that (6,000 of `vis` is about 16 km of clear air),
-as it does for the original twenty; `m = 1 + 1.4 × (rain − the mission's own rain) + 0.8 × snow + 1.6 × dust`
-is the weather look's thickening (src/art/weather-look.js). So in snow or dust the pilot sees less than `vis`:
-a mission's text names **what the pilot sees**, and the mission sets `vis` to give it (Whiteout: `vis` 1,520 in
-snow 0.9 shows 900 m). tools/test-maps.mjs checks the maps missions against this formula. If the look ever
-subtracts the mission's own snow and dust as it already does its rain, `vis` becomes what the pilot sees in
-every mission, and those values go back to the seen ones.
+*(Added by the maps area, 2026-09-18; the rule settled in the polish pass the same day. The weather area owns it.)*
+A scenario's `vis`, and a `visDrop`'s `vis`, is the whole visibility: the number the sky and the weather model are
+given (`weather.state.vis`), the one the briefing's kneeboard shows, and the one a mission's text names. The rain,
+snow and dust the spec itself asks for are already in it; the weather look thickens the air only for precipitation
+**above** the spec's own (a squall's rain, a storm cell's shaft): `m = 1 + 1.4 × (rain − the spec's rain) +
+0.8 × (snow − the spec's snow) + 1.6 × (dust − the spec's dust)`, never below 1 (src/art/weather-look.js). What the
+pilot sees is the 2%-contrast distance of the air the look draws, `3.912 / (clearExtinction(vis) × m)`;
+`clearExtinction` (src/art/world-atmosphere.js) is exact at 900 m and below and draws the air clearer above that
+(6,000 of `vis` is about 16 km of clear air), as it does for the original twenty. So at 900 m and below, `vis` is
+exactly what the pilot sees (Whiteout: 900 m in the text, on the kneeboard and out of the window); above it, the
+window is never worse than the number (Dust Wall: seven kilometres before the wall, 1,100 m after the drop).
+tools/test-maps.mjs checks the maps missions against this formula.
 
 ## Engine interfaces (stubs exist; the owners fill them in)
 

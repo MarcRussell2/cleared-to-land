@@ -48,7 +48,8 @@
 //                   table is scaled ONCE at build for the storm's darkness (and tinted for dust), then per frame
 //                   the sun, the hemisphere light and the exposure are set from the values the sky's set() left
 //                   (never toggling a light's `visible`, which would recompile every program), and the shared
-//                   atExtinction uniform carries the visibility: the model's (a visDrop), thicker in heavy rain,
+//                   atExtinction uniform carries the visibility: the model's (a visDrop), thicker only where more
+//                   rain (or snow or dust) falls than the spec's own, which the scenario's `vis` already includes,
 //                   and the whiteout inside the cloud above the ceiling (a ragged base 30 m deep). Inside the
 //                   cloud atWeather is lifted to 1 as well, so the airlight has no horizon step (a false
 //                   horizon in a whiteout); outside it is the sky's own value, rewritten every frame.
@@ -200,7 +201,7 @@ export class WeatherLook {
 
     // --- what the sky set, before the weather touches it (restored and scaled from these every frame) ---
     this.base = sky ? { sun: sky.sun.intensity, sunOn: sky.sun.visible, hemi: sky.hemi.intensity, exposure: sky.renderer ? sky.renderer.toneMappingExposure : 1, weather: U ? U.atWeather.value : 0 } : null;
-    this.baseRain = s.rain || 0;
+    this.baseRain = s.rain || 0; this.baseSnow = s.snow || 0; this.baseDust = s.dust || 0;
     // a flash is light added to the scene, and the night exposure (about 3x the day's) would multiply it again:
     // what the flash adds is scaled back by the exposure the sky chose, so a night strike is bright, not white
     this.flashK = this.base ? clamp(1.4 / Math.max(0.1, this.base.exposure), 0.35, 1) : 1;
@@ -586,9 +587,12 @@ export class WeatherLook {
       if (R) R.toneMappingExposure = b.exposure * (1 - 0.3 * dk * day) * (1 + 0.3 * flash);
     }
 
-    // --- visibility: the model's, thicker in heavier rain, and white inside the cloud ---
+    // --- visibility: the model's, thicker where more falls than the spec's own, and white inside the cloud ---
+    // A scenario's `vis` is the whole of it: the rain, snow and dust the spec itself asks for are already in that
+    // number (the briefing and its kneeboard say it, the sky draws it), so only what arrives on top thickens the air
+    // (a squall's rain, a storm cell's shaft). src/missions/README.md "Visibility"; tools/test-maps.mjs.
     const camY = cam.position.y;
-    let ext = clearExtinction(st.vis) * (1 + 1.4 * Math.max(0, st.rain - this.baseRain) + 0.8 * st.snow + 1.6 * st.dust);
+    let ext = clearExtinction(st.vis) * (1 + 1.4 * Math.max(0, st.rain - this.baseRain) + 0.8 * Math.max(0, st.snow - this.baseSnow) + 1.6 * Math.max(0, st.dust - this.baseDust));
     let inCloud = 0;
     if (deck) {
       inCloud = smoothstep(st.ceilingY - 30, st.ceilingY + 12, camY) * (1 - smoothstep(st.cloudTop - 60, st.cloudTop + 60, camY));

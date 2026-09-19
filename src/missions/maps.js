@@ -9,8 +9,9 @@
 // The weather's look and model come from the weather area (src/systems/weather.js, src/art/weather-look.js);
 // these carry the spec, and the visibility and wind that matter to the flying are the scenario's own vis
 // and wind (plus, for dust-wall, the rough air of the dust front, a turbBurst). The visibility a briefing names
-// is what the pilot sees, and `vis` is set for it: the weather look thickens the air on top of `vis`, see
-// src/missions/README.md "Visibility" (tools/test-maps.mjs holds the numbers to it). Each one is landed by the stock
+// is the scenario's `vis`, which the kneeboard shows too: the snow or dust a mission asks for is already in that
+// number (the weather look thickens the air only for what arrives on top), see src/missions/README.md "Visibility"
+// (tools/test-maps.mjs holds the numbers to it). Each one is landed by the stock
 // Autoland on its straight path (tools/test-maps.mjs checks that path clears the terrain, and only just; the
 // branch's commit messages carry the headless flights, with the weather model and without it).
 // eslint-disable-next-line no-unused-vars
@@ -72,7 +73,7 @@ export const MAPS_MISSIONS = [
   },
   {
     id: 'whiteout', n: 42, group: 'maps', difficulty: 4, title: 'Whiteout', tags: T('map', 'weather', 'crosswind'),
-    aircraft: 'skylark', site: 'frostbite', time: 13, vis: 1520,   // (the pilot sees 900 m: README "Visibility")
+    aircraft: 'skylark', site: 'frostbite', time: 13, vis: 900,   // (what the briefing says, the kneeboard shows and the pilot sees)
     weather: { preset: 'snow', snow: 0.9 },
     desc: 'Snow blowing across a frozen lake, 900 metres of visibility, and a runway that is a ploughed strip of ice. The crosswind is only 10 knots; the problem is the grip, or the lack of it: whichever way the wheels touch down is the way the airplane keeps going.',
     tips: [
@@ -85,12 +86,13 @@ export const MAPS_MISSIONS = [
   },
   {
     id: 'dust-wall', n: 43, group: 'maps', difficulty: 5, title: 'Dust Wall', tags: T('map', 'weather', 'crosswind', 'bush'),
-    aircraft: 'skylark', site: 'redmesa', time: 17, vis: 6000,
-    // (README "Visibility": in dust 0.8 the pilot sees about 6,900 m at the start and 1,100 m after the drop to 2,300,
-    // as the briefing says; a drop to 1,100 of model visibility, 480 m seen, hid the dust-coloured mesa against the
-    // dust-coloured desert until 200 m before the rim of a strip with no lights and no PAPI)
+    aircraft: 'skylark', site: 'redmesa', time: 17, vis: 7000, clouds: 0,   // (no cloud sheets over a dust storm)
+    // (README "Visibility": seven kilometres before the wall, as the briefing and the kneeboard say (the sky draws
+    // clear air above 900 m clearer still, as it does for every mission), and 1,100 m after the drop, as the
+    // briefing's "to one" says; less than that - 480 m, tried - hid the dust-coloured mesa against the dust-coloured
+    // desert until 200 m before the rim of a strip with no lights and no PAPI)
     weather: { preset: 'dust', dust: 0.8, events: [
-      { type: 'visDrop', at: { type: 'dist', value: 1500 }, vis: 2300, ramp: 8 },
+      { type: 'visDrop', at: { type: 'dist', value: 1500 }, vis: 1100, ramp: 8 },
       { type: 'turbBurst', at: { type: 'dist', value: 1500 }, turb: 0.3, dur: 12 },   // the front's rough air
     ] },
     desc: 'A haboob is coming over the mesa, and so are you. Gusts to 23 knots across a 500 m strip on a cliff top, and when the dust wall arrives the visibility goes from seven kilometres to one. Get lined up while you can still see.',
