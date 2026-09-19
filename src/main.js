@@ -293,6 +293,11 @@ class Game {
     this.camera.position.set(-260, 60, 700);
     this.camera.lookAt(0, 20, -600);
     this.camera.fov = 50; this.camera.updateProjectionMatrix();
+    // The sky patches the world's materials with the atmosphere on its first update(), which the menu's frame in
+    // loop() also makes before it draws. Made here as well, so nothing that draws the backdrop straight after
+    // toMenu() (a stepped harness) compiles it unpatched: the apron lamps' shader reads the sky's atDay and would
+    // fail to compile without it, and every other material would compile twice.
+    this.world.sky.update(this.camera.position, 0);
   }
 
   loadSite(site, sc) {
