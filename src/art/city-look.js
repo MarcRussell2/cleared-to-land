@@ -76,7 +76,7 @@
 //      thin members' widening) is invisible to it and to the contract check. Build any shape that casts a visible
 //      shadow as geometry (the plain look builds each frustum among the round buildings and the hill that way).
 //
-// ---- The plain look (this file as the city ladder left it: the brief asks the art department to replace it)
+// ---- Metro City: weathered pastel flats, reflective curtain walls and a fine glass Needle
 // Draw calls: one InstancedMesh per geometry - boxes, thin cylinders, round buildings and the hill (one mesh per
 // taper: a frustum's taper is in its geometry, so its shadow is a frustum), tubes, marker balls, trees - sharing ONE
 // material and program (course/solids) except the trees; one draped Mesh for the ground (course/ground); one LightSet
@@ -106,9 +106,15 @@
 // onBeforeCompile; seeded randomness only (makeRng from the course seed); no point or spot lights; linear colours,
 // sunlit white about 0.8, nothing but lamps above 1; nothing allocated per frame - update() only rewrites the
 // lights' colours when a blinker toggles (and moves the two shadow primers during the first half second).
-// Metro art pass: dark distance-filtered windows, curtain walls, painted roof plant,
-// concrete weathering and bridge structure. Collision geometry and primers stay intact.
-// Quality removes fine weathering on medium and roof/AC relief on low; no textures.
+// city-facades.js holds the facade/roof shader: close individual windows, two blended
+// integer-hashed super-cell levels at range, thin filtered mullions, fritted glass,
+// painted roof relief and concrete weathering. Night preserves albedo and uses sparse
+// low-average window emission. The Needle has metre-high LED rings; streets have
+// local sodium pools and static points in the course's single night LightSet.
+// Bridge structure, the rocky hill and floodlit board retain their surface styles.
+// Quality removes stains on medium, reduces roof items from four to two, and removes
+// roof/AC relief on low. No new textures; collision geometry and primers stay intact.
+// Solids program keys include the quality tier baked into their shader source.
 import * as THREE from 'three';
 import { CITY_FACADES } from './city-facades.js';
 import { makeRng } from '../config.js';
@@ -232,6 +238,14 @@ float ctHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453
 // a window, a stack, a panel: the hash of an integer cell and the instance's integer seed, kept small (mod 289) so the
 // hash's sine never sees a large argument (the same cell gives the same number on every pixel, on every GPU)
 float ctCellHash(vec2 cell, float seed, float k) { return ctHash(mod(cell + vec2(seed * 7.0 + k, seed * 13.0 + 3.0 * k), 289.0)); }
+// Integrated square point: fixed integer super-cells, analytically filtered edges.
+// Each level covers 16% of its area; 0.25 occupancy * 0.36 radiance gives 0.0144.
+float ctWindowPoints(vec2 cell, vec2 footprint, float scale, float seed, float probability) {
+  vec2 q = cell / scale, w = max(footprint / scale, vec2(0.001));
+  vec2 c = floor(q), f = fract(q);
+  vec2 coverage = max(vec2(0.0), min(f + w * 0.5, vec2(0.7)) - max(f - w * 0.5, vec2(0.3))) / w;
+  return coverage.x * coverage.y * step(1.0 - probability, ctCellHash(c, seed, 37.0 + log2(scale)));
+}
 float ctNoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(ctHash(i), ctHash(i + vec2(1.0, 0.0)), f.x), mix(ctHash(i + vec2(0.0, 1.0)), ctHash(i + 1.0), f.x), f.y); }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
@@ -354,7 +368,7 @@ if (ctGloss > 0.0) {
   totalEmissiveRadiance += ctGloss * (1.0 - ctNight) * mix(0.12, 0.62, ctF) * vec3(0.30, 0.40, 0.52);
 }`);
   };
-  m.customProgramCacheKey = () => 'ctl-course-solids-v9';
+  m.customProgramCacheKey = () => `ctl-course-solids-v10-${detail}`;
   return m;
 }
 
@@ -367,6 +381,40 @@ const GROUND_KIND = { city: 0, avenue: 1, plaza: 2, apron: 3 };
 function inRect(r, x, z) {
   const dx = x - r.x, dz = z - r.z, a = dx * r.ux + dz * r.uz, b = dx * r.vx + dz * r.vz;
   return a >= 0 && a <= r.lu && b >= 0 && b <= r.lv;
+}
+// Static light points at the same local coordinates as the ground's sodium pools.
+// No posts or new solids. Respect the drape's overlap, skip and water rules.
+function streetLamps(areas, terrain) {
+  const lamps = [];
+  if (!terrain) return lamps;
+  areas.forEach((a, ai) => {
+    const add = (x, z) => {
+      if (!inRect(a, x, z) || areas.slice(0, ai).some((r) => inRect(r, x, z))
+        || (a.skip || []).some((r) => inRect(r, x, z))) return;
+      const y = a.y != null ? a.y : terrain.height(x, z);
+      if (a.y == null && y < (terrain.waterLevel ?? -1e9) + 0.5) return;
+      lamps.push({ x, y: y + 0.7, z, color: 'amber' });
+    };
+    if (a.kind === 'avenue') {
+      for (let p = Math.ceil(-a.lu / 72) * 36; p <= a.lu / 2; p += 36)
+        for (const q of [-57, 0, 57]) add(a.x + a.ux * (p + a.lu / 2) + a.vx * (q + a.lv / 2),
+          a.z + a.uz * (p + a.lu / 2) + a.vz * (q + a.lv / 2));
+    } else if (a.kind === 'city' && a.grid) {
+      const g = a.grid;
+      const corners = [[0, 0], [a.lu, 0], [0, a.lv], [a.lu, a.lv]].map(([u, v]) => {
+        const x = a.x + a.ux * u + a.vx * v - g.x, z = a.z + a.uz * u + a.vz * v - g.z;
+        return [x * g.p[0] + z * g.p[1], x * g.q[0] + z * g.q[1]];
+      });
+      const lo = [0, 1].map((k) => Math.min(...corners.map((c) => c[k])));
+      const hi = [0, 1].map((k) => Math.max(...corners.map((c) => c[k])));
+      for (let i = Math.ceil((lo[0] / g.pitchP - 0.5) / 2); (2 * i + 0.5) * g.pitchP <= hi[0]; i++)
+        for (let j = Math.ceil((lo[1] / g.pitchQ - 0.5) / 2); (2 * j + 0.5) * g.pitchQ <= hi[1]; j++) {
+          const p = (2 * i + 0.5) * g.pitchP, q = (2 * j + 0.5) * g.pitchQ;
+          add(g.x + g.p[0] * p + g.q[0] * q, g.z + g.p[1] * p + g.q[1] * q);
+        }
+    }
+  });
+  return lamps;
 }
 function groundMaterial(night) {
   const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, metalness: 0, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 });
@@ -401,14 +449,24 @@ vec3 ctGEmit = vec3(0.0);
     float d = min(f.x, f.y);
     diffuseColor.rgb = d < street * 0.5 ? asphalt : d < street * 0.5 + 3.0 ? walk : plot;
     diffuseColor.rgb *= 0.9 + 0.2 * ctGHash(floor(lp / pitch + 0.5));
-    ctGEmit = vec3(1.0, 0.62, 0.26) * 0.055 * ctNight * (1.0 - smoothstep(street * 0.5, street * 0.5 + 4.0, d));
+    vec2 lampDelta = mod(lp - pitch * 0.5 + pitch, pitch * 2.0) - pitch;
+    float pool = pow(1.0 - smoothstep(0.0, 12.0, length(lampDelta)), 2.0);
+    ctGEmit = vec3(1.0, 0.62, 0.26) * ctNight * (0.002 + 0.045 * pool)
+      * (1.0 - smoothstep(street * 0.5, street * 0.5 + 4.0, d));
   } else if (kind < 1.5) {
     // the avenue: a boulevard down lp.y = 0 (six lanes, a median), pavements, then paving
     float v = abs(lp.y);
     diffuseColor.rgb = v < 2.5 ? vec3(0.07, 0.09, 0.05) : v < 57.0 ? asphalt : v < 64.0 ? walk : plot;
     float lane = abs(fract((v - 2.5) / 9.0) - 0.5) * 9.0;
-    if (v > 2.5 && v < 57.0 && lane < 0.08 && fract(lp.x / 12.0) < 0.5) diffuseColor.rgb = vec3(0.55);
-    ctGEmit = vec3(1.0, 0.62, 0.26) * 0.065 * ctNight * step(2.5, v) * (1.0 - smoothstep(57.0, 66.0, v));
+    float marking = (1.0 - smoothstep(0.08, 0.08 + fwidth(lp.y), lane))
+      * min(1.0, 0.16 / max(fwidth(lp.y), 0.001)) * step(fract(lp.x / 12.0), 0.5)
+      * step(2.5, v) * step(v, 57.0);
+    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.55), marking);
+    float alongLamp = abs(mod(lp.x + 18.0, 36.0) - 18.0);
+    float acrossLamp = min(abs(v - 57.0), v);
+    float pool = pow(1.0 - smoothstep(0.0, 12.0, length(vec2(alongLamp, acrossLamp))), 2.0);
+    ctGEmit = ctNight * (vec3(1.0, 0.62, 0.26) * 0.055 * pool
+      + vec3(0.008, 0.007, 0.005) * marking);
   } else if (kind < 2.5) {
     // a plaza: pale paving on an 8 m grid
     vec2 f = abs(fract(lp / 8.0) - 0.5);
@@ -424,7 +482,7 @@ vec3 ctGEmit = vec3(0.0);
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
 totalEmissiveRadiance += ctGEmit;`);
   };
-  m.customProgramCacheKey = () => 'ctl-course-ground-v2';
+  m.customProgramCacheKey = () => 'ctl-course-ground-v3';
   return m;
 }
 
@@ -652,7 +710,7 @@ export function buildCourse(prims, gates, opts = {}) {
   // the checkerboard; amber (sodium) lamps on the bridge deck; the gates' corners. Night only: by day they would be
   // dots nobody sees, and a draw nobody needs.
   let blink = null, set = null, on = true;
-  const L = opts.lights || [];
+  const L = night ? [...(opts.lights || []), ...streetLamps(opts.ground || [], opts.terrain)] : [];
   if (night && (L.length || gates.length)) {
     set = new LightSet(L.length + gates.length * 4 + 1, 7, 1);
     set.mat.name = 'course/obstacle-lights'; set.points.name = 'course/obstacle-lights';
