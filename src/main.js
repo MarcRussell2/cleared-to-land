@@ -356,14 +356,15 @@ class Game {
   }
 
   // ---------- scenario flow ----------
-  startScenario(scBase) {
+  startScenario(scBase, seed = null) {
     this.scenarioBase = scBase;
     // One seed per flight. Everything that varies from approach to approach draws
     // from it: the gust strength and anything else resolveScenario picks, the
     // turbulence, the camera shake, which wing drops at the stall. Pinning it with
     // window.CTL_WIND_SEED replays an approach exactly, which is how the
     // screenshot harness compares two builds (tools/ctl-shots/looksheet.mjs).
-    const flightSeed = window.CTL_WIND_SEED || Math.floor(Math.random() * 1000) + 1;
+    // (free flight hands in the seed it already dealt its "Surprise me" failure from: one seed per flight)
+    const flightSeed = (Number.isFinite(seed) && seed > 0 ? seed : 0) || window.CTL_WIND_SEED || Math.floor(Math.random() * 1000) + 1;
     this.flightSeed = flightSeed;
     const flightRng = makeRng(flightSeed);
     const sc = resolveScenario(scBase, flightRng, this.settings);
@@ -470,9 +471,11 @@ class Game {
   startFree() {
     this.freeOpts = validateFreeOpts(this.freeOpts, { defaults: DEFAULT_FREE, sites: SITES, aircraft: AIRCRAFT, failures: FAILURES, missions: SCENARIOS });
     saveJSON('ctl.free', this.freeOpts);
-    // the seed only picks a "Surprise me" failure; pinned with the flight's own seed so a harness replay repeats it
-    const sc = makeFreeFlight(this.freeOpts, window.CTL_WIND_SEED || Math.floor(Math.random() * 1000) + 1);
-    this.startScenario(sc);
+    // The flight's seed, drawn once: it picks a "Surprise me" failure here and then everything else the flight draws,
+    // so replaying game.flightSeed (window.CTL_WIND_SEED) repeats the surprise as well
+    const seed = window.CTL_WIND_SEED || Math.floor(Math.random() * 1000) + 1;
+    const sc = makeFreeFlight(this.freeOpts, seed);
+    this.startScenario(sc, seed);
   }
 
   spawn(sc) {
