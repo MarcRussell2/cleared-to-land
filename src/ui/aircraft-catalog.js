@@ -1,7 +1,8 @@
 // Display-only data for the menu: what each airplane looks like from above, a one-line blurb, a workload rating
 // and two type facts. The numbers (Vref, weight, span, stall speeds, runway needed) are read from
 // src/aircraft/defs.js at render time and never copied here: that file belongs to the flight model and is not
-// edited for the menu. Nothing in this file is read by the simulation.
+// edited for the menu. Nothing in this file is read by the simulation (free flight's builder, src/missions/free.js,
+// reads the runway need ashore below to decide which places it offers).
 import { RAD } from '../config.js';
 
 // Plan-view silhouettes, nose up, in a 120x120 box. Wing first, fuselage over it, so the fuselage outline reads
@@ -91,6 +92,21 @@ export function aircraftInfo(def) {
     runwayNeed: def.approach ? def.approach.runwayNeed : 0,
     hook: !!def.hook,
   };
+}
+
+// The airplanes a mission with aircraft 'random' (Roulette) can draw. It mirrors the pick in resolveScenario()
+// (src/systems/scenarios.js), which never draws the Sea Hornet: the menu files Roulette under these three only.
+export const RANDOM_AIRCRAFT = ['skylark', 'condor', 'trailblazer'];
+// Does this mission fly this airplane (a random-aircraft mission counts for each airplane it can draw)?
+export const missionFlies = (sc, acId) => !!sc && (sc.aircraft === acId || (sc.aircraft === 'random' && RANDOM_AIRCRAFT.includes(acId)));
+
+// The runway an airplane needs ashore, for free flight's place list. defs.js gives the Sea Hornet its arrested
+// stopping distance (200 m on the wires); on a runway, without a wire, a fighter needs about 1,500 m.
+const RUNWAY_NEED_ASHORE = { hornet: 1500 };
+export function runwayNeedAshore(def) {
+  if (!def) return 0;
+  if (RUNWAY_NEED_ASHORE[def.id] != null) return RUNWAY_NEED_ASHORE[def.id];
+  return (def.approach && def.approach.runwayNeed) || 0;
 }
 
 // How hard each of the original twenty is, 1..5 (a new mission carries `difficulty` itself; scenarios.js, where

@@ -230,7 +230,8 @@ export function resolveScenario(sc, rng = Math.random, settings = null) {
 }
 
 // Free flight: options -> scenario lives in src/missions/free.js (weather, trouble, obstacles, a seeded surprise).
-// `seed` only picks the "Surprise me" failure; main.js passes the flight's seed.
+// `seed` only picks the "Surprise me" failure; main.js passes the flight's seed. The missions let a pair a mission flies
+// (the Condor at Ridgefield) through the builder's runway check.
 export function makeFreeFlight(o, seed = 1) {
-  return buildFreeFlight(o, { sites: SITES, seed });
+  return buildFreeFlight(o, { sites: SITES, seed, missions: SCENARIOS });
 }

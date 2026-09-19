@@ -1,5 +1,6 @@
 // Free flight: the options the menu's builder edits (saved as ctl.free) and the one function that turns them into a
-// scenario (src/missions/README.md). Pure: no DOM, no three.js scene, importable in Node (tools/test-free.mjs).
+// scenario (src/missions/README.md). Pure: no DOM, no three.js scene, importable in Node (tools/test-free.mjs, run by
+// npm test).
 //
 // The site list is passed in rather than imported: src/systems/scenarios.js imports this file (its makeFreeFlight
 // delegates here) and owns SITES, so importing it back would be a cycle.
@@ -13,6 +14,7 @@
 import { AIRCRAFT } from '../aircraft/defs.js';
 import { FAILURES, shouldTrigger } from '../systems/malfunctions.js';
 import { makeRng, clamp, FT, DEG } from '../config.js';
+import { runwayNeedAshore } from '../ui/aircraft-catalog.js';
 
 // Weather presets. Picking one sets the wind, gusts, turbulence, shear, visibility and cloud base below; the
 // Advanced drawer then fine-tunes those. rain/snow/dust/darkness/lightning go straight into the weather spec.
@@ -34,8 +36,10 @@ export const TIME_PRESETS = [
 ];
 export const timePreset = (t) => TIME_PRESETS.reduce((a, b) => (Math.abs(b.t - t) < Math.abs(a.t - t) ? b : a));
 
-// Where the flight starts, metres to the threshold (or the carrier's ramp). A bush strip always starts at 900 m and
-// high over the trees: resolveScenario() fixes that for the two original strips, and the builder caps new ones.
+// Where the flight starts, metres to the threshold (or the carrier's ramp). A bush strip always starts close in and
+// high over the trees: resolveScenario() puts every flight at the two original strips 900 m out and 100 m up
+// (FIXED_BUSH_START mirrors that here, so the failure trigger is worked out from where the flight really starts), and
+// the builder caps any other bush strip at 1,500 m.
 export const START_PRESETS = [
   { id: 'short', name: 'Short final', dist: 2000 }, { id: 'final', name: 'Final', dist: 5000 },
   { id: 'long', name: 'Long final', dist: 8000 }, { id: 'far', name: 'Far out', dist: 12000 },
@@ -48,6 +52,7 @@ export const WHEN = [
   { id: 'start', name: 'At start' }, { id: 'approach', name: 'On approach' }, { id: 'short', name: 'Short final' }, { id: 'any', name: 'Any time' },
 ];
 export const WEIGHTS = ['light', 'normal', 'heavy'];
+const FIXED_BUSH_START = { gravelbar: { dist: 900, alt: 100 }, oneway: { dist: 900, alt: 100 } };
 
 export const LIMITS = {
   windSpeed: [0, 40], gustAbove: [0, 25], turb: [0, 1], time: [6, 22.5], vis: [200, 40000], ceilingFt: [200, 10000],
@@ -61,13 +66,20 @@ export function landingHeading(site) {
   return 0;
 }
 
-// Can this airplane land at this place? { ok, reason }.
-export function siteUsable(site, def) {
+// Can this airplane land at this place? { ok, reason, tight }. The carrier needs a tailhook; a runway must be as long as
+// the airplane needs ashore (src/ui/aircraft-catalog.js runwayNeedAshore: defs.js's runwayNeed, except the Sea Hornet,
+// whose 200 m is its stop on the wires). A pair a mission flies is always allowed, marked tight when the runway is
+// short of the need (the Condor at Ridgefield, "Short & Heavy"): pass `sites` and `missions` for that.
+export function siteUsable(site, def, { sites = null, missions = null } = {}) {
   if (!site || !def) return { ok: false, reason: 'Unknown' };
   if (site.kind === 'carrier' || (!site.runways && site.carrier)) return def.hook ? { ok: true, reason: '' } : { ok: false, reason: 'Needs a tailhook' };
   const rw = site.runways && site.runways[0];
-  const need = (def.approach && def.approach.runwayNeed) || 0;
-  if (rw && rw.length < need) return { ok: false, reason: `Too short: needs ${fmtInt(need)} m` };
+  const need = runwayNeedAshore(def);
+  if (rw && rw.length < need) {
+    const flown = !!(sites && Array.isArray(missions) && missions.some((m) => m && m.aircraft === def.id && sites[m.site] === site));
+    if (flown) return { ok: true, reason: '', tight: `Tight: needs ${fmtInt(need)} m` };
+    return { ok: false, reason: `Too short: needs ${fmtInt(need)} m` };
+  }
   return { ok: true, reason: '' };
 }
 
@@ -88,7 +100,8 @@ const wrap180 = (d) => { const x = ((d % 360) + 540) % 360 - 180; return x === -
 
 // Clean a saved (or harness-written) options object: every key present, every id known, every number in range.
 // `raw` may be anything JSON.parse can return. Old saves carry an absolute `windDir`; it becomes `windRel`.
-export function validateFreeOpts(raw, { defaults, sites, aircraft = AIRCRAFT, failures = FAILURES } = {}) {
+// `missions` (SCENARIOS) lets a pair a mission flies through siteUsable() even when the runway is short of the need.
+export function validateFreeOpts(raw, { defaults, sites, aircraft = AIRCRAFT, failures = FAILURES, missions = null } = {}) {
   const r = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   const d = defaults || {};
   const o = {};
@@ -97,8 +110,9 @@ export function validateFreeOpts(raw, { defaults, sites, aircraft = AIRCRAFT, fa
   o.aircraft = acIds.includes(r.aircraft) ? r.aircraft : acIds.includes(d.aircraft) ? d.aircraft : acIds[0];
   const def = aircraft[o.aircraft];
   o.site = siteIds.includes(r.site) ? r.site : siteIds.includes(d.site) ? d.site : siteIds[0];
-  if (sites && sites[o.site] && !siteUsable(sites[o.site], def).ok) {
-    const first = [d.site, ...siteIds].find((id) => sites[id] && siteUsable(sites[id], def).ok);
+  const usable = (id) => sites[id] && siteUsable(sites[id], def, { sites, missions }).ok;
+  if (sites && sites[o.site] && !usable(o.site)) {
+    const first = [d.site, ...siteIds].find(usable);
     if (first) o.site = first;
   }
   const site = sites ? sites[o.site] : null;
@@ -150,18 +164,22 @@ function optsHash(o) {
 }
 
 // Roughly how high (ft) and how long before the threshold (s) the flight starts.
-function startProfile(site, def, dist, bush) {
+function startProfile(site, def, spawn, bush) {
   const carrier = site.kind === 'carrier' || (!site.runways && site.carrier);
   const rw = site.runways ? site.runways[0] : null;
+  const dist = spawn.dist;
   let heightM;
-  if (bush) heightM = 100 + (dist - 900) * 0.09;
+  if (bush) heightM = spawn.alt != null ? spawn.alt : 100 + (dist - 900) * 0.09;
   else if (carrier) heightM = dist * Math.tan(3.5 * DEG) + 3;
   else heightM = (dist + ((rw && rw.aimDistance) || 300)) * Math.tan(rw && rw.gsAngle ? rw.gsAngle * DEG : def.approach.glideslope);
   const secs = dist / Math.max(20, def.speeds.Vref * 0.514444);
   return { ft: heightM / FT, secs };
 }
 
-function failureTrigger(when, o, prof, useWindow) {
+// Every altitude trigger sits below the start height (at most 85% of it), so no failure the pilot asked for "on
+// approach" or "on short final" fires in the first second. "On approach" is 60% of the start height (72% on a bush
+// strip, which starts only about 330 ft up), capped at 1,500 ft; "short final" is 300 ft or half the start height.
+function failureTrigger(when, o, prof, useWindow, bush) {
   const ft = prof.ft, T = prof.secs;
   const below = (v) => Math.round(Math.max(60, Math.min(v, ft * 0.85)));
   switch (when) {
@@ -173,7 +191,7 @@ function failureTrigger(when, o, prof, useWindow) {
     case 'approach':
     default:
       if (useWindow) return { type: 'window', from: 5, to: Math.max(8, Math.round(T * 0.55)) };
-      return { type: 'alt', value: below(Math.max(350, Math.min(1500, ft * 0.6))) };
+      return { type: 'alt', value: below(Math.min(1500, ft * (bush ? 0.72 : 0.6))) };
   }
 }
 
@@ -188,16 +206,17 @@ function freeTrigger(entry, at, useWindow) {
 }
 
 // options -> scenario (src/missions/README.md). `seed` only picks the "Surprise me" failure.
-export function buildFreeFlight(opts, { sites, aircraft = AIRCRAFT, failures = FAILURES, seed = 1, defaults = null } = {}) {
-  const o = validateFreeOpts(opts, { defaults: defaults || opts, sites, aircraft, failures });
+export function buildFreeFlight(opts, { sites, aircraft = AIRCRAFT, failures = FAILURES, seed = 1, defaults = null, missions = null } = {}) {
+  const o = validateFreeOpts(opts, { defaults: defaults || opts, sites, aircraft, failures, missions });
   const site = sites[o.site], def = aircraft[o.aircraft];
   const carrier = site.kind === 'carrier' || (!site.runways && !!site.carrier);
   const bush = site.kind === 'bush';
   const w = weatherPreset(o.weather);
   const dir = (((landingHeading(site) + o.windRel) % 360) + 360) % 360;
   const spawn = { dist: o.dist, hook: carrier, flap: o.aircraft === 'condor' ? 0.75 : o.aircraft === 'skylark' ? 0.667 : 1, fixed: true };
-  if (bush) { spawn.dist = Math.min(o.dist, 1500); spawn.alt = 100 + (spawn.dist - 900) * 0.09; }
-  const prof = startProfile(site, def, spawn.dist, bush);
+  if (bush && FIXED_BUSH_START[o.site]) { spawn.dist = FIXED_BUSH_START[o.site].dist; spawn.alt = FIXED_BUSH_START[o.site].alt; }
+  else if (bush) { spawn.dist = Math.min(o.dist, 1500); spawn.alt = 100 + (spawn.dist - 900) * 0.09; }
+  const prof = startProfile(site, def, spawn, bush);
   const useWindow = windowTriggerSupported();
   let names = o.failures.slice();
   if (o.surprise) {
@@ -205,7 +224,7 @@ export function buildFreeFlight(opts, { sites, aircraft = AIRCRAFT, failures = F
     const rng = makeRng((Math.abs(Math.round(seed)) || 1) * 131 + 17);
     names = pool.length ? [pool[Math.floor(rng() * pool.length)]] : [];
   }
-  const at = failureTrigger(o.when, o, prof, useWindow);
+  const at = failureTrigger(o.when, o, prof, useWindow, bush);
   const sc = {
     id: 'free', n: 0, title: 'Free Flight', tags: ['free'],
     aircraft: o.aircraft, site: o.site, time: o.time, vis: o.vis, clouds: w.clouds,

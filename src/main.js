@@ -90,7 +90,7 @@ class Game {
     this.touchSeen = false;
     if (!saved.quality && this.touchDevice) this.settings.quality = 'medium';   // a phone starts a tier down; autoQuality() scales from there
     // a saved setup may name a site, aircraft or failure this build does not have (or be anything at all): cleaned, never trusted
-    this.freeOpts = validateFreeOpts(loadJSON('ctl.free', {}), { defaults: DEFAULT_FREE, sites: SITES, aircraft: AIRCRAFT, failures: FAILURES });
+    this.freeOpts = validateFreeOpts(loadJSON('ctl.free', {}), { defaults: DEFAULT_FREE, sites: SITES, aircraft: AIRCRAFT, failures: FAILURES, missions: SCENARIOS });
     this.best = loadJSON('ctl.best', {});
     this.pilot = pilotName.get();   // the logbook name new bests are stamped with; shared with the rest of goodmarc.com
 
@@ -310,7 +310,8 @@ class Game {
     if (this.shadowMapSize && this.shadowMapSize !== this.profile.shadowMap) sky.setShadowSize(this.shadowMapSize);
     // A mission course (towers, bridges, cables, gates: src/world/obstacles.js) is planned before the terrain is
     // built, so the forests and villages keep out of it.
-    const course = ObstacleField.plan(site, sc);
+    // Free flight's "Obstacles off" sends course: false (src/missions/free.js): no course, no trees on short final.
+    const course = sc.course === false ? null : ObstacleField.plan(site, sc);
     const terrain = new Terrain({ ...site.terrain, flats: siteFlats(site), keepOut: course ? course.keepOut : null });
     terrain.build(scene, { sun: sky.sunDir, treeScale: this.profile.treeScale });
     let airport = null, carrier = null;
@@ -318,7 +319,7 @@ class Game {
       airport = new Airport(site.runways, terrain);
       airport.build(scene, { night });
     }
-    if (site.obstacleTrees) terrain.addObstacleTrees(site.obstacleTrees);
+    if (site.obstacleTrees && sc.course !== false) terrain.addObstacleTrees(site.obstacleTrees);
     if (site.carrier) {
       carrier = new Carrier({ ...site.carrier, seaState: sc.seaState ?? site.carrier.seaState, night, x: 0, z: 0 });
       carrier.build(scene);
@@ -461,13 +462,13 @@ class Game {
 
   // The free-flight builder hands its options back here: cleaned the same way a saved setup is, then saved.
   setFreeOpts(o) {
-    this.freeOpts = validateFreeOpts(o, { defaults: DEFAULT_FREE, sites: SITES, aircraft: AIRCRAFT, failures: FAILURES });
+    this.freeOpts = validateFreeOpts(o, { defaults: DEFAULT_FREE, sites: SITES, aircraft: AIRCRAFT, failures: FAILURES, missions: SCENARIOS });
     saveJSON('ctl.free', this.freeOpts);
     return this.freeOpts;
   }
 
   startFree() {
-    this.freeOpts = validateFreeOpts(this.freeOpts, { defaults: DEFAULT_FREE, sites: SITES, aircraft: AIRCRAFT, failures: FAILURES });
+    this.freeOpts = validateFreeOpts(this.freeOpts, { defaults: DEFAULT_FREE, sites: SITES, aircraft: AIRCRAFT, failures: FAILURES, missions: SCENARIOS });
     saveJSON('ctl.free', this.freeOpts);
     // the seed only picks a "Surprise me" failure; pinned with the flight's own seed so a harness replay repeats it
     const sc = makeFreeFlight(this.freeOpts, window.CTL_WIND_SEED || Math.floor(Math.random() * 1000) + 1);

@@ -17,7 +17,7 @@ import { touchify } from '../touch.js';
 import { readBoard, pilotName } from '../systems/leaderboard.js';
 import { MISSION_GROUPS, missionOrder } from '../missions/index.js';
 import { WEATHER_PRESETS, weatherPreset, TIME_PRESETS, START_PRESETS, TURB_LEVELS, turbLevel, WHEN, WEIGHTS, LIMITS, siteUsable, failureApplies, siteHasObstacles, applyWeatherPreset, landingHeading } from '../missions/free.js';
-import { sil, aircraftInfo, difficultyOf, isClassicMission, CLASSIC_SITES, siteLine } from './aircraft-catalog.js';
+import { sil, aircraftInfo, difficultyOf, isClassicMission, CLASSIC_SITES, siteLine, RANDOM_AIRCRAFT, missionFlies } from './aircraft-catalog.js';
 
 function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 // The top three get a tint on the board, the rest nothing.
@@ -73,6 +73,13 @@ const acShort = (id) => (id === 'random' ? 'Any aircraft' : AIRCRAFT[id] ? AIRCR
 const siteName = (id) => (id === 'random' ? 'Random place' : SITES[id] ? SITES[id].name : String(id));
 const siteShort = (id) => (id === 'random' ? 'Anywhere' : SITES[id] ? SITES[id].short || SITES[id].name.replace(/\s+(Regional|Intl|International|Municipal|at sea)$/i, '') : String(id));
 const isCarrierSite = (site) => !!site && (site.kind === 'carrier' || (!site.runways && !!site.carrier));
+// Free flight's place check, with the missions passed so a pair a mission flies is offered (marked tight when short).
+const usableHere = (site, def) => siteUsable(site, def, { sites: SITES, missions: SCENARIOS });
+// Roulette's briefing: the airplanes a random-aircraft mission can draw, by name.
+const NUM_WORD = ['none', 'one', 'two', 'three', 'four', 'five', 'six'];
+const randomFleet = () => RANDOM_AIRCRAFT.filter((id) => AIRCRAFT[id]);
+const randomFleetTitle = () => `Any of ${NUM_WORD[randomFleet().length] || randomFleet().length}`;
+const randomFleetNames = () => { const n = randomFleet().map((id) => AIRCRAFT[id].short || AIRCRAFT[id].name); return n.length > 1 ? `${n.slice(0, -1).join(', ')} or ${n[n.length - 1]}` : n.join(''); };
 
 function visText(v) {
   if (v === 'random') return 'Random';
@@ -146,7 +153,8 @@ export class Menus {
     root.appendChild(this.overlay);
     this.page = 'home';
     this.selected = null;        // the mission in the missions dock (and NEXT UP once the pilot has picked one)
-    this.picked = false;         // true once the pilot chose a mission himself this session
+    this.picked = false;         // true once the pilot chose a mission himself this session (a filter moving the dock clears it)
+    this.boardSel = null;        // logbook: the mission board picked there (null = the selected mission's)
     this.cat = 'all';            // missions: the category in the rail
     this.acFilter = 'all';       // missions: the aircraft chip
     this.acSel = null;           // hangar: the highlighted airplane
@@ -413,7 +421,7 @@ export class Menus {
           <div class="door-detail"><dl class="last set">
             <div class="last-h">In use</div>${row('Graphics', s.quality || 'high')}${row('Controls', (s.controlMode || 'assist') === 'assist' ? 'Assisted' : 'Direct')}${row('Start', ({ short: 'Short final', medium: 'Medium', long: 'Long' })[s.approach] || 'Short final', 'ph-hide')}${row('Camera', s.camera || 'chase', 'ph-hide')}
           </dl></div>
-          <div class="door-foot"><h2 class="door-title">Settings</h2><p class="door-copy">Controls, graphics, sound, your logbook name.</p>${GO}</div>
+          <div class="door-foot"><h2 class="door-title">Settings</h2><p class="door-copy">Controls, graphics, sound<span class="dc-more">, your logbook name</span>.</p>${GO}</div>
         </div>
       </main>
       <footer class="foot">
@@ -428,10 +436,10 @@ export class Menus {
   /* ------------------------------------------------------------- missions */
 
   // The missions the rail and grid show, in menu order, with the aircraft chip applied. A random-aircraft
-  // mission (Roulette) belongs to every airplane.
+  // mission (Roulette) belongs to each airplane it can draw (RANDOM_AIRCRAFT: never the Sea Hornet).
   filtered() {
     const f = this.acFilter;
-    return this.order().filter((s) => f === 'all' || s.aircraft === f || s.aircraft === 'random');
+    return this.order().filter((s) => f === 'all' || missionFlies(s, f));
   }
   groupsShown(list) {
     const groups = [...MISSION_GROUPS, OTHER_GROUP];
@@ -446,9 +454,11 @@ export class Menus {
     if (this.cat !== 'all' && !groups.some((x) => x.g.id === this.cat)) this.cat = 'all';
     const shown = this.cat === 'all' ? list : list.filter((s) => groupOf(s).id === this.cat);
     // keep the dock on something the grid shows
+    // (a move the pilot did not make himself: the home screen's NEXT UP goes back to the next unflown mission)
     if (!shown.some((s) => s.id === this.selected)) {
       const next = shown.find((s) => !this.bestOf(s.id)) || shown[0];
       if (next) this.selected = next.id; else this.selectedMission();
+      this.picked = false;
     }
     const count = (l) => `${l.filter((s) => this.bestOf(s.id)).length}/${l.length}`;
     let rail = `<button class="cat all ${this.cat === 'all' ? 'on' : ''}" data-cat="all"><span class="cn">All missions</span><span class="cc">${count(list)}</span></button><hr>`;
@@ -485,8 +495,7 @@ export class Menus {
       </main>
       <div class="dock" id="dock">${this.dock(this.selectedMission())}</div>
     </div>`);
-    const sel = this.q('.card.sel');
-    if (sel) sel.scrollIntoView({ block: 'nearest' });
+    this.revealSelected();
     this.bindMissionActs();
     this.act.any = (b) => {
       const d = b.dataset;
@@ -495,6 +504,17 @@ export class Menus {
       if (d.id) this.select(d.id);
     };
   }
+  // Bring the selected card into view only when it is not already in full view. On a phone the title and the aircraft
+  // chips are sticky at the top of the grid and the cards carry a scroll margin, so they stay on screen.
+  revealSelected() {
+    const sel = this.q('.card.sel'), grid = this.q('#mgrid');
+    if (!sel || !grid) return;
+    const r = sel.getBoundingClientRect(), g = grid.getBoundingClientRect();
+    const tool = grid.querySelector('.tool');
+    const top = tool && getComputedStyle(tool).position === 'sticky' ? tool.getBoundingClientRect().bottom : g.top;
+    if (r.top >= top - 1 && r.bottom <= g.bottom + 1) return;
+    sel.scrollIntoView({ block: 'nearest' });
+  }
   bindMissionActs() {
     this.act['btn-fly'] = () => { const sc = this.selectedMission(); this.game.startScenario(sc); };
     this.act['btn-brief'] = () => this.showBriefingPage();
@@ -502,11 +522,12 @@ export class Menus {
   // Select a card without rebuilding the page (the grid keeps its scroll, the focus stays put).
   select(id) {
     const sc = scById(id); if (!sc) return;
-    this.selected = id; this.picked = true;
+    this.selected = id; this.picked = true; this.boardSel = null;
     this.qa('.card.sel').forEach((c) => { c.classList.remove('sel'); c.setAttribute('aria-pressed', 'false'); });
     const c = this.q(`.card[data-id="${CSS.escape(id)}"]`);
     if (c) { c.classList.add('sel'); c.setAttribute('aria-pressed', 'true'); }
     const dock = this.q('#dock'); if (dock) dock.innerHTML = this.dock(sc);
+    this.revealSelected();   // a card tapped half under the sticky chips on a phone comes fully into view
   }
 
   card(sc, rung) {
@@ -580,7 +601,7 @@ export class Menus {
         <h2>${esc(info.name)}</h2>
         <p>${esc(info.description)}</p>
         <dl class="extra">${[['Vref', `${info.vref} kt`], ['Weight', info.massText], ...info.facts].map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>
-      </aside>` : `<aside class="brief-ac"><div class="plane-cat">Random aircraft</div><h2>Any of the four</h2><p>The airplane, the place and the weather are drawn when you press Fly.</p></aside>`;
+      </aside>` : `<aside class="brief-ac"><div class="plane-cat">Random aircraft</div><h2>${esc(randomFleetTitle())}</h2><p>${esc(randomFleetNames())}. The airplane, the place and the weather are drawn when you press Fly.</p></aside>`;
     this.show(`<div class="app app-brief">${this.bar('challenges')}
       <main class="brief">
         <div class="brief-main">
@@ -614,7 +635,7 @@ export class Menus {
     const stat = (l, w, v) => `<div class="stat"><span class="sl">${l}</span><span class="sb"><b style="width:${pct(w)}"></b></span><span class="sv">${v}</span></div>`;
     const cards = AIRCRAFT_LIST.map((def) => {
       const a = aircraftInfo(def);
-      const mine = this.order().filter((s) => s.aircraft === a.id || s.aircraft === 'random');
+      const mine = this.order().filter((s) => missionFlies(s, a.id));
       const fl = mine.filter((s) => this.bestOf(s.id));
       const best = Math.max(0, ...fl.map((s) => this.bestOf(s.id).points || 0));
       const work = `<div class="stat"><span class="sl">Workload</span><span class="wp">${[1, 2, 3, 4, 5].map((i) => `<i class="${i <= a.work ? 'f' : ''}"></i>`).join('')}</span><span class="sv">${a.work} / 5</span></div>`;
@@ -648,7 +669,7 @@ export class Menus {
     this.act.any = (b) => {
       const d = b.dataset;
       if (d.acsel) { this.acSel = d.acsel; this.showAircraft(); return; }
-      if (d.acm) { this.acSel = d.acm; this.acFilter = d.acm; this.cat = 'all'; const l = this.filtered(); const n = l.find((s) => !this.bestOf(s.id)) || l[0]; if (n) this.selected = n.id; this.showMissions(); return; }
+      if (d.acm) { this.acSel = d.acm; this.acFilter = d.acm; this.cat = 'all'; const l = this.filtered(); const n = l.find((s) => !this.bestOf(s.id)) || l[0]; if (n) { this.selected = n.id; this.picked = false; } this.showMissions(); return; }
       if (d.acfree) { this.acSel = d.acfree; this.game.setFreeOpts({ ...this.game.freeOpts, aircraft: d.acfree }); this.showFree('place'); }
     };
   }
@@ -660,7 +681,9 @@ export class Menus {
     const rel = Math.round(o.windRel || 0);
     const side = Math.abs(rel) < 3 ? '' : `${Math.abs(rel)}°${rel < 0 ? 'L' : 'R'} `;
     const tp = TIME_PRESETS.find((p) => Math.abs(p.t - o.time) < 0.26);
-    const start = site && site.kind === 'bush' ? 'Bush, 900 m' : (START_PRESETS.find((p) => p.dist === o.dist) || { name: `${(o.dist / 1000).toFixed(1)} km` }).name;
+    // a bush strip starts close in: the two original strips 900 m out (resolveScenario), any other at most 1,500 m
+    const bushStart = () => (CLASSIC_SITES.includes(o.site) ? 'Bush, 900 m' : `Bush, ${fmtInt(Math.min(o.dist, 1500))} m`);
+    const start = site && site.kind === 'bush' ? bushStart() : (START_PRESETS.find((p) => p.dist === o.dist) || { name: `${(o.dist / 1000).toFixed(1)} km` }).name;
     return {
       aircraft: def ? def.name : o.aircraft,
       place: site ? site.name : o.site,
@@ -723,13 +746,14 @@ export class Menus {
       case 'place': {
         const ids = Object.keys(SITES);
         const tiles = ids.map((id) => {
-          const s = SITES[id], u = siteUsable(s, def), fresh = !CLASSIC_SITES.includes(id);
-          return `<button class="tile ${o.site === id ? 'on' : ''} ${u.ok ? '' : 'off'}" data-set="site" data-v="${attr(id)}" aria-pressed="${o.site === id}" ${u.ok ? '' : `aria-disabled="true" title="${attr(u.reason)}"`}>${fresh ? '<span class="new">NEW</span>' : ''}<span class="tn">${esc(s.name)}</span><span class="tk">${esc(siteLine(s))}</span>${u.ok ? '' : `<span class="why">${esc(u.reason)}</span>`}</button>`;
+          const s = SITES[id], u = usableHere(s, def), fresh = !CLASSIC_SITES.includes(id);
+          const note = u.ok ? (u.tight ? `<span class="why tight">${esc(u.tight)}</span>` : '') : `<span class="why">${esc(u.reason)}</span>`;
+          return `<button class="tile ${o.site === id ? 'on' : ''} ${u.ok ? '' : 'off'}" data-set="site" data-v="${attr(id)}" aria-pressed="${o.site === id}" ${u.ok ? '' : `aria-disabled="true" title="${attr(u.reason)}"`}>${fresh ? '<span class="new">NEW</span>' : ''}<span class="tn">${esc(s.name)}</span><span class="tk">${esc(siteLine(s))}</span>${note}</button>`;
         }).join('');
         const bush = site && site.kind === 'bush';
         const starts = START_PRESETS.map((p) => ({ id: String(p.dist), name: p.name, small: `${p.dist / 1000} km` }));
         const hasObs = siteHasObstacles(site);
-        const usable = ids.filter((id) => siteUsable(SITES[id], def).ok).length;
+        const usable = ids.filter((id) => usableHere(SITES[id], def).ok).length;
         return `<div class="blk">${head('Place', `${ids.length} places. The ${esc(def.short || def.name)} can use ${usable}.`)}<div class="tiles t6">${tiles}</div></div>
           <div class="two">
             <div class="blk"><div class="blk-h"><h3>Start</h3>${bush ? '<span>Bush strips start close in, over the trees</span>' : ''}</div>${seg('dist', starts, bush ? '' : String(o.dist), bush)}</div>
@@ -912,7 +936,7 @@ export class Menus {
   showLogbook(back, backLabel) {
     this.page = 'logbook';
     this.onBack = back || (() => this.showHome());
-    const sc = this.selectedMission();
+    const sc = scById(this.boardSel) || this.selectedMission();
     const pilot = this.game.pilot || '';
     const best = this.game.best || {};
     const flown = SCENARIOS.filter((s) => best[s.id]).length;
@@ -939,7 +963,8 @@ export class Menus {
       this.showLogbook(back, backLabel);
     };
     this.onInputs = (e, done) => {
-      if (done && e.target.id === 'lb-mission') { this.selected = e.target.value; this.fillBoard('#board-one', e.target.value); }
+      // a board to read, not a mission to fly: the missions page and NEXT UP keep their own selection
+      if (done && e.target.id === 'lb-mission') { this.boardSel = e.target.value; this.fillBoard('#board-one', e.target.value); }
     };
     const inp = this.q('#lb-pilot');
     if (inp) inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); this.act['btn-lb-pilot'](); } });

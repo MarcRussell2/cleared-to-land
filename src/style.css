@@ -125,6 +125,8 @@ button { font: inherit; }
 .overlay.pg-home { background: linear-gradient(180deg, rgba(8,12,18,0.72) 0%, rgba(8,12,18,0.22) 22%, rgba(8,12,18,0.10) 38%, rgba(8,12,18,0.55) 62%, rgba(8,12,18,0.92) 100%); }
 .overlay.pg-debrief { background: linear-gradient(90deg, rgba(8,12,18,0.95) 0%, rgba(8,12,18,0.86) 50%, rgba(8,12,18,0.55) 100%); }
 .overlay.pg-pause { background: radial-gradient(ellipse at center, rgba(6,9,13,0.50) 0%, rgba(6,9,13,0.80) 100%); }
+/* settings / controls / logbook opened from the pause: the frozen flight stays behind, but the HUD must not show through the text */
+.overlay.pg-over { background: rgba(8,12,18,0.95); }
 :where(.overlay) :where(button) { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; cursor: pointer; text-align: inherit; }
 .overlay :focus { outline: none; }
 .overlay :focus-visible { outline: 2px solid var(--hud); outline-offset: 2px; }
@@ -262,6 +264,9 @@ button { font: inherit; }
 .overlay .foot b { color: var(--muted); font-weight: 400; }
 .overlay .foot-pilot { letter-spacing: inherit; text-transform: inherit; padding: 6px 0; }
 .overlay .foot-pilot:hover b { color: var(--text); }
+/* the footer's pilot link on a touch screen: its hit area fills the footer strip (at least 40 px on a phone held sideways),
+   without reaching into the door above (the phone strip is set after the phone layouts below) */
+@media (pointer: coarse) { .overlay .foot-pilot { position: relative; } .overlay .foot-pilot::after { content: ''; position: absolute; inset: -8px -12px -16px; } }
 
 /* ================================================================== the inner pages */
 .overlay .app { position: absolute; inset: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
@@ -527,6 +532,7 @@ button { font: inherit; }
 .overlay .tile .new { position: absolute; right: 10px; top: 10px; }
 .overlay .tile .new + .tn { padding-right: 40px; }
 .overlay .tile .why { margin-top: auto; font: 400 10.5px/1.25 var(--mono); letter-spacing: 0.08em; color: var(--warn); text-transform: uppercase; }
+.overlay .tile .why.tight { color: var(--amber); }
 .overlay .tile.off { cursor: not-allowed; background: rgba(12,17,24,0.55); }
 .overlay .tile.off .tn, .overlay .tile.off .tk { opacity: 0.45; }
 .overlay .tile.off:hover { border-color: var(--line); }
@@ -747,6 +753,9 @@ button { font: inherit; }
   .overlay .tool h1 { font-size: 26px; column-gap: 12px; }
   .overlay .tool .sub { font-size: 9.5px; letter-spacing: 0.12em; }
   .overlay .tool .blurb { display: none; }
+  .overlay .mgrid { padding-top: 0; }
+  .overlay .tool { position: sticky; top: 0; z-index: 3; margin: 0 calc(-1 * var(--sr)) 0 -14px; padding: 10px var(--sr) 8px 14px; background: rgba(10,14,20,0.98); border-bottom: 1px solid var(--line); }
+  .overlay .card { scroll-margin-top: 64px; }
   .overlay .chip { height: 36px; padding: 0 8px 0 6px; gap: 4px; font-size: 13px; letter-spacing: 0.06em; }
   .overlay .chip .lbl { display: none; }
   .overlay .chip.all .lbl { display: inline; }
@@ -917,9 +926,11 @@ button { font: inherit; }
   .overlay .door { padding: 10px 11px 12px; }
   .overlay .door-set { padding-left: 9px; padding-right: 9px; }
   .overlay .door-copy { font-size: 11.5px; }
-  .overlay .door-set .door-copy { display: none; }
-  .overlay .door-set .door-go { display: none; }   /* the whole door is the button; the title needs the room */
-  .overlay .door-set .door-foot { grid-template-columns: minmax(0, 1fr); grid-template-areas: "t" "c"; }
+  .overlay .door-set .door-copy { font-size: 10.5px; line-height: 1.2; margin-top: 5px; }
+  .overlay .door-set .door-copy .dc-more { display: none; }   /* "Controls, graphics, sound." */
+  .overlay .door-set .door-go { width: 26px; height: 26px; }
+  .overlay .door-set .door-go svg { width: 12px; height: 12px; }
+  .overlay .door-set .door-foot { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "t t" "c g"; column-gap: 4px; }
   .overlay .door-set .door-title { font-size: min(24px, 21cqw); }
   .overlay .door-go { width: 34px; height: 34px; }
   .overlay .seg button { font-size: 12.5px; letter-spacing: 0.02em; }   /* "On approach" on one line */
@@ -932,6 +943,7 @@ button { font: inherit; }
   .overlay .last div:not(.last-h) { grid-template-columns: 52px minmax(0, 1fr); }
   .overlay .last dd { font-size: 11px; }
   .overlay .brand.sm .bt { display: none; }
+  .overlay .brand.static .bt { display: inline; }   /* the debrief's name is not a back button: it has no chevron to stand for it */
   .overlay .path { padding: 0 9px; font-size: 14px; letter-spacing: 0.08em; }
   .overlay .bar .quiet .tab { padding: 12px 6px; font-size: 9.5px; letter-spacing: 0.08em; }
   .overlay .mis { grid-template-columns: 160px minmax(0, 1fr); }
@@ -961,6 +973,13 @@ button { font: inherit; }
   .overlay .ready dl { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .overlay .ready .btn.fly { height: 56px; font-size: 26px; }
   .overlay .deb { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); }
+}
+
+/* a phone held sideways: the footer strip grows to 40 px so the pilot link's hit area (above) can fill it */
+@media (pointer: coarse) and (max-height: 500px) {
+  .overlay .home-wrap { padding-bottom: max(13px, env(safe-area-inset-bottom)); }
+  .overlay .foot { padding-top: 10px; }
+  .overlay .foot-pilot::after { inset: -10px -12px -13px; }
 }
 
 /* ================================================================== portrait and narrow windows */
