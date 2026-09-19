@@ -128,6 +128,11 @@ button { font: inherit; }
 :where(.overlay) :where(button) { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; cursor: pointer; text-align: inherit; }
 .overlay :focus { outline: none; }
 .overlay :focus-visible { outline: 2px solid var(--hud); outline-offset: 2px; }
+/* gamepad navigation (menus.js pollPad): the browser does not count a pad as a keyboard, so while one is in use the ring is drawn on :focus */
+.overlay.padnav :focus { outline: 2px solid var(--hud); outline-offset: 2px; }
+.overlay.padnav .door-link:focus { outline: none; }
+.overlay.padnav .door:has(.door-link:focus) { outline: 2px solid var(--hud); outline-offset: 3px; border-color: rgba(159,247,200,0.45); }
+.overlay.padnav .path:focus, .overlay.padnav .seg button:focus, .overlay.padnav .adv summary:focus, .overlay.padnav .plane-hit:focus, .overlay.padnav .cat:focus { outline-offset: -3px; }
 .overlay button:disabled { cursor: default; }
 .overlay .new { font: 400 10px/1 var(--mono); letter-spacing: 0.16em; color: #1a1305; background: var(--amber); padding: 3px 5px 2px; border-radius: 2px; text-transform: uppercase; white-space: nowrap; }
 .overlay .eyebrow { font: 400 12px/1.3 var(--mono); letter-spacing: 0.24em; color: var(--hud); text-transform: uppercase; }

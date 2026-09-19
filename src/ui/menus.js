@@ -161,13 +161,16 @@ export class Menus {
     this.overlay.addEventListener('input', (e) => this.onInputs && this.onInputs(e, false));
     this.overlay.addEventListener('change', (e) => this.onInputs && this.onInputs(e, true));
     window.addEventListener('keydown', (e) => this.onKey(e));
-    window.addEventListener('pointerdown', () => { this.kb = false; }, { capture: true, passive: true });
+    window.addEventListener('pointerdown', () => { this.kb = false; this.overlay.classList.remove('padnav'); }, { capture: true, passive: true });
+    this.padPrev = null;         // gamepad: the buttons held at the last poll (null = the menu just appeared)
+    this.padDir = '';            // gamepad: the direction held, for auto-repeat
+    this.padNext = 0;
   }
 
   show(html, look = 'inner') {
     const key = this.kb ? focusKey(document.activeElement, this.overlay) : null;
     this.act = {}; this.onInputs = null;
-    this.overlay.className = 'overlay pg-' + look;
+    this.overlay.className = 'overlay pg-' + look + (this.overlay.classList.contains('padnav') ? ' padnav' : '');
     this.overlay.innerHTML = html;
     this.game.input.releaseMouse();
     if (this.kb) {
@@ -175,7 +178,7 @@ export class Menus {
       if (el && el.focus) el.focus({ preventScroll: false });
     }
   }
-  hide() { this.overlay.classList.add('hidden'); this.overlay.innerHTML = ''; this.page = null; }
+  hide() { this.overlay.classList.add('hidden'); this.overlay.innerHTML = ''; this.page = null; this.padPrev = null; }
   get visible() { return !this.overlay.classList.contains('hidden'); }
   q(sel) { return this.overlay.querySelector(sel); }
   qa(sel) { return [...this.overlay.querySelectorAll(sel)]; }
@@ -239,18 +242,76 @@ export class Menus {
     if (!all.length) return;
     const cur = this.overlay.contains(document.activeElement) ? document.activeElement : null;
     if (!cur) { (this.q('[data-autofocus]') || all[0]).focus(); return; }
+    // Measured edge to edge, so a wide button (Resume) leads to the row right under it and the leftmost door does not
+    // wander down to the footer; an element inside another (FLY inside the Missions door) is measured centre to centre.
     const a = cur.getBoundingClientRect(), ax = a.left + a.width / 2, ay = a.top + a.height / 2;
+    const inside = (p, q) => p.left >= q.left - 1 && p.right <= q.right + 1 && p.top >= q.top - 1 && p.bottom <= q.bottom + 1;
     let best = null, bestScore = Infinity;
     for (const el of all) {
       if (el === cur) continue;
       const r = el.getBoundingClientRect(), bx = r.left + r.width / 2, by = r.top + r.height / 2;
-      const along = (bx - ax) * dx + (by - ay) * dy;
-      if (along <= 4) continue;
-      const across = Math.abs((bx - ax) * dy) + Math.abs((by - ay) * dx);
-      const score = along + across * 2.2;
+      let along, across;
+      if (inside(r, a) || inside(a, r)) {
+        along = (bx - ax) * dx + (by - ay) * dy;
+        if (along <= 4) continue;
+        across = Math.abs((bx - ax) * dy) + Math.abs((by - ay) * dx);
+      } else {
+        along = dx > 0 ? r.left - a.right : dx < 0 ? a.left - r.right : dy > 0 ? r.top - a.bottom : a.top - r.bottom;
+        if (along < -4) continue;
+        across = dx ? Math.max(0, Math.max(a.top, r.top) - Math.min(a.bottom, r.bottom)) : Math.max(0, Math.max(a.left, r.left) - Math.min(a.right, r.right));
+      }
+      const score = Math.max(0, along) + across * 2 + (Math.abs((bx - ax) * dy) + Math.abs((by - ay) * dx)) * 0.1;
       if (score < bestScore) { bestScore = score; best = el; }
     }
     if (best) { best.focus(); best.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
+  }
+
+  // The gamepad, polled by the game loop while a menu is up (never in flight): D-pad or left stick moves the focus
+  // (and nudges a focused slider or the wind dial), A presses, B goes back, Start resumes a paused flight. A button
+  // already held when the menu appeared (the Start that paused, the A that ended a flight) does nothing until it is
+  // released. The flight's own edge detector (Input._pollPad) is handed each snapshot, so the A that pressed FLY is
+  // not also read as "gear" on the flight's first frame.
+  pollPad() {
+    const pads = typeof navigator !== 'undefined' && navigator.getGamepads ? navigator.getGamepads() : [];
+    let gp = null;
+    for (const p of pads) if (p && p.connected) { gp = p; break; }
+    if (!gp) { this.padPrev = null; return; }
+    const now = [...gp.buttons].map((b) => !!(b && b.pressed));
+    const prev = this.padPrev;
+    this.padPrev = now;
+    this.game.input._padButtons = now;
+    if (!prev) return;
+    const edge = (i) => now[i] && !prev[i];
+    const ax = gp.axes || [];
+    const sx = Math.abs(ax[0] || 0) > 0.6 ? Math.sign(ax[0]) : 0, sy = Math.abs(ax[1] || 0) > 0.6 ? Math.sign(ax[1]) : 0;
+    const dir = now[12] ? [0, -1] : now[13] ? [0, 1] : now[14] ? [-1, 0] : now[15] ? [1, 0] : sy ? [0, sy] : sx ? [sx, 0] : null;
+    const t = performance.now(), key = dir ? dir.join() : '';
+    if (key !== this.padDir) { this.padDir = key; this.padNext = t + 380; if (dir) this.padMove(dir); }
+    else if (dir && t >= this.padNext) { this.padNext = t + 140; this.padMove(dir); }
+    // A press may start a flight or rebuild the world: never from inside the game loop (the loop would render the new
+    // world in this same frame, before its sky has patched the materials), so it runs as its own task, like a click.
+    const act = edge(0) ? () => this.padPress() : edge(1) && this.onBack ? () => this.onBack() : edge(9) && this.page === 'pause' ? () => this.game.resume() : null;
+    if (act) setTimeout(act, 0);
+  }
+  padMove(dir) {
+    this.kb = true; this.overlay.classList.add('padnav');
+    const el = document.activeElement;
+    if (el && this.overlay.contains(el) && dir[1] === 0) {
+      if (el.matches('input[type=range]:not([disabled])')) {
+        el.value = String(+el.value + dir[0] * (+el.step || 1));
+        el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true }));
+        return;
+      }
+      if (el.matches('[data-arrows]')) { el.dispatchEvent(new KeyboardEvent('keydown', { key: dir[0] < 0 ? 'ArrowLeft' : 'ArrowRight', bubbles: true })); return; }
+    }
+    this.moveFocus(dir);
+  }
+  padPress() {
+    this.kb = true; this.overlay.classList.add('padnav');
+    const el = document.activeElement;
+    if (!el || el === document.body || !this.overlay.contains(el)) { const f = this.q('[data-autofocus]') || this.q('button:not([disabled])'); if (f) f.focus(); return; }
+    if (el.tagName === 'SELECT') { el.selectedIndex = (el.selectedIndex + 1) % el.options.length; el.dispatchEvent(new Event('change', { bubbles: true })); return; }
+    if (el.matches('button, summary, input[type=checkbox]')) el.click();
   }
 
   // The header of every page behind the doors: back to the doors, the three paths, the quiet links.

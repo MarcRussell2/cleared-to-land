@@ -639,6 +639,7 @@ class Game {
     else if (this.state === 'debrief' && this.ac) this.frameBackground(dt);
     else if (this.state === 'menu' && this.world) { this.world.sky.update(this.camera.position, dt); this.world.terrain.water?.tick(dt); this.world.airport?.update(dt, this.camera.position, this.wind, this.t); this.t += dt; }
     else if (this.state === 'paused') { /* frozen */ }
+    if (this.state !== 'flying' && this.menus.visible) this.menus.pollPad();   // the gamepad works the menu (never in flight)
     this.touch.update();
     if (this.state === 'menu' && (this.frameNo & 1)) return;   // the backdrop behind the menu at half rate: nobody is flying it
     this.render();
