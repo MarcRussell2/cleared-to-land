@@ -8,7 +8,7 @@
 // It runs in plain Node, so it can only import the modules and inspect them — no
 // canvas, no WebGL. Anything that needs a real frame is checked by the look sheet
 // in the website repo (tools/ctl-shots/looksheet.mjs).
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -81,7 +81,7 @@ for (const n of ['groundDetail', 'runwaySurface', 'carrierDeck']) isFn(textures,
 
 // --- terrain-look.js ------------------------------------------------------------
 const terrainLook = await import('../src/art/terrain-look.js');
-for (const n of ['groundColor', 'buildGround', 'buildForest', 'buildRocks', 'buildRoad', 'buildVillage', 'buildObstacleTrees']) {
+for (const n of ['groundColor', 'buildGround', 'buildForest', 'buildRocks', 'buildRoad', 'buildVillage', 'buildObstacleTrees', 'buildCourse']) {
   isFn(terrainLook, n, 'terrain-look.js');
 }
 ok(terrainLook.OBSTACLE_TREE && typeof terrainLook.OBSTACLE_TREE.radius === 'number' && typeof terrainLook.OBSTACLE_TREE.height === 'number',
@@ -253,7 +253,10 @@ for (const f of ['terrain-look.js', 'airport-look.js', 'carrier-look.js']) {
   // House rules for every module that draws the world.
   const WORLD_FILES = ['sky.js', 'world-atmosphere.js', 'world-water.js', 'world-ground.js', 'world-vegetation.js', 'world-props.js',
     'terrain-look.js', 'airport-look.js', 'carrier-look.js', 'textures.js', 'lights.js', 'palette.js', 'quality.js',
-    'weather-look.js', 'world-biomes.js'];   // the storms and the new maps (2026-09-17)
+    'weather-look.js', 'world-biomes.js',   // the storms and the new maps (2026-09-17)
+    'city-look.js',
+    // the city's helper modules, whatever the art department adds (src/art/city-*.js, see docs/briefs/city/)
+    ...readdirSync(join(ROOT, 'src', 'art')).filter((f) => /^city-.+\.js$/.test(f) && f !== 'city-look.js')];
   for (const f of WORLD_FILES) {
     const code = src(`art/${f}`);
     ok(!FORBIDDEN.test(code), `art/${f} must not import from physics/, systems/ or ui/`);
@@ -270,7 +273,7 @@ for (const f of ['terrain-look.js', 'airport-look.js', 'carrier-look.js']) {
     }
   }
   // The world must never reach the art bench through anything but the two doors.
-  for (const f of ['world/terrain.js', 'world/airport.js', 'world/carrier.js']) {
+  for (const f of ['world/terrain.js', 'world/airport.js', 'world/carrier.js', 'world/obstacles.js']) {
     const code = src(f);
     ok(!/from\s+'\.\.\/art\/world-/.test(code), `${f} must import the look through terrain-look.js / sky.js, not the world-* modules directly`);
   }

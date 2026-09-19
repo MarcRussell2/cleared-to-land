@@ -64,7 +64,7 @@ has `rwToWorld(site, u, v, y)`.
   spawn: { u: -6500, v: 1200, hdg: -40, gamma: -3, alt: 500 },   // u/v/hdg/gamma are new; hdg is relative to the runway heading
   failures: [ { name: 'stuckThrottle', at: { type: 'alt', value: 900 }, arg: 0.7, silent: false } ],
   scoring: { type: 'runway', mission: { gates: 'required' }, belly: true },
-  hint: (ctx) => ctx.ra > 300 ? 'Line up on the gap before the towers.' : null,   // ctx = { ac, ra, d, t, mission }
+  hint: (ctx) => ctx.ra > 300 ? 'Line up on the gap before the towers.' : null,   // ctx = { ac, ra, d, t, u, v, mission }
 }
 ```
 
@@ -97,7 +97,7 @@ tools/test-maps.mjs checks the maps missions against this formula.
 - `new Weather(spec, { seed, wind, world, scenario, hud, audio, rig })`; `update(dt, t, ac)`; `addWind(p, t, out)`
   adds m/s to `out` (O(1), early-out; it runs per particle); `state` = `{ rain, snow, dust, darkness, ceiling, flash, ... }`.
 - `new WeatherLook(scene, { spec, sky, quality, touch })`; `update(dt, state, { camera, t, sky, renderer, ac })`.
-- `ObstacleField.plan(site, sc)` returns a resolved course (world-space volumes, gates, `keepOut` rectangles for the
+- `ObstacleField.plan(site, sc)` returns a resolved course (world-space volumes, gates, `keepOut` circles for the
   terrain's clutter) or null; `new ObstacleField(course, { terrain, site })`; `build(scene, { night, quality })`;
   `reset(ac)`; `hit(ac)` returns the name of what the airframe hit since the last call, or null; `update(dt, t, pos)`.
 - `new FailureRuntime(ac, sc, { seed, hud, audio, rig, input, world, touch, game })`; `trigger(spec)`;
@@ -161,3 +161,220 @@ Places the chosen aircraft cannot use are shown disabled with the reason: a runw
 ashore (`runwayNeedAshore()` in `src/ui/aircraft-catalog.js`: `def.approach.runwayNeed`, except the Sea Hornet's, which
 is its 200 m on the wires, so 1,500 m ashore), or the carrier without a hook. A pair a mission flies is always offered
 (the Condor at Ridgefield's 1,600 m, "Short & Heavy"), marked "Tight".
+
+## The obstacle engine (for course builders: the city ladder is built on it)
+
+*Written 2026-09-18 with the three "In the way" missions (`src/missions/obstacles.js`: power-lines, the-notch,
+harbor-cranes), which are its worked examples. The full reference for every kind is the header of
+`src/world/obstacles.js`; this is the map.*
+
+### The pieces
+
+| Piece | File | What it does |
+|---|---|---|
+| Course resolution, collision, gates | `src/world/obstacles.js` | `plan()` turns `site.course` + `sc.course` (runway frame) into world volumes; `hit(ac)` after every physics step |
+| The airframes' probe spheres | `src/aircraft/hulls.js` | `HULLS[id]`: nose, tail, fins, wing and tail surfaces, nacelles, flaps (they move with the flap), wheels while down |
+| The look | `src/art/city-look.js` (through `terrain-look.js`) | draws every volume from its own numbers, instanced: 3-5 draws a course, plus the night lights |
+| Gates, debrief lines, hints, HUD status | `src/systems/mission.js` | wraps `scoreLanding`'s result; required gates cap the points, bonus gates add |
+| The route pilot | `src/systems/routepilot.js` | flies `sc.route`, then hands over to the stock Autoland on the final |
+| The proof | `tools/fly-mission.mjs`, `tools/test-obstacles.mjs` | fly a mission headless (Node or the real page), stills, mid-flight compiles; the suite |
+
+A scenario with no `course` (site or scenario) never constructs an `ObstacleField`: the original twenty are
+untouched, and `tools/test-obstacles.mjs` checks that none of them builds one.
+
+### A course
+
+```js
+course: {
+  obstacles: [ { kind: 'tower', u: -2400, v: 60, w: 30, d: 30, h: 180, rot: 0, name: 'the Meridian Tower' }, ... ],
+  gates: [ { u: -3000, v: 0, y: 120, w: 60, h: 40, name: 'Gate 1' },                        // required (default)
+           { u: -1500, v: 0, y: 60, w: 40, h: 24, name: 'the arch', required: false, bonus: 10 } ],
+  clear: [ { u: -120, v: -10, r: 40 } ],   // extra circles kept free of decorative forest and villages
+}
+```
+
+- **Kinds**: `box`, `tower`, `block`, `cyl`, `mast` (optional guy wires), `cable` (one sagging wire), `powerline`
+  (`hv` lattice pylons or `pole`s with their wires, marker balls), `bridge` (a deck you can fly under, optional
+  suspension towers and cables), `crane` (`sts` ship-to-shore with a boom angle, or a `tower` crane), `ship`
+  (`container` or `tall`), `quay`, `containers` (a yard), `tree` and `treeWall` (the bush strips' spruce, with a
+  `gap` notch). Parameters: the header of `src/world/obstacles.js`.
+- **Heights**: `h` is above the local ground (or the water for ships and quays); `y`, `y0`, `y1`, `top` and `base`
+  are above the threshold elevation, **except a quay's `top`, which is above the water**, and `deck`, which sets
+  any compound's base that far above the water (the harbor's `quay top: 4` and its cranes' `base: -4` are the same
+  height only because Harbor City's water is 8 m below its threshold). A route's `alt` is the **CG's** height above
+  the threshold elevation. The ground under an approach is rarely at the threshold's height (Moose Creek's notch
+  stands 6 m above the bar): quote heights in a description only after the suite prints them.
+- **Names** read "Hit " + name in the debrief: give them their article (`'the lowered crane boom'`, `'a pylon'`).
+- **A new kind** is one function in `BUILD` using the `Placer` (`box`, `beam`, `cyl`, `cap`, `wire`, `light`,
+  `keep`); the look draws whatever volumes it makes, by their `look` (`building`, `plain`, `hull`, `container`,
+  `steel`, `wire`, `marker`, `tree`, `trunk`, `truss`, `concrete`, `white`, `wood`, `insulator`), and the suite's
+  "drawn = collides" check covers it with no new test code.
+- **Gates** are markers (drawn, never solid), **flown in array order** (`ObstacleField.gatesStep`):
+  - **passed** when the CG crosses the plane in the gate's direction inside the frame - also a gate already missed
+    (a go-around mends a miss). One gate per crossing, the first in order not yet passed, so two gates on the same
+    spot (an arch flown twice) take two passes. Gates before it that are still pending were skipped: missed now.
+  - **missed** when the CG crosses the plane in its direction outside the frame but within `max(3 x w, 150 m)` of
+    it - and only when the gate is **due** (every required gate before it passed or missed). A later gate's plane
+    is ignored until then, so a circuit whose upwind leg crosses the final gate's plane does not miss it. Bonus
+    gates never hold the sequence up.
+  - Give the gates in the order they are flown, and never route an earlier leg through a later gate in that gate's
+    direction (it would be passed early and the gates between marked skipped).
+  A required gate missed or never reached caps the landing at `MISSION_CAP` (30) with the grade `MISSED GATE`; a
+  bonus gate adds its points; the total is clamped to 100. The HUD status line reads `Gates 1/3 · the harbor exit
+  1.2 km` (the next pending gate). Name a gate so "Through " + name reads well (`'the gap under the boom'`).
+- **Near misses**: a pass within 5 m of an obstacle (a prim's `group`: one pylon, one crane, one tree) gets an
+  in-flight callout ("3.2 m") once the airframe is past it, and the debrief quotes the closest pass under 15 m
+  ("Closest shave"), not after a crash. The clearance is taken at each frame's pose (the hit test is swept, this
+  is not): within a metre at 60 fps; at the harness's 25 fps and 150 kt, within about 1.5 m, never closer than true.
+- **Hints**: `sc.hint(ctx)` is not asked while the stall warning sounds above the flare zone: the game's own stall
+  hint shows instead.
+- **A site of your own** (`OBSTACLES_SITES`, `CITY_SITES`): keep what only the mission is about in the mission's
+  `course`, not the site's, so free flight, Autoland and the look and perf tools at that site meet nothing they
+  cannot fly; mark a site that exists only for a mission `missionOnly: true` (the new home menu's free-flight
+  picker leaves it out; Moose Creek Notch is one).
+
+### Collision: what it is and is not
+
+`main.js` calls `hit(ac)` right after `ac.step()`. Every probe sphere of the airframe is swept from the previous
+frame's pose to this one against the volumes near the path (a 48 m grid, then per-cluster bounds), so nothing
+tunnels even at 250 kt with the 0.1 s frame clamp: a 12 cm cable is caught, and a 0.6 m mast cannot slip between
+two probes on the Condor's wing (the suite proves both). A hit calls the aircraft's public `crash('Hit ' + name)`.
+
+The course is **not** in the physics ground query: radio altitude, ground effect, the flare law, Autoland's
+flare, the callouts and altitude-triggered failures all still read the terrain, even under a crane boom or over a
+rooftop, and nobody can land on a roof. The chase camera is not obstacle-aware either: it can pass through a wall
+behind the airplane in a tight street (not a problem in the three missions; `src/camera.js` is shared).
+
+Cost: `hit()` is 1-3 microseconds per frame on average on the dev i7 and 190 at worst (the Condor under the
+harbor's boom); allow about three times that on a phone.
+
+### The route pilot
+
+`route: [{ u, v, alt, kt?, over?, flap?, gear?, bank? }]` - waypoints in the runway frame; heights flown as
+straight lines between them, with a look-ahead so a change of slope is flown as a curve; `over: true` flies over
+the point (a gate, a notch) instead of cutting the corner; `kt` is the indicated speed on the leg TO the point
+(default Vref + 6/4/12/10 kt for the Skylark/Trailblazer/Condor/Hornet); `bank` raises the leg's bank limit
+(default 30/32/25/30 degrees). After the last waypoint it joins the extended centreline and Autoland's own glide
+path (3 degrees, 5 for the Trailblazer) and hands over once lined up, on the path, on speed and wings level for
+3 s, or at the latest six seconds before the aim point. `game.setAutopilot(true)` uses it whenever the scenario
+has a route. At the start of a flight it flies the whole route (a first leg may head away from the runway: a
+downwind, a teardrop); switched on mid-flight it resumes at the leg the airplane is on, by progress along the
+route and the airplane's track, not by `u`.
+
+**The handover decides the landing.** Autoland (physics-owned, not edited, and nothing inside it is written) holds
+the pitch it is handed and flies a proportional pitch loop, so the trim it inherits sets how the flare goes. The
+Condor is handed the trim a stock approach starts with (Vref on the glide path, flaps 30), blended in during the
+join: Harbor Cranes over ten seeds landed at 383-768 fpm (median 535) with the route's own trim and 189-679
+(median 374) with the approach trim, against 283-529 (median 424) for a stock straight-in Autoland in the same
+wind. The Skylark and the Trailblazer keep the spawn's trim (the approach trim made the Skylark land harder and the
+Trailblazer float 150-200 m into Moose Creek's 340 m bar). The Condor still wants a straight final of 2 km or more
+after the last obstacle for its best landings.
+
+What the suite proves it flies: the three missions on two seeds each; and, over a tower, a mast or a tree line
+standing on the straight-in path, a descent of 7-10 degrees onto the final in the Condor (a 150 m tower, 7.5
+degrees at 155 kt), the Skylark and the Trailblazer.
+
+### Proving a mission
+
+- `node tools/fly-mission.mjs <id> --node` - the flight in plain Node (real physics, terrain, field, runtime,
+  pilots; no renderer). Seconds. `--seed N`, `--route JSON` (a deliberately bad line: prove the obstacle is real),
+  `--pilot autoland` (straight in, obstacle-blind), `--track N` (a sample every N frames), `--set JSON`.
+  `simulate(id, { scenario })` flies a scenario object that is not registered (a draft, a test course).
+- `npm run web`, then `node tools/fly-mission.mjs <id>` - the same in the real page (headless Edge, the game's
+  own `setAutopilot`); stills with `--shot DIR --at "u > -600@chase"` (cameras: chase, cockpit, tower, flyby,
+  wing, or `view:u,v,h>u,v,h` for a fixed camera in the runway frame); `--render 5` draws every 5th frame and
+  lists every shader program compiled after the first frame, with where (there must be none mid-flight).
+  Edge ports: each worktree its own range (`--port`); `CTL_MISSION_DIR` is its scratch folder.
+- `tools/test-obstacles.mjs` - add the new mission's flights to section 7 (landed on two seeds, and the wrong
+  line crashing into what the mission is about); section 3 checks that the spawn is 40 m clear and that every
+  point inside every gate can be flown wings level, section 4 that everything drawn is where it collides.
+
+### Traps
+
+- **Autoland is obstacle-blind**: a course that stands on the straight-in path needs a route, or every harness
+  that flies it (looksheet, perf-probe, fly-mission) crashes. Conversely, keep the straight path blocked if the
+  mission is about the obstacle: the suite's "wrong line" flights are how you know.
+- **The spawn is above the terrain**, not above the course: a spawn inside a tower is a crash on the first frame.
+- The decorative forest and villages are kept out of the course (`keepOut` circles, and along a route flown under
+  45 m), but only in the look: collision is only ever the course's own volumes.
+- **Draws**: a course is 3-5 instanced draws plus one light set at night, whatever its size (power-lines has
+  1,226 volumes in 5 draws). Two "shadow primers" ride with the aircraft for the first half second and are then
+  hidden: the engine compiles the world up front but not the shadow pass, so the first instanced caster to reach
+  the sun's shadow box would otherwise compile a depth program mid-approach. A course without trees costs one
+  extra program for that.
+- **Culling a big course**: each of those draws is ONE InstancedMesh with one bounding sphere round the whole
+  course, straight in the scene (the engine chunks only the terrain's own instanced meshes), so neither the camera
+  nor the 180 m shadow box can skip part of it: fine for three missions of a kilometre or two, not for a city. A
+  course spread over several kilometres should be drawn one InstancedMesh per district: a chunking step inside
+  `buildCourse` (calling it once per district would share the program but add two shadow primers per call).
+  `geom.js chunkInstanced` does not fit as it is: the course meshes carry per-instance attributes (`ctBox`,
+  `ctSeed`, `ctTaper`) on the shared geometry, so a chunk needs its own geometry with those attributes re-packed.
+- **Programs**: the limit is 70 with the cockpit showing, not just the chase view: harbor-cranes compiles 62 in the
+  chase view and 67 once the Condor's cockpit has been shown. Count a new course with `perf-probe --camera cockpit`.
+- **Leaderboard**: every new mission raises the most a career can score; the site's `src/games/lib/games.js`
+  (`max: 2000`) and its Worker must follow, or careers above the cap are silently rejected. A site-session job.
+
+## The city ladder (Metro City and "The city", n 44-49)
+
+*Written 2026-09-19 with the six missions of `src/missions/city.js`, on the engine above; revised the same week after
+review (the Needle's line and cue, the arc law, the under-gates, the budget test).*
+
+- **Metro City** (`CITY_SITES.metro`): the coast style, terrain seed 638 and `coastX` 500, found by scanning seeds for
+  a coast that crosses the extended centerline (water under it 4 to 7.7 km out, land for the last 4 km). A 3,000 m
+  runway heading north with ILS, lights and PAPI. Its course is the shared skyline: six generated districts (4,542
+  buildings), Checkerboard Hill, the Harbor Bridge, Container Island, a sea wall. **Nothing in it touches the
+  straight-in path** (the 3-degree path is 34 m clear at the closest, checked from 9 km out): free flight, Autoland,
+  the looksheet and perf-probe fly it. Mission-only things (the avenue, the skybridges, the slalom towers, the
+  Needle) live in the missions' courses.
+- **Districts** grow round everything placed by hand: resolveCourse places the hand-placed kinds, then the gates, the
+  `clear` circles and a low route's corridor, and only then the districts, which avoid all of those and the `carve`
+  rectangles. A mission clears the SITE's blocks where its own towers stand with `carve` (its own districts are spared:
+  Downtown's second row stands inside its carve), and gives that ground its own look with `ground` (`avenue`,
+  `plaza`). A district adds coarse keep-out circles (230 m) for the forest instead of one per building (the terrain
+  scans them linearly per tree), and no circle is kept out on the water.
+- **The look** is a plain working look (`src/art/city-look.js`), and its header is the drawing contract for the art
+  department's pass (the brief: `docs/briefs/city/city-look.txt`). `tools/test-obstacles.mjs` section 4 checks the
+  contract (every drawn vertex inside its prim's volume, every prim's drawing filling it, over 17 kinds) and section 10
+  the city's budget on every course a flight at Metro City builds (free flight and the six missions, at three tiers):
+  at most 60 draws, 450k / 250k / 120k triangles a pass, and at most 6 programs of its own **counted by variant** (a
+  material drawn with and without instance colours is two programs; the plain look is 3, and Checkerboard reaches 67
+  of the scene's 70 with the cockpit shown). Shapes that cast a shadow are geometry: the shadow pass never runs a
+  material's onBeforeCompile (the plain look's round frustums, the hill among them, are tapered geometry now).
+- **Gates under something** (the skybridges, the bridge deck) are built by `underGate()`: the CG between a floor and
+  the underside less the Condor's fin (`FIN`, 9.1 m; the hull's fin tops out at 9.02) and half a metre, so a crossing
+  that takes the whole airplane under counts. (They used to stop 12 m under, and a clean pass 2-3 m under a skybridge
+  scored MISSED GATE.) The tips and hints quote those heights from the same numbers (`altFt`, `raFt`).
+- **Routes with arcs** (`arc: 'L' | 'R', r`): see the header of `src/systems/routepilot.js` for the arc law. The arcs
+  have their own roll loop (a bank reference moved at no more than 15 degrees a second, tracked stiffly): the stock
+  loop let a roll to 40 degrees overshoot to 46 and creep back, and the path loop chased the swing. Design the legs
+  either side of an arc tangent to it; S-curves (`sCurve()` in city.js) are two arcs. Switched off and on inside an
+  arc, RoutePilot keeps the arc's own circle (a chord from the airplane would cut inside it).
+- **End a route on Autoland's path, including the CG height** (`onPath(u)` in city.js adds the Condor's 4.1 m), near
+  Vref (146 kt), and let a level run under the path end where it meets it (`meetPath(alt)`). Handovers after short
+  finals land firmer than a long straight-in, and Autoland lands crabbed, so a strong crosswind costs it about 20
+  points whatever the route does: Checkerboard's wind is 11 kt from 25 degrees right (it was 12 gusting 18 from 50,
+  where even a stock straight-in Autoland scored a median of 58 and RoutePilot 47, a third of its landings DAMAGED).
+- **The Needle** (48, and 49's first gate): two lines through the same aim point. The pilot's is a 35-degree turn at
+  150 kt in still air (NEEDLE_R 867 m) from the line the flight starts on; the tips describe it, and the HUD hint is a
+  flight director on it (`needleCue`: a countdown to the roll, then the bank to hold, which the wind moves: 29-33
+  degrees at the eye in both missions' winds). RoutePilot's is a 40-degree turn through the same eye (NEEDLE_R_AP
+  723 m). The gap is 34 m: the Condor's probe footprint is 35.0 m wings level (winglets), 31.3 at 30 degrees, 29.9 at
+  35, 28.2 at 40, 26.3 at 45, and its middle leans about a metre toward the low wing, so the gap's middle sits
+  NEEDLE_LEAN inside the aim point and the gate frame is centred on the aim point. A 33 m gap left a pilot held to
+  the Assist's 35 degrees about a metre at the 29-33 degrees the director asks for. **TIGHTEN LATER** (NEEDLE_GAP,
+  NEEDLE_BANK, NEEDLE_AP_BANK in city.js) once the flight-physics review removes the Assist's bank limit.
+- **What the suite proves** (`tools/test-city.mjs`): RoutePilot on ten seeds per mission (no crash, every gate on nine
+  or more, a median of at least 60), the wrong line into each obstacle, the autopilot switched off and on 300 m
+  before the eye, and a pilot who does only what the HUD hint says, never past 35 degrees: through the eye on every
+  seed in the Needle's wind and on 8 of 10 in the Gauntlet's 18-kt gusts, where the Assist's limit leaves about a
+  metre (RoutePilot, at 40 degrees, gets through on all of them).
+- **Perf** (`tools/perf-probe.mjs`, the RTX 4080, 1920x1080, high, after the review fixes): Checkerboard in the chase
+  view 357 fps median (p95 313), 132 draws (24 in the shadow pass), 456k triangles (112k shadow), 62 programs, GPU
+  1.3 / 2.3 ms at p50 / p95; in the cockpit 345 fps median, p95 44 (GPU p95 22 ms: the spikes the stock heavy
+  challenge's cockpit shows too), 116 draws, 398k triangles, 67 programs of the 70 allowed. Flown in the page, no
+  city mission compiled a shader after its first 0.2 s. Checkerboard is in perf-probe's BUDGET_MATRIX (chase and
+  cockpit): the scene the city's art pass is held to.
+- **Measuring on the Intel proxy**: `--gpu intel` pins an adapter by a LUID that changes at every boot; perf-probe now
+  refuses the run when the page renders on another vendor's GPU. Read the current LUIDs (dxgi EnumAdapters1) and pass
+  `--gpu <high,low>`. The review measured the phone proxy that way (UHD 770, phone medium): Checkerboard 7.0 / 8.0 ms
+  GPU at p50 / p95, 71 fps, loadSite 2,350 ms, against the stock heavy challenge's 7.0 / 9.2 ms, 56 fps, 1,912 ms.

@@ -74,8 +74,11 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const WORK = (process.env.CTL_PERF_DIR || 'C:/tmp/ctl-perf').replace(/\\/g, '/');
 const EDGE = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
-// Adapter LUIDs on this machine (dxgi EnumAdapters1); pass your own as high,low if they differ.
+// Adapter LUIDs on this machine (dxgi EnumAdapters1); pass your own as high,low if they differ. A LUID is handed out
+// at boot and changes with it: a stale one is ignored by Edge and the page renders on the default adapter - so a run
+// with --gpu nvidia | intel is refused (below) when the renderer the page reports is not that vendor's.
 const GPUS = { nvidia: '0,96124', intel: '0,100565' };
+const GPU_VENDOR = { nvidia: /nvidia/i, intel: /intel/i };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ------------------------------------------------------------------ arguments
@@ -621,6 +624,10 @@ async function measure(o, jsFile) {
     await br.send('Page.navigate', { url: `file:///${file}` });
     for (let i = 0; i < 600; i++) { const st = await br.eval('window.__perf ? { ready: window.__perf.ready, error: window.__perf.error } : null'); if (st && (st.ready || st.error)) { if (st.error) throw new Error(st.error); break; } await sleep(100); }
     if (!(await br.eval('!!(window.__perf && window.__perf.ready)'))) throw new Error('the game never became ready');
+    if (o.gpu && GPU_VENDOR[o.gpu]) {
+      const got = await br.eval('window.__perf.gpuName');
+      if (!GPU_VENDOR[o.gpu].test(got || '')) throw new Error(`--gpu ${o.gpu} asked for, but the page renders on "${got}": the LUID in GPUS (${GPUS[o.gpu]}) is stale - LUIDs change at every boot. Read the adapters' LUIDs (dxgi EnumAdapters1) and pass --gpu <high,low>.`);
+    }
     // the engine holds the loop while the new flight's airframe arrives and its shaders compile (startCompile);
     // wait for that to clear so the sample is of the real thing (older builds without the flag: wait for the glTF)
     for (let i = 0; i < 100; i++) { if (o.scene === 'menu' || await br.eval('(window.game.compiling === false) || (window.game.compiling === undefined && !!(window.game.model && window.game.model.gltfRoot))')) break; await sleep(100); }
@@ -795,7 +802,9 @@ function printBudget(r, checks) {
   console.log(`  ${'owner'.padEnd(24)} ${'metric'.padEnd(64)} ${'measured'.padStart(10)} ${'budget'.padStart(9)}  result`);
   for (const c of checks) console.log(`  ${c.owner.padEnd(24)} ${c.metric.padEnd(64)} ${String(c.measured).padStart(10)} ${String(c.budget).padStart(9)}  ${c.ok === null ? 'info' : c.ok ? 'ok' : 'BREACH'}${c.note ? '   ' + c.note : ''}`);
 }
-const BUDGET_MATRIX = ['solo', 'heavy', 'night', 'gravel', 'fog'].flatMap((scene) => ['chase', 'cockpit'].map((camera) => ({ scene, camera })));
+// (checkerboard: Metro City, the biggest city - 5,000 buildings - and the most programs with the cockpit shown, 67 with
+// the plain look: the scene the city's art pass is held to)
+const BUDGET_MATRIX = ['solo', 'heavy', 'night', 'gravel', 'fog', 'checkerboard'].flatMap((scene) => ['chase', 'cockpit'].map((camera) => ({ scene, camera })));
 
 async function main() {
   const o = parseArgs(process.argv.slice(2));
