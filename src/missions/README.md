@@ -98,3 +98,52 @@ has `rwToWorld(site, u, v, y)`.
 Everything random draws from the flight seed (`game.flightSeed`, pinned by `window.CTL_WIND_SEED`) through
 `makeRng(seed * k + c)` with its own constants: never `Math.random()`, and never extra draws from the rng that
 `resolveScenario` uses, or pinned-seed replays of the original challenges change.
+
+## The menu and free flight (`src/ui/menus.js`, `src/missions/free.js`)
+
+The home menu (2026-09-18, "Three Doors") lists whatever `SCENARIOS`, `SITES` and `MISSION_GROUPS` contain; nothing in
+it names a mission. What it reads from a mission:
+
+- `group` (or a place in a group's `ids`) puts it in that group's rail entry and grid block; groups show in
+  `MISSION_GROUPS` order, and a mission in no known group lands in a "More" block at the end. `missionOrder()` in
+  `index.js` is the one order everything follows: the rail, the home screen's NEXT UP and the debrief's Next.
+- `difficulty` (1..5) is drawn as pips. The original twenty have theirs in `src/ui/aircraft-catalog.js`
+  (`CLASSIC_DIFFICULTY`), so `scenarios.js` stays untouched; that table's keys are also how the menu tells the original
+  twenty from new missions, which carry a NEW tag until they are flown.
+- The group `city` is drawn as a ladder: RUNG 1, 2, ... in menu order.
+- The briefing shows `wind.rel` or `wind.dir` (turned into degrees off the landing direction), `weather` (preset,
+  precipitation, ceiling, events), obstacles (`course`, or the site's `obstacleTrees` / `course`), the sea state on
+  the carrier, and a failure's name unless `surprise` is set.
+- A site with an id outside the original six gets a NEW tag in the free-flight builder.
+- `aircraft: 'random'` files a mission under the airplanes `resolveScenario()` can draw (`RANDOM_AIRCRAFT` in
+  `src/ui/aircraft-catalog.js`: Skylark, Condor, Trailblazer; never the Sea Hornet). Change both together.
+
+**Free flight** is `buildFreeFlight(options, { sites, seed, missions })` in `src/missions/free.js` (`makeFreeFlight` in
+`scenarios.js` delegates to it; `tools/test-free.mjs`, part of `npm test`, checks it). The options are saved as `ctl.free` and cleaned by `validateFreeOpts()` on every load,
+so a stale site, aircraft or failure id falls back instead of throwing. The scenario it returns:
+
+- `id: 'free'` (never logged, never on the leaderboard), `aircraft`, `site`, `time`, `vis`, `weight`, `spawn` (a bush
+  strip starts close in, low over the trees: the Gravel Bar and the One-Way Strip 900 m out and 100 m up, as
+  `resolveScenario()` forces for them, any other strip at most 1,500 m out), `scoring.type` from `site.kind`.
+- `wind: { dir, speed, gust, turb, shear }`, `dir` absolute (the builder stores the wind relative to the landing
+  direction, `windRel`). A gust equal to the wind speed means no gusts.
+- `weather: { preset, rain, snow, dust, darkness, ceiling, lightning, events }` from the preset tiles and the Advanced
+  drawer; the wind shear toggle adds `{ type: 'microburst', at: { type: 'dist', value: 2500 } }`; `seaState` only on
+  the carrier.
+- `failures`: only names whose catalogue entry has no `applies()` or whose `applies(def)` is true. The trigger is the
+  entry's `freeAt` when it has one, else the moment the pilot picked: a seeded `window` when `shouldTrigger` supports
+  it, otherwise an altitude worked out from the options and the start height (never `Math.random()`, always below
+  where the flight starts: "on approach" is 60% of the start height, 72% on a bush strip, "short final" 300 ft or half
+  of it). "Surprise me" deals one of them from the flight seed, with `silent: true`, and sets `surprise: true`.
+- **`course: false`** when the pilot switched obstacles off. It means *no obstacles at all* for this flight: neither a
+  mission course, nor the site's own `course`, nor the site's `obstacleTrees` (the Gravel Bar's tree wall). `loadSite`
+  in `main.js` honours it before anything is planned: it skips `ObstacleField.plan()` (so no course is built and the
+  terrain keeps no clearings for one) and `terrain.addObstacleTrees()`. **Merge note:** keep both guards
+  (`sc.course === false ? null : ObstacleField.plan(site, sc)` and `site.obstacleTrees && sc.course !== false`) when
+  the obstacles work lands; a mission never sets `course: false`. The builder only offers the switch at a place that
+  has something in the way.
+
+Places the chosen aircraft cannot use are shown disabled with the reason: a runway shorter than the airplane needs
+ashore (`runwayNeedAshore()` in `src/ui/aircraft-catalog.js`: `def.approach.runwayNeed`, except the Sea Hornet's, which
+is its 200 m on the wires, so 1,500 m ashore), or the carrier without a hook. A pair a mission flies is always offered
+(the Condor at Ridgefield's 1,600 m, "Short & Heavy"), marked "Tight".
