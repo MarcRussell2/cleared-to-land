@@ -82,8 +82,11 @@ export const MAPS_MISSIONS = [
   {
     id: 'dust-wall', n: 43, group: 'maps', difficulty: 5, title: 'Dust Wall', tags: T('map', 'weather', 'crosswind', 'bush'),
     aircraft: 'skylark', site: 'redmesa', time: 17, vis: 6000,
+    // (the drop is to 2,300 m of model visibility: the weather look thickens the air by (1 + 1.6 x dust) on top of
+    // it, so the pilot sees about a kilometre, as the briefing says; at 1,100 m the dust-coloured mesa vanished
+    // against the dust-coloured desert 200 m before the rim of a strip with no lights and no PAPI)
     weather: { preset: 'dust', dust: 0.8, events: [
-      { type: 'visDrop', at: { type: 'dist', value: 1500 }, vis: 1100, ramp: 8 },
+      { type: 'visDrop', at: { type: 'dist', value: 1500 }, vis: 2300, ramp: 8 },
       { type: 'turbBurst', at: { type: 'dist', value: 1500 }, turb: 0.3, dur: 12 },   // the front's rough air
     ] },
     desc: 'A haboob is coming over the mesa, and so are you. Gusts to 23 knots across a 500 m strip on a cliff top, and when the dust wall arrives the visibility goes from six kilometres to one. Get lined up while you can still see.',

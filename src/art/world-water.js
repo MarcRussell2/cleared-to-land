@@ -158,7 +158,9 @@ export function makeWater(size, level, sun) {
         // The body: deep blue-green by day, near black at night, lighter on the crests.
         vec3 body = wvDeep * mix(0.025, 0.72, atDay);
         #ifdef WV_SHALLOWS
-        body = wvShallowBody(body, wvS, mix(0.025, 0.72, atDay));
+        // (the sand under a few metres of water is lit by the sun's height, not just by whether it is day:
+        // at a low sun it darkens with the land instead of glowing cyan against a dusk coast)
+        body = wvShallowBody(body, wvS, mix(0.025, 0.72, atDay) * (0.3 + 0.7 * smoothstep(0.0, 0.5, atSun.y)));
         #endif
         vec3 col = mix(body, sky, fres);
         // Sun glitter on the perturbed normal; the lobe widens and dims with the pixel
