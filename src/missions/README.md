@@ -269,12 +269,14 @@ review (the Needle's line and cue, the arc law, the under-gates, the budget test
   Downtown's second row stands inside its carve), and gives that ground its own look with `ground` (`avenue`,
   `plaza`). A district adds coarse keep-out circles (230 m) for the forest instead of one per building (the terrain
   scans them linearly per tree), and no circle is kept out on the water.
-- **The look** is a plain working look (`src/art/city-look.js`), and its header is the drawing contract for the art
-  department's pass (the brief: `docs/briefs/city/city-look.txt`). `tools/test-obstacles.mjs` section 4 checks the
+- **The look** (`src/art/city-look.js`, its facade shader in `src/art/city-facades.js`) is the art department's:
+  Codex's two passes of 2026-09-19 (briefs `docs/briefs/city/city-look.txt` and `city-look-2.txt`; a third,
+  `city-look-3.txt`, is written for the day facades and not yet run). The header of city-look.js is the drawing
+  contract, unchanged by those passes, which changed neither the flying nor the budget. `tools/test-obstacles.mjs` section 4 checks the
   contract (every drawn vertex inside its prim's volume, every prim's drawing filling it, over 17 kinds) and section 10
   the city's budget on every course a flight at Metro City builds (free flight and the six missions, at three tiers):
   at most 60 draws, 450k / 250k / 120k triangles a pass, and at most 6 programs of its own **counted by variant** (a
-  material drawn with and without instance colours is two programs; the plain look is 3, and Checkerboard reaches 67
+  material drawn with and without instance colours is two programs; the look compiles 3, and Checkerboard reaches 67
   of the scene's 70 with the cockpit shown). Shapes that cast a shadow are geometry: the shadow pass never runs a
   material's onBeforeCompile (the plain look's round frustums, the hill among them, are tapered geometry now).
 - **Gates under something** (the skybridges, the bridge deck) are built by `underGate()`: the CG between a floor and
