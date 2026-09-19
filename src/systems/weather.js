@@ -5,7 +5,8 @@
 //
 // The flight-physics wind (src/physics/wind.js) is not edited. Weather works on it from outside in two ways:
 //   - update() may ramp the Wind object's public fields (speedKt, gustKt, dirDeg, turb, shear) for slow changes
-//     such as a gust front; the HUD wind box, the windsock and the cockpit follow automatically;
+//     such as a gust front; the HUD wind box, the windsock and the cockpit follow automatically (dirDeg is always
+//     written 0..360);
 //   - addWind() adds a local overlay in m/s (a microburst's downdraft and outflow) on top of Wind.at(). main.js
 //     calls it for the aircraft (every physics sub-step) and for every live particle, so it is O(1) with an
 //     early exit when nothing is active.
@@ -22,8 +23,9 @@
 //   lightning    0..1, about 6 strikes a minute at 1; cloud-to-ground strikes draw a bolt, all of them flash
 //   cells        number of storm cells around the field (rain shafts, where the lightning comes from)
 //   wet          true/false overrides the rain rule for the runway
-//   seaState     the carrier's sea (the ship's heave, pitch and roll, and the look of the sea); above 1 a longer,
-//                heavier swell joins in (src/world/carrier.js), and the deck motion's phases come from the seed
+//   seaState     the carrier's sea (the ship's heave, pitch and roll, and the look of the sea, which seaLook() maps
+//                gently); above 1 a longer, heavier swell joins in (src/world/carrier.js), and the deck motion's
+//                phases come from the seed
 //   events       [{ type, at, ... }]; `at` uses the failure trigger types (src/systems/malfunctions.js
 //                shouldTrigger: start, time s, alt ft radio, dist m to the threshold or ramp; plus window
 //                {from,to} s seeded, speed kt IAS below, touchdown):
@@ -36,7 +38,8 @@
 //                 It rains itself out after `life`, so going around and coming back is a real choice.
 //     gustFront   { shift deg, speed kt, gust kt (default speed + 10), ramp = 4 s, turb (added, default 0.15) }
 //     windShift   { shift deg, speed kt (default unchanged), gust, ramp = 15 s }
-//     turbBurst   { turb = 0.5 (added at the peak), dur = 8 s }: rougher air for a while, and camera jolts
+//     turbBurst   { turb = 0.5 (added at the peak), dur = 8 s }: rougher air for a while (it builds and dies over about
+//                 two seconds each way), and camera jolts
 //     squall      { rain = 0.95, darkness (added, default 0.15), shift, speed, gust, ramp = 4 s, seaState }
 //     visDrop     { vis m, ramp = 6 s }
 //
@@ -104,7 +107,24 @@ export function downburstParams({ outflow = 12, radius = 650, depth = 300, eps =
 }
 
 const T0 = new Vector3();
-const envOf = (b, t) => { const x = (t - b.t0) / b.dur; return x >= 1 || x < 0 ? 0 : b.add * smoothstep(0, 0.12, x) * (1 - smoothstep(0.7, 1, x)); };
+const START_AT = { type: 'start' };
+// A turbulence burst's envelope: it builds over two seconds (at least 12% of the burst) and dies over two (at least
+// the last 30%), never more than half the burst each. The Wind's turb is written once a frame while the physics
+// sub-steps at 4 ms, so a steep edge is a step in the gust noise between two frames (tools/test-weather.mjs, 5).
+const envOf = (b, t) => {
+  const x = (t - b.t0) / b.dur;
+  if (x >= 1 || x < 0) return 0;
+  const up = Math.min(0.5, Math.max(0.12, 2 / b.dur)), down = Math.min(0.5, Math.max(0.3, 2 / b.dur));
+  return b.add * smoothstep(0, up, x) * (1 - smoothstep(1 - down, 1, x));
+};
+// A lightning return stroke's ripple on the flash (module level: no closure per frame)
+const ripple = (x) => (x > 0 && x < 0.25 ? Math.exp(-x / 0.05) : 0);
+const wrap360 = (d) => ((d % 360) + 360) % 360;
+// The ship's sea state as the water's look: 0.35 (the look every original mission draws) at a sea of 0.5, gentler
+// above it and never past 0.7. At the look's maximum a storm sea glowed with full-brightness whitecaps under a
+// near-black deck; the foam's light belongs to src/art/world-water.js, so until it follows the scene light this
+// keeps the storm missions' sea believable.
+export const seaLook = (s) => clamp(0.35 + 0.35 * (s - 0.5), 0, 0.7);
 
 export class Weather {
   constructor(spec, { seed = 1, wind = null, world = null, scenario = null, hud = null, audio = null, rig = null } = {}) {
@@ -166,7 +186,7 @@ export class Weather {
       if (c.setMotionSeed) c.setMotionSeed(seed * 131 + 7);
       c.update(0);   // re-pose the deck at the new sea state without a heave-rate spike (dt = 0 gives heaveRate 0)
     }
-    if (w.terrain && w.terrain.water && c) w.terrain.water.seaState = Math.min(1, c.seaState);
+    if (w.terrain && w.terrain.water && c) w.terrain.water.seaState = seaLook(c.seaState);
     // a wet runway: the grip the aerodrome already models (mu 0.5 on wet asphalt)
     if (this.runway && (s.wet === true || (s.wet !== false && s.rain > 0.3))) this.runway.wet = true;
     // under a storm deck the lights are on: runway and deck lights toward their night strength
@@ -181,6 +201,8 @@ export class Weather {
       shafts: [0, 1, 2, 3].map(() => ({ x: 0, z: 0, r: 0, a: 0 })), nShafts: 0,
       gust: 0, seaState: c ? c.seaState : 0, fieldY: this.fieldY, lightning: s.lightning || 0,
     };
+    this._trig = { t: 0, distToThreshold: 0 };   // the trigger context, refilled (update() allocates nothing)
+    this._dirU = null;                           // the ramp's wind direction, unwrapped (the Wind gets it 0..360)
     this.fillShafts(0);
   }
 
@@ -198,26 +220,40 @@ export class Weather {
     return 1e9;
   }
 
-  // The failure triggers, with the same meaning (start/time/alt/dist go through malfunctions.shouldTrigger itself).
-  triggered(e, ac, t) {
-    const at = e.at || { type: 'start' };
+  // The failure triggers, with the same meaning (time/alt/dist go through malfunctions.shouldTrigger itself, with
+  // `ctx`, the one trigger context update() refills).
+  triggered(e, ac, t, ctx) {
+    const at = e.at || START_AT;
     switch (at.type) {
+      case 'start': return true;
       case 'window': return t >= e._when;
       case 'speed': return !ac.onGround && ac.ias < at.value * KT && t > 1;
       case 'touchdown': return !!(ac.stats && ac.stats.touchdown);
-      default: return shouldTrigger(e, ac, { t, distToThreshold: this.distTo(ac) });
+      default: return shouldTrigger(e, ac, ctx);
     }
   }
 
   update(dt, t, ac) {
-    const s = this.spec, st = this.state, W = this.wind;
+    const s = this.spec, st = this.state, W = this.wind, ev = this.events;
     this.t = t;
-    if (ac) for (const e of this.events) if (!e.fired && this.triggered(e, ac, t)) { e.fired = true; e.firedAt = t; this.fire(e, t, ac); }
+    if (ac) {
+      // the distance is measured once a frame, and only while something is still waiting to happen
+      let ctx = null;
+      for (let i = 0; i < ev.length; i++) {
+        const e = ev[i];
+        if (e.fired) continue;
+        if (!ctx) { ctx = this._trig; ctx.t = t; ctx.distToThreshold = this.distTo(ac); }
+        if (this.triggered(e, ac, t, ctx)) { e.fired = true; e.firedAt = t; this.fire(e, t, ac); }
+      }
+    }
     // the Wind's public fields: a ramp (gust front, shift, squall) and the turbulence bursts on top
     if (W && (this.ramp || this.turbAdd.length)) {
       if (this.ramp) {
         const r = this.ramp, k = smoothstep(0, 1, (t - r.t0) / r.dur);
-        W.dirDeg = r.from.dir + (r.to.dir - r.from.dir) * k;
+        // interpolated unwrapped, so a swing through north takes the short way; the Wind (the HUD, the cockpit's
+        // wind readout, the windsock) always holds 0..360
+        this._dirU = r.from.dir + (r.to.dir - r.from.dir) * k;
+        W.dirDeg = wrap360(this._dirU);
         W.speedKt = r.from.speed + (r.to.speed - r.from.speed) * k;
         W.gustKt = Math.max(W.speedKt, r.from.gust + (r.to.gust - r.from.gust) * k);
         this.turbBase = r.from.turb + (r.to.turb - r.from.turb) * k;
@@ -237,7 +273,7 @@ export class Weather {
     this.darkAdd += clamp(this.darkTo - this.darkAdd, -dt * 0.05, dt * 0.05);
     let near = 0;
     if (ac) {
-      for (const c of this.cells) { const dx = ac.pos.x - c.x, dz = ac.pos.z - c.z; near = Math.max(near, c.power * Math.exp(-(dx * dx + dz * dz) / (c.r * c.r))); }
+      for (let i = 0; i < this.cells.length; i++) { const c = this.cells[i], dx = ac.pos.x - c.x, dz = ac.pos.z - c.z; near = Math.max(near, c.power * Math.exp(-(dx * dx + dz * dz) / (c.r * c.r))); }
       if (this.burst) { const b = this.burst, dx = ac.pos.x - b.x, dz = ac.pos.z - b.z; near = Math.max(near, this.burstAmp(t) * Math.exp(-(dx * dx + dz * dz) / (b.R * b.R * 1.6))); }
     }
     const base = Math.max(s.rain || 0, this.rainAdd);
@@ -252,7 +288,7 @@ export class Weather {
       if (c.seaState !== this.seaTarget) c.seaState += clamp(this.seaTarget - c.seaState, -dt * 0.02, dt * 0.02);
       st.seaState = c.seaState;
       const water = this.world && this.world.terrain && this.world.terrain.water;
-      if (water) water.seaState = Math.min(1, c.seaState);
+      if (water) water.seaState = seaLook(c.seaState);
     }
     this.lightning(t, ac);
     this.fillShafts(t);
@@ -272,13 +308,15 @@ export class Weather {
         const quiet = e.type === 'windShift';
         if (W && (e.type !== 'squall' || e.shift || e.speed != null)) {
           // from where the wind is now; to a target relative to where it was going (a change that fires during
-          // another one builds on its target, so events compose)
-          const from = { dir: W.dirDeg, speed: W.speedKt, gust: W.gustKt, turb: this.turbBase };
+          // another one builds on its target, so events compose). Mid-ramp "now" is the ramp's own unwrapped
+          // direction, in the same frame as its target.
+          const from = { dir: this.ramp && this._dirU != null ? this._dirU : W.dirDeg, speed: W.speedKt, gust: W.gustKt, turb: this.turbBase };
           const prev = this.ramp ? this.ramp.to : from;
           const speed = e.speed ?? prev.speed;
           const gust = Math.max(speed, e.gust ?? (e.speed != null ? speed + 10 : prev.gust));
           const to = { dir: prev.dir + (e.shift || 0), speed, gust, turb: prev.turb + (e.turb ?? (quiet ? 0 : 0.15)) };
           this.ramp = { from, to, t0: t, dur: e.ramp || (quiet ? 15 : 4), said: false, announce: e.announce !== false };
+          this._dirU = from.dir;
         }
         if (e.type === 'squall') {
           this.rainTo = e.rain ?? 0.95;
@@ -320,7 +358,8 @@ export class Weather {
     const hPath = Math.max(40, (-u + (this.runway ? this.runway.aimDistance : 0)) * Math.tan(3 * DEG));
     this.burst.lossKt = Math.round((2 * downburst(p, p.R * 1.12, 0, hPath, 1, T0.set(0, 0, 0)).x) / KT / 5) * 5;
     if (this.runway && this.burst.lossKt >= 15) {
-      const mi = Math.max(1, Math.round(-u / 1609));
+      // nautical miles, as the tower and the briefing give them (the Microburst mission's 4,600 m is "2.5 mile final")
+      const mi = String(Math.max(0.5, Math.round(-u / 1852 * 10) / 10));
       const name = String(this.runway.name || '').split('').join(' ');
       if (this.hud) this.hud.message(`MICROBURST ALERT  ${this.burst.lossKt} KT LOSS  ${mi} MI FINAL`, 'warn', 5);
       if (this.audio) this.audio.say(`Microburst alert. Runway ${name} arrival, ${this.burst.lossKt} knot loss, ${mi} mile final.`);
@@ -387,7 +426,7 @@ export class Weather {
     if (hp > 0.18) this.rig.bump(clamp((hp - 0.18) * 1.6, 0, 0.9));
     if (this.turbAdd.length && t >= this.nextJolt) {
       let env = 0;
-      for (const b of this.turbAdd) env = Math.max(env, envOf(b, t));
+      for (let i = 0; i < this.turbAdd.length; i++) env = Math.max(env, envOf(this.turbAdd[i], t));
       this.rig.bump(clamp((0.25 + 0.6 * this.rngJolt()) * env * 1.6, 0, 1));
       this.nextJolt = t + 0.35 + this.rngJolt() * 1.1;
     }
@@ -430,8 +469,7 @@ export class Weather {
     if (a >= 0 && a < 1.6) {
       const P = this.strikePulses, g = this.strikeGap;
       const env = P[0] * (a < 0.02 ? a / 0.02 : Math.exp(-(a - 0.02) / 0.3));
-      const rip = (x) => (x > 0 && x < 0.25 ? Math.exp(-x / 0.05) : 0);
-      st.flash = clamp(env * (1 + P[1] * rip(a - g) + P[2] * rip(a - 2.4 * g)), 0, 1);
+      st.flash = clamp(env * (1 + P[1] * ripple(a - g) + P[2] * ripple(a - 2.4 * g)), 0, 1);
       st.bolt.on = st.bolt.cg && a < 0.28;
     } else { st.flash = 0; st.bolt.on = false; }
   }
@@ -439,7 +477,7 @@ export class Weather {
   fillShafts(t) {
     const st = this.state;
     let n = 0;
-    for (const c of this.cells) { if (n >= 3) break; const sh = st.shafts[n++]; sh.x = c.x; sh.z = c.z; sh.r = c.r * 0.55; sh.a = 0.5 * c.power * Math.max(this.spec.rain, 0.5); }
+    for (let i = 0; i < this.cells.length && n < 3; i++) { const c = this.cells[i], sh = st.shafts[n++]; sh.x = c.x; sh.z = c.z; sh.r = c.r * 0.55; sh.a = 0.5 * c.power * Math.max(this.spec.rain, 0.5); }
     if (this.burst) { const sh = st.shafts[n++], b = this.burst; sh.x = b.x; sh.z = b.z; sh.r = b.R * 0.8; sh.a = 0.8 * this.burstAmp(t); }
     for (let i = n; i < 4; i++) st.shafts[i].a = 0;
     st.nShafts = n;

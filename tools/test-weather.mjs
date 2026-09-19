@@ -422,17 +422,18 @@ say('weather model');
   const wx = new Weather(spec, { seed: 9, wind, world: w, scenario: base });
   const ac = { pos: new THREE.Vector3(0, 120, 2400), vel: new THREE.Vector3(0, -3, -60), ias: 60, radioAlt: 120, onGround: false, crashed: false, gload: 1, stats: {} };
   const a = new THREE.Vector3(), prev = new THREE.Vector3();
-  let worst = 0, first = true, worstAt = 0;
+  let worst = 0, first = true, worstAt = 0, dirOut = 0;
   for (let i = 0; i < 25 * 250; i++) {   // 25 s at 4 ms
     const t = i * 0.004;
     ac.pos.addScaledVector(ac.vel, 0.004); ac.radioAlt = ac.pos.y;
-    if (i % 10 === 0) wx.update(0.04, t, ac);   // the frame; the physics sub-steps in between
+    if (i % 10 === 0) { wx.update(0.04, t, ac); if (!(wind.dirDeg >= 0 && wind.dirDeg < 360)) dirOut++; }   // the frame; the physics sub-steps in between
     a.set(0, 0, 0); wind.at(ac.pos, t, a); wx.addWind(ac.pos, t, a);
     if (!first) { const d = a.distanceTo(prev); if (d > worst) { worst = d; worstAt = t; } }
     prev.copy(a); first = false;
   }
   ok(worst < 0.35, `the wind at the airplane never changes more than 0.35 m/s in one 4 ms step (worst ${worst.toFixed(3)} at t=${worstAt.toFixed(2)} s)`);
-  ok(Math.abs(wind.speedKt - 25) < 1e-9 && Math.abs(wind.gustKt - 35) < 1e-9 && Math.abs(wind.dirDeg - (350 + 60 - 40 + 30)) < 1e-9, `after the ramps the Wind holds the last target (${wind.dirDeg.toFixed(0)} deg, ${wind.speedKt} G ${wind.gustKt} kt)`);
+  ok(Math.abs(wind.speedKt - 25) < 1e-9 && Math.abs(wind.gustKt - 35) < 1e-9 && Math.abs(wind.dirDeg - (350 + 60 - 40 + 30) % 360) < 1e-9, `after the ramps the Wind holds the last target (${wind.dirDeg.toFixed(0)} deg, ${wind.speedKt} G ${wind.gustKt} kt)`);
+  ok(dirOut === 0, `the Wind's direction stays 0..360 through every ramp, swinging through north (${dirOut} frames outside)`);
   ok(Math.abs(wind.turb - (0.25 + 0.15 + 0.15)) < 1e-9, `the turbulence burst is gone and the fronts' roughness stays (turb ${wind.turb.toFixed(2)})`);
   ok(Math.abs(wx.state.vis - 1200) < 1e-6 && wx.state.rain > 0.95, `visDrop and the squall's rain arrive (vis ${wx.state.vis}, rain ${wx.state.rain.toFixed(2)})`);
 }
@@ -485,6 +486,8 @@ for (const m of WEATHER_MISSIONS) {
 {
   const mb = results['microburst/autoland'];
   ok(mb.every((r) => r.msgs.some((x) => x.startsWith('MICROBURST ALERT'))), `microburst: the tower calls the microburst alert ("${mb[0].said.find((x) => /Microburst/.test(x))}")`);
+  const mbAt = SCENARIOS.find((s) => s.id === 'microburst').weather.events[0].u, nm = (-mbAt / 1852).toFixed(1);
+  ok(mb.every((r) => r.msgs.some((x) => x.endsWith(` ${nm} MI FINAL`)) && r.said.some((x) => x.includes(`${nm} mile final`))), `microburst: the alert gives the distance in nautical miles, as the briefing does (${nm} mile final for ${-mbAt} m)`);
   ok(mb.every((r) => r.msgs.filter((x) => x === 'WINDSHEAR').length === 1 && r.said.some((s) => /Windshear, windshear/.test(s))), 'microburst: WINDSHEAR is shown and spoken, once, in every flight');
   ok(results['microburst/escape'].every((r) => r.escapes >= 1), 'microburst: the escape pilot flies the escape in every seed');
   const sq = results['squall/autoland'];

@@ -80,10 +80,12 @@ const NORMAL_LENS = Math.tan(55 * Math.PI / 360);
 const COUNTS = { rain: [4000, 7000, 11000], snow: [3000, 5000, 8000], dust: [1600, 2600, 4000] };
 const KINDS = {
   //   box (m), fall (m/s), width (m), minimum streak (m), exposure (s), flutter (m), alpha, shape (0 streak, 1 flake,
-  //   2 puff), low (1 = hugs the ground)
-  rain: { box: 56, fall: 8.5, width: 0.0045, len: 0.18, expo: 0.028, flutter: 0, alpha: 0.30, shape: 0, low: 0 },
-  snow: { box: 44, fall: 1.1, width: 0.022, len: 0, expo: 0.022, flutter: 0.6, alpha: 0.55, shape: 1, low: 0 },
-  dust: { box: 90, fall: -0.2, width: 0.9, len: 0, expo: 0.03, flutter: 2.5, alpha: 0.10, shape: 2, low: 1 },
+  //   2 puff), low (1 = hugs the ground), streak (the longest motion blur, in the drop's own widths; 0 = no limit)
+  // Snow's blur is held to six flake widths: at approach speed the exposure alone drew every flake as a 0.8 m
+  // line, and the whole view read as a star field; short flakes show the speed as parallax instead.
+  rain: { box: 56, fall: 8.5, width: 0.0045, len: 0.18, expo: 0.028, flutter: 0, alpha: 0.30, shape: 0, low: 0, streak: 0 },
+  snow: { box: 44, fall: 1.1, width: 0.022, len: 0, expo: 0.022, flutter: 0.6, alpha: 0.55, shape: 1, low: 0, streak: 6 },
+  dust: { box: 90, fall: -0.2, width: 0.9, len: 0, expo: 0.03, flutter: 2.5, alpha: 0.10, shape: 2, low: 1, streak: 0 },
 };
 
 const quad = (n) => {   // an instanced quad: corner.x across (-1, 1), corner.y along (0 head, 1 tail)
@@ -265,14 +267,14 @@ export class WeatherLook {
       wxOff: { value: new THREE.Vector3() }, wxFall: { value: new THREE.Vector3(0, -K.fall, 0) }, wxCamVel: { value: new THREE.Vector3() },
       wxBox: { value: K.box }, wxDensity: { value: 1 }, wxAlpha: { value: K.alpha }, wxExpo: { value: K.expo }, wxWidth: { value: K.width },
       wxLen: { value: K.len }, wxPix: { value: 0.001 }, wxShape: { value: K.shape }, wxFlutter: { value: K.flutter }, wxTime: { value: 0 },
-      wxFieldY: { value: 0 }, wxLow: { value: K.low }, wxColor: { value: new THREE.Color() }, wxZoom: { value: 1 },
+      wxFieldY: { value: 0 }, wxLow: { value: K.low }, wxColor: { value: new THREE.Color() }, wxZoom: { value: 1 }, wxStreak: { value: K.streak },
     };
     const mat = new THREE.ShaderMaterial({
       name: 'weather/' + kind,
       uniforms, transparent: true, depthWrite: false, depthTest: true, side: THREE.DoubleSide, forceSinglePass: true,
       vertexShader: `
         attribute vec2 corner; attribute vec4 aSeed;
-        uniform vec3 wxOff, wxFall, wxCamVel; uniform float wxBox, wxDensity, wxAlpha, wxExpo, wxWidth, wxLen, wxShape, wxFlutter, wxTime, wxFieldY, wxLow, wxZoom;
+        uniform vec3 wxOff, wxFall, wxCamVel; uniform float wxBox, wxDensity, wxAlpha, wxExpo, wxWidth, wxLen, wxShape, wxFlutter, wxTime, wxFieldY, wxLow, wxZoom, wxStreak;
         varying vec2 vSC; varying float vLen, vA;
         ${RIBBON_GLSL}
         void main() {
@@ -296,12 +298,15 @@ export class WeatherLook {
           vec3 head = (viewMatrix * vec4(world, 1.0)).xyz;
           vec3 back = mat3(viewMatrix) * vr;
           float bl = length(back);
-          vec3 tail = head - back * wxExpo - (bl > 1e-4 ? back / bl : vec3(0.0)) * wxLen;
+          float w = wxWidth * (0.7 + 0.6 * aSeed.y);
+          // the blur over the exposure, held to wxStreak widths where the kind asks for it (snow)
+          float blur = bl * wxExpo;
+          if (wxStreak > 0.0) blur = min(blur, wxStreak * w);
+          vec3 tail = head - (bl > 1e-4 ? back / bl : vec3(0.0)) * (blur + wxLen);
           // a streak never reaches into the lens: its tail stays at least half the head's depth away (a drop
           // flying past the camera would otherwise swell into a bar across the screen)
           float hz = -head.z, tz = -tail.z, zmin = max(0.8, 0.5 * hz);
           if (tz < zmin && hz > tz) tail = mix(head, tail, clamp((hz - zmin) / (hz - tz), 0.0, 1.0));
-          float w = wxWidth * (0.7 + 0.6 * aSeed.y);
           vec3 pos; float len;
           float gain = wxRibbon(head, tail, corner, w, 1.3, 0.5, pos, vSC, len);
           vLen = len;

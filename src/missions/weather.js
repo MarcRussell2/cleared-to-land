@@ -7,10 +7,12 @@ import { treeWall, rwToWorld } from './util.js';
 const T = (...tags) => tags;
 
 // Mission hints read the live weather through ctx.mission.weather (src/systems/mission.js); null = the game's own.
+// They run every frame: plain loops, nothing allocated.
 const sinceFired = (m, type) => {
   const w = m && m.weather; if (!w) return 1e9;
-  const e = w.events.find((x) => x.type === type && x.fired);
-  return e ? w.t - e.firedAt : 1e9;
+  const ev = w.events;
+  for (let i = 0; i < ev.length; i++) if (ev[i].type === type && ev[i].fired) return w.t - ev[i].firedAt;
+  return 1e9;
 };
 
 export const WEATHER_MISSIONS = [
@@ -20,8 +22,8 @@ export const WEATHER_MISSIONS = [
     desc: 'A line of storms is crossing the field and it gets there when you do. Half a mile out the gust front hits: the wind swings 60 degrees, jumps to 20 gusting 30, and the rain comes down in sheets on a runway that is already wet.',
     tips: [
       'Fly 68 kt, not 62: half the gust factor on top. That margin is what the gust front spends.',
-      'When the front hits, the drift flips from left to right. Take the old crab out and put a new one in, early and small. Do not fight the gusts with big inputs.',
-      'Wet runway, a third less grip: put it on the numbers, no float, then Brake gently (Space) and keep straight with rudder (Q/E).',
+      'When the front hits, the crab flips from left to right (the drift from right to left). Take the old crab out and put a new one in, early and small. Do not fight the gusts with big inputs.',
+      'Wet runway, about 40% less grip: put it on the numbers, no float, then Brake gently (Space) and keep straight with rudder (Q/E).',
     ],
     wind: { rel: -15, speed: 8, gust: 12, turb: 0.25 }, weight: 'normal', spawn: { dist: 2400, flap: 0.667, speedKt: 68 },
     weather: {
@@ -63,7 +65,7 @@ export const WEATHER_MISSIONS = [
     },
   },
   {
-    id: 'storm-trap', n: 23, title: 'Storm Trap', group: 'storms', difficulty: 3, tags: T('carrier', 'weather', 'storm'),
+    id: 'storm-trap', n: 23, title: 'Storm Trap', group: 'storms', difficulty: 4, tags: T('carrier', 'weather', 'storm'),
     aircraft: 'hornet', site: 'carrier', time: 13.5, vis: 5000,
     desc: 'Daytime, though you would not know it: a thunderstorm over the ship, an 800-foot cloud base, rain, and a wind gusting 21 knots on top of the ship\'s own 25. The deck rises and falls two metres, and the ball and the wind move with it. Catch a wire anyway.',
     tips: [
@@ -81,7 +83,7 @@ export const WEATHER_MISSIONS = [
   {
     id: 'night-storm', n: 24, title: 'Night Storm Trap', group: 'storms', difficulty: 5, tags: T('carrier', 'weather', 'storm'),
     aircraft: 'hornet', site: 'carrier', time: 22.5, vis: 3500,
-    desc: 'Night Trap was the hardest thing in aviation. This is Night Trap in a thunderstorm: heavy rain on the canopy, a 650-foot ceiling, lightning that wrecks your night vision, and a deck pitching like it wants you off it. The ball is the only thing out there not lying to you.',
+    desc: 'Night Trap was the hardest thing in aviation. This is Night Trap in a thunderstorm: heavy rain on the canopy, a 650-foot ceiling, lightning that wrecks your night vision, and a deck heaving and rolling like it wants you off it. The ball is the only thing out there not lying to you.',
     tips: [
       'Lightning washes the picture out for a second. Keep flying the last ball you saw; do not react to the flash.',
       'The ramp rises and falls four metres. Fly the ball\'s average and let the ship come to you; never dive at the deck.',
