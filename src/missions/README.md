@@ -305,7 +305,12 @@ review (the Needle's line and cue, the arc law, the under-gates, the budget test
   before the eye, and a pilot who does only what the HUD hint says, never past 35 degrees: through the eye on every
   seed in the Needle's wind and on 8 of 10 in the Gauntlet's 18-kt gusts, where the Assist's limit leaves about a
   metre (RoutePilot, at 40 degrees, gets through on all of them).
-- **Perf**: PERF_LINE
+- **Perf** (`tools/perf-probe.mjs`, the RTX 4080, 1920x1080, high, after the review fixes): Checkerboard in the chase
+  view 357 fps median (p95 313), 132 draws (24 in the shadow pass), 456k triangles (112k shadow), 62 programs, GPU
+  1.3 / 2.3 ms at p50 / p95; in the cockpit 345 fps median, p95 44 (GPU p95 22 ms: the spikes the stock heavy
+  challenge's cockpit shows too), 116 draws, 398k triangles, 67 programs of the 70 allowed. Flown in the page, no
+  city mission compiled a shader after its first 0.2 s. Checkerboard is in perf-probe's BUDGET_MATRIX (chase and
+  cockpit): the scene the city's art pass is held to.
 - **Measuring on the Intel proxy**: `--gpu intel` pins an adapter by a LUID that changes at every boot; perf-probe now
   refuses the run when the page renders on another vendor's GPU. Read the current LUIDs (dxgi EnumAdapters1) and pass
   `--gpu <high,low>`. The review measured the phone proxy that way (UHD 770, phone medium): Checkerboard 7.0 / 8.0 ms
