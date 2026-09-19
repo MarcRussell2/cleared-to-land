@@ -371,14 +371,16 @@ body.stick-right #hud.compact #cfg { left: calc(max(6px, env(safe-area-inset-lef
 #hud.compact.narrow #loc, #hud.compact.narrow #ball { top: calc(50% + 66px); }
 /* failures on the compact HUD: a phone screen has no room for the annunciators (what they say is in the failure
    chips, and in the drill buttons), so the caution light alone, one word, just left of the G readout; the standby
-   gauges where the ADI was */
+   gauges low in the middle, between the thumbs and just above the failure chips, so the chase view's airplane stays
+   in sight, and the callouts above them */
 #hud.compact #mc { right: calc(50% + 90px); top: 42px; width: auto; }
 #hud.compact #mc .light { font-size: 9px; padding: 2px 6px 1px; }
 #hud.compact #mc .light .m { display: none; }
 #hud.compact #mc .annun { display: none; }
 #hud.compact.narrow #mc .light { font-size: 8px; padding: 2px 4px 1px; }
 #hud.compact .tape .flag { top: 16px; font-size: 10px; }
-#hud.compact #stby { bottom: auto; top: calc(50% + 30px); transform: translate(-50%, -50%); width: 200px; height: 100px; }
+#hud.compact #stby { bottom: 80px; width: 200px; height: 100px; }
+#hud.compact.dark #calls { top: calc(100% - 206px); }
 #hud.compact.dark #hint { bottom: auto; }
 #hud.compact.dark #gmeter, #hud.compact.dark #cfg, #hud.compact.dark #aoa { display: none; }   /* (the compact rules above set their display) */
 

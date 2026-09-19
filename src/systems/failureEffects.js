@@ -83,13 +83,23 @@ class RunawayTrim {
   pre(dt, ac, inp, w) {
     if (!this.cut) this.bias = clamp(this.bias + this.rate * dt, -this.limit, this.limit);
     else if (this.rt.fcsFlying() && inp) {
-      // the pilot's trim keys live in the Input (the assist mode nudges its attitude with them, direct mode uses them
-      // as electric trim): each frame's movement turns the manual wheel instead, and the Input is put back (held clear
-      // of the Input's +-1 stops, or a pilot who had trimmed to a stop could not wind that way at all)
-      if (this.held == null) this.held = clamp(inp.trim || 0, -0.9, 0.9);
-      const d = (inp.trim || 0) - this.held;
+      // The pilot's trim keys live in the Input (the assist mode nudges its attitude with them, direct mode uses them
+      // as electric trim): each frame's movement turns the manual wheel instead, and the Input is put back. It is held
+      // clear of the stops (the Input's +-1; direct mode's +-0.45), or a pilot who had trimmed to a stop - holding T
+      // against the runaway, say - could not wind that way at all.
+      const fcs = this.rt.game.fcs, direct = !!(fcs && fcs.mode === 'direct'), now = inp.trim || 0;
+      let d = 0;
+      if (this.held == null) {
+        this.held = clamp(now, direct ? -0.4 : -0.9, direct ? 0.4 : 0.9);
+        // direct mode: that trim is on the elevator, so what the hold takes off it goes onto the wheel (no jump)
+        if (direct) this.bias = clamp(this.bias + now - this.held, -this.limit, this.limit);
+        // assist mode: the flight control reads the trim keys as a change of the Input's trim from the last frame, so
+        // it is told where the Input now sits, or it would take the hold for a trim input and nudge the attitude
+        else if (fcs && 'lastTrim' in fcs) fcs.lastTrim = this.held;
+      } else d = now - this.held;
       inp.trim = this.held;
       this.bias = clamp(this.bias + d * 0.35, -this.limit, this.limit);
+      if (direct) w.trim = this.held + d;   // (the flight control copied the Input before the hold)
     } else {
       // an autopilot or a scripted pilot writes the trim channel itself: its movement turns the wheel
       if (this.lastW == null) { this.lastW = w.trim; this.heldW = w.trim; }

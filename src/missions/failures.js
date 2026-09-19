@@ -63,7 +63,7 @@ export const FAILURES_MISSIONS = [
   {
     id: 'bird-strike', n: 28, group: 'breaks', difficulty: 3, title: 'Bird Strike', tags: T('failure', 'heavy'),
     aircraft: 'condor', site: 'harbor', time: 17.5, vis: 30000,
-    desc: 'Geese over the harbour at 800 ft. One comes through the windshield (it holds, just) and one goes down the right engine, which keeps running, badly: it surges and bangs every few seconds and gives you about 60% when it feels like it.',
+    desc: 'Geese over the harbour at 800 ft. One hits the windshield, which cracks and holds, and one goes down the right engine, which keeps running, badly: it surges and bangs every few seconds and gives you about 60% when it feels like it.',
     tips: [
       'Fly the airplane first: wings level, nose on the glideslope. The windshield is cracked, not gone, and the HUD still works.',
       'Each surge yaws you toward the right engine: left rudder (Q). Or shut it down with the fire handle (press A) and fly one engine.',
@@ -183,7 +183,7 @@ export const FAILURES_MISSIONS = [
   {
     id: 'one-wheel', n: 34, group: 'breaks', difficulty: 4, title: 'One Wheel', tags: T('failure'),
     aircraft: 'skylark', site: 'bayfield', time: 12, vis: 30000,
-    desc: 'The tower watched your left main wheel roll off into the grass as you left, and what is left is a stub. Land on the right wheel, hold the left wing up for as long as it flies, and keep it on the runway when the stub touches.',
+    desc: 'The tower watched your left main wheel bounce off into the grass on the takeoff roll, and all that is on that side now is a stub. Land on the right wheel, hold the left wing up for as long as it flies, and keep it on the runway when the stub touches.',
     tips: [
       'Touch down on the right wheel first: a little right bank, left rudder to keep the nose straight.',
       'After touchdown keep turning the stick right as it slows: the longer the left wing stays up, the better. The debrief says how slow.',

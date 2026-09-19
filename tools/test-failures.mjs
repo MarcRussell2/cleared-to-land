@@ -27,6 +27,7 @@ import { FailureRuntime, EFFECT_NAMES, crackPattern } from '../src/systems/failu
 import { FAILURES_MISSIONS } from '../src/missions/failures.js';
 import { NEW_MISSIONS, MISSION_GROUPS } from '../src/missions/index.js';
 import { scoreLanding, vrefFor } from '../src/systems/scoring.js';
+import { FlightControl } from '../src/systems/flightControl.js';
 import { touchify } from '../src/touch.js';
 import { KEY_HELP } from '../src/input.js';
 import { KT, FT, FPM, DEG, RAD, clamp, wrapPi, makeRng, headingToVec } from '../src/config.js';
@@ -655,6 +656,46 @@ function runChecks() {
     rt.dispose();
   }
   check(JSON.stringify(AIRCRAFT, noFn) === defsBefore, 'the shared aircraft definitions are never written to');
+
+  // The scripted pilots below write ac.input like the autopilot, so they never go through the flight control; a player
+  // always does. These fly the runaway trim the way a player has to: the flight control between the keys and the
+  // surfaces, the cutout (D), the trim keys (T) on the Input, in both control modes. Loose bands on purpose: the flight
+  // control is being rewritten, and what matters is that the runaway beats it and the cutout plus the wheel win it back.
+  console.log('\n== Through the flight control (what a player has) ==');
+  for (const mode of ['assist', 'direct']) {
+    const fly = (cutAt) => {
+      const ac = airborne('condor', { alt: 900 }), game = { ap: null };
+      const rt = new FailureRuntime(ac, { failures: [] }, { seed: 1, game });
+      const inp = { kbPitch: 0, kbRoll: 0, pitch: 0, roll: 0, yaw: 0, trim: 0, mouseYoke: false, mdx: 0, mdy: 0, boost: false, mouseSens: 0.5 };
+      inp.trim = ac.input.trim;   // main.js starts the Input's trim where the spawn trimmed the airplane
+      const fcs = game.fcs = new FlightControl(ac, { controlMode: mode });   // (main.js keeps it as game.fcs)
+      const p0 = ac.euler.pitch, thr = ac.input.throttle, trim0 = inp.trim;
+      let minP = 9, maxDev = 0, held = 0, wound = 0;
+      const dt = 1 / 25;
+      for (let t = dt; t < 24; t += dt) {
+        if (t >= 1 && !rt.get('runawayTrim')) rt.trigger({ name: 'runawayTrim', arg: -0.12 });
+        const f = rt.get('runawayTrim');
+        if (cutAt != null && f && !f.cut && t >= cutAt) rt.action('trimCutout');
+        // T held (src/input.js: 0.12/s, speeding up to 0.345/s over 1.5 s) while the wheel is still wound nose down
+        if (f && f.cut && f.bias < -0.02) { held += dt; const r = 0.12 + Math.min(held, 1.5) * 0.15; inp.trim = clamp(inp.trim + r * dt, -1, 1); wound += r * dt; } else held = 0;
+        // the stick: direct mode needs a hand on it (the auto-trim is main.js's, not here); assist holds the attitude by itself
+        if (mode === 'direct') { inp.pitch = inp.kbPitch = clamp(3 * (p0 - ac.euler.pitch) - 1.5 * ac.omega.x, -1, 1); inp.roll = inp.kbRoll = clamp(-2 * ac.euler.roll + 0.5 * ac.omega.z, -1, 1); }
+        ac.input.throttle = thr;
+        fcs.update(dt, inp, ac, 1);
+        rt.preStep(dt, ac, inp);
+        ac.step(dt, AIR); ac.events.length = 0;
+        rt.check(ac, { t, distToThreshold: 1e9 });
+        rt.postStep(dt, ac);
+        minP = Math.min(minP, ac.euler.pitch);
+        if (t > 3) maxDev = Math.max(maxDev, Math.abs(ac.euler.pitch - p0));
+      }
+      return { minP: (minP - p0) * RAD, maxDev: maxDev * RAD, bias: rt.get('runawayTrim').bias, wound, trimInp: inp.trim - (rt.get('runawayTrim').held ?? trim0), crashed: ac.crashed };
+    };
+    const left = fly(null), cut = fly(3.5);
+    check(left.minP < -8, `${mode}: left alone, the runaway beats the flight control: the nose goes ${left.minP.toFixed(0)}° down`);
+    check(cut.bias > -0.05 && cut.maxDev < 6 && !cut.crashed, `${mode}: cut out at 2.5 s and wound back with T: the wheel is back to ${cut.bias.toFixed(2)} and the nose never more than ${cut.maxDev.toFixed(1)}° off`);
+    check(Math.abs(cut.trimInp) < 0.02 && cut.wound > 0.3, `${mode}: the trim keys turn the wheel, not the electric trim (${cut.wound.toFixed(2)} of winding; the Input's own trim stays where the cutout left it, ${cut.trimInp.toFixed(2)} off)`);
+  }
 
   console.log('\n== The ten missions ==');
   const ids = FAILURES_MISSIONS.map((m) => m.id);
