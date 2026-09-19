@@ -8,7 +8,7 @@
 // It runs in plain Node, so it can only import the modules and inspect them — no
 // canvas, no WebGL. Anything that needs a real frame is checked by the look sheet
 // in the website repo (tools/ctl-shots/looksheet.mjs).
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -253,7 +253,9 @@ for (const f of ['terrain-look.js', 'airport-look.js', 'carrier-look.js']) {
   // House rules for every module that draws the world.
   const WORLD_FILES = ['sky.js', 'world-atmosphere.js', 'world-water.js', 'world-ground.js', 'world-vegetation.js', 'world-props.js',
     'terrain-look.js', 'airport-look.js', 'carrier-look.js', 'textures.js', 'lights.js', 'palette.js', 'quality.js',
-    'city-look.js'];
+    'city-look.js',
+    // the city's helper modules, whatever the art department adds (src/art/city-*.js, see docs/briefs/city/)
+    ...readdirSync(join(ROOT, 'src', 'art')).filter((f) => /^city-.+\.js$/.test(f) && f !== 'city-look.js')];
   for (const f of WORLD_FILES) {
     const code = src(`art/${f}`);
     ok(!FORBIDDEN.test(code), `art/${f} must not import from physics/, systems/ or ui/`);

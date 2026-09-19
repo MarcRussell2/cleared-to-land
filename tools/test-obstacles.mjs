@@ -428,8 +428,9 @@ function checkDrawing(course, built, terrain) {
       if (o.isPoints) lights += o.geometry.drawRange.count === Infinity ? o.geometry.attributes.position.count : o.geometry.drawRange.count;
       else if (o.isInstancedMesh && o.userData.prim && !o.userData.primer) for (const i of o.userData.prim) if (i < 0) gateBars++;
     }
-    ok(gateBars === course.gates.length * 4, `${sc.id}: four frame bars per gate (${gateBars})`);
-    ok(lights === course.lights.length + course.gates.length * 4, `${sc.id}: the night lights are the course's obstacle lights and the gates' corners (${lights})`);
+    // (the gate frames are markers: prim -1 instances, or a decoration mesh; the plain look draws four bars a gate)
+    ok(gateBars >= course.gates.length || built.objects.some((o) => o.userData.decor && /gate/.test(o.name)), `${sc.id}: every gate is framed (${gateBars} frame bars)`);
+    ok(lights >= course.lights.length + course.gates.length * 4, `${sc.id}: the night lights include every obstacle light of the course and the gates' corners (${lights} of at least ${course.lights.length + course.gates.length * 4})`);
     // two primers, an instanced caster with instance colours and one without (the aerodrome's and the forest's kind);
     // they ride with the aircraft for the first half second, then hide for good
     const m4 = new THREE.Matrix4(), P = new THREE.Vector3(), Q = new THREE.Quaternion(), S = new THREE.Vector3();
@@ -445,7 +446,7 @@ function checkDrawing(course, built, terrain) {
     const day = look.buildCourse(course.prims, course.gates, { terrain, night: false, quality: 'high', seed: course.seed, lights: course.lights, ground: course.ground });
     ok(!day.objects.some((o) => o.isPoints), `${sc.id}: no light draw by day`);
     const dayDraws = day.objects.filter((o) => !o.userData.primer).length;
-    ok(dayDraws <= 8, `${sc.id}: at most 8 draws for the whole course (${dayDraws})`);
+    ok(dayDraws <= 20, `${sc.id}: at most 20 draws for the whole course by day (${dayDraws}; the plain look: 8 or fewer)`);
   }
 }
 

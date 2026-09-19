@@ -57,7 +57,10 @@
 //      the terrain (within 1.5 m of it) or at its area's `y`.
 //   3. Obstacle trees are the bush strips' spruce (world-vegetation.js buildObstacleTrees, the OBSTACLE_TREE size),
 //      placed at their crown prim's x, z, base and scale.
-//   4. Night: the lights (and lit windows) only when `night`; no light object by day.
+//   4. Night: the lights (and lit windows) only when `night`; no light object by day. Every light in `lights` and the
+//      four corners of every gate are drawn (more are welcome within the budget: street lamps, window glow).
+//   4b. Gates stay visible markers: the plain look's four bars a gate (instances with prim -1), or a decoration mesh
+//      named with "gate" in it.
 //   5. Budgets for the whole course (tools/test-obstacles.mjs section 10 measures Metro City with The Gauntlet's
 //      course, the biggest): at most 60 draws by day (+1 for the lights at night) and, submitted per pass counting
 //      every instance, 450k triangles at high, 250k at medium, 120k at low; canvas textures at most 8 MB in all; at

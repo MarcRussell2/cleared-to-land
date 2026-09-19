@@ -93,6 +93,8 @@ function sCurve(u0, v0, u1, v1, alt0, alt1, kt) {
     { u: u1, v: v1, alt: alt1, arc: b > 0 ? 'L' : 'R', r, kt },
   ];
 }
+// A gate's name at the start of a hint.
+const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
 const OFFICE = (h) => ({ cls: 'office', facade: 'glass', roof: 'crown', lit: 0.35, height: h < 60 ? 'mid' : h < 150 ? 'high' : 'super' });
 
 // ---- The Needle (48, 49): two round glass towers on a pier in the bay, 33 m apart, joined by a skybridge at the top.
@@ -174,7 +176,7 @@ function avenueCourse(u0, u1, bridges, seed) {
     for (const e of [-1, 1]) tower(b.u, 44, e);
     obstacles.push({ kind: 'skybridge', a: { u: b.u, v: -66 }, b: { u: b.u, v: 66 }, y0: b.y0, y1: b.y1, d: 26, name: b.name });
     // (the gate: from 12 m up to 12 m under the skybridge's underside - the fin stands 9 m over the airplane's middle)
-    gates.push({ u: b.u - 30, v: 0, y: b.y0 / 2, w: 90, h: b.y0 - 24, name: `under ${b.name}` });
+    gates.push({ u: b.u - 30, v: 0, y: b.y0 / 2, w: 90, h: b.y0 - 24, name: `the gap under ${b.name}` });
   }
   for (const e of [-1, 1]) {
     for (let u = u0; u < u1;) {
@@ -226,7 +228,7 @@ const checkerboard = {
     const n = c.mission.next();
     // along the line to the checkerboard: distance to the turn and the height wanted
     const toTurn = (c.u - CB_S.u) * -Math.cos(45 * D2R) + (c.v - CB_S.v) * Math.sin(45 * D2R);
-    if (n && n.gate.name === 'the checkerboard line') return `Fly at the checkerboard: turn in ${Math.max(0, Math.round((toTurn + 900) / 100) * 100)} m.`;
+    if (n && n.gate.name === 'the checkerboard line') return `Fly at the checkerboard: turn in ${Math.max(0, Math.round(toTurn / 100) * 100)} m.`;
     if (c.u < CB_S.u + 120 && c.v > 150 && toTurn > -60) return toTurn > 250 ? `Turn right in ${Math.round(toTurn / 50) * 50} m, over the shore.` : 'Turn right now: 25 degrees of bank, and hold it.';
     if (c.u < CB_E && c.v > 12) return 'Keep turning right: 25 degrees, roll out on the centerline.';
     if (c.u < -300 && Math.abs(c.v) > 25) return `Line up: ${Math.round(Math.abs(c.v))} m ${c.v > 0 ? 'left' : 'right'} to the centerline.`;
@@ -255,9 +257,9 @@ const downtown = {
   aircraft: 'condor', site: 'metro', time: 12.4, vis: 25000,
   desc: 'Metro Intl sits at the end of Grand Avenue, and the avenue has two skybridges across it: the first 100 metres up, the second 82. Every tower along the street is taller than you. Fly the last three kilometres down the street, below the rooftops, and land at the end of it.',
   tips: [
-    'Down to 220 ft over the harbor and hold it: the skybridges are 330 and 270 ft up, and your fin stands 30 ft above you.',
+    'Down to 230 ft on the altimeter over the harbor and hold it: the skybridges\' undersides are at 340 and 280 ft, and your fin stands 30 ft above you.',
     'Stay in the middle of the avenue: it is 120 m wide and you are 34. Small bank angles only; the wind swirls between the towers.',
-    'Under the second skybridge (below 230 ft), hold your height until the glideslope comes down to meet you, 800 m out, then fly it down. Arm the spoilers (K) and set autobrake (L).',
+    'Under the second skybridge (below 240 ft), hold your height until the glideslope comes down to meet you, 800 m out, then fly it down. Arm the spoilers (K) and set autobrake (L).',
   ],
   wind: { rel: -30, speed: 10, gust: 16, turb: 0.28 }, weight: 'normal',
   spawn: { u: -5000, v: 0, alt: 72, gamma: 0, flap: 0.75, speedKt: 150, fixed: true },
@@ -272,10 +274,11 @@ const downtown = {
   hint: (c) => {
     if (c.ac.onGround) return null;
     const agl = c.ra * 0.3048;
-    if (c.u < -1850) {
+    if (c.u < DT_BRIDGES[1].u) {
       if (Math.abs(c.v) > 25) return `Back to the middle of the avenue: ${Math.round(Math.abs(c.v))} m ${c.v > 0 ? 'left' : 'right'}.`;
-      const b = c.u < -2900 ? DT_BRIDGES[0] : DT_BRIDGES[1];
-      return `Under ${b.name} in ${Math.round((b.u - c.u) / 10) * 10} m: stay below ${Math.round((b.y0 - 22) / 0.3048 / 10) * 10} ft.`;
+      // (heights as the altimeter reads them: above the sea, 4 m under the threshold; the fin stands 9 m over the middle)
+      const b = c.u < DT_BRIDGES[0].u ? DT_BRIDGES[0] : DT_BRIDGES[1];
+      return `Under ${b.name} in ${Math.round((b.u - c.u) / 10) * 10} m: stay below ${Math.floor((b.y0 + 4 - 12) / 0.3048 / 10) * 10} ft on the altimeter.`;
     }
     if (c.u < -900) return agl > 60 ? 'Hold your height: the glideslope will come down to you.' : 'Below the glideslope: hold it level until you meet it.';
     return null;
@@ -315,7 +318,7 @@ const slalom = {
       const want = SL_APEX.find((a) => a.u > c.u - 50);
       if (!want) return null;
       const off = c.v - want.v;
-      if (n.dist < 450) return Math.abs(off) > 10 ? `${n.gate.name}: ${Math.round(Math.abs(off))} m ${off > 0 ? 'left' : 'right'}!` : `${n.gate.name}: on it, hold the bank.`;
+      if (n.dist < 450) return Math.abs(off) > 10 ? `${cap(n.gate.name)}: ${Math.round(Math.abs(off))} m ${off > 0 ? 'left' : 'right'}!` : `${cap(n.gate.name)}: on it, hold the bank.`;
       return `Next: ${n.gate.name}, 60 m ${want.v > 0 ? 'right' : 'left'} of the centerline, ${Math.round(n.dist / 10) * 10} m.`;
     }
     if (c.u < -300 && Math.abs(c.v) > 20) return `Back onto the centerline: ${Math.round(Math.abs(c.v))} m ${c.v > 0 ? 'left' : 'right'}.`;
@@ -338,7 +341,7 @@ const underBridge = {
   wind: { rel: -20, speed: 9, turb: 0.2 }, weight: 'normal',
   spawn: { u: -8300, v: 0, alt: 150, gamma: -2, flap: 0.75, speedKt: 150, fixed: true },
   failures: [], scoring: { type: 'runway' },
-  course: { obstacles: [], gates: [{ u: BRIDGE.u, v: 0, y: 26, w: 150, h: 36, name: 'under the Harbor Bridge' }] },
+  course: { obstacles: [], gates: [{ u: BRIDGE.u, v: 0, y: 26, w: 150, h: 36, name: 'the gap under the Harbor Bridge' }] },
   route: [
     { u: -7000, v: 0, alt: 70 },
     { u: -6250, v: 0, alt: 29 },
@@ -404,7 +407,7 @@ const GA_APEX = [{ u: -3500, v: 60, y: 108 }, { u: -2700, v: -60, y: 98 }];
 const GA_BRIDGE = [{ u: -1700, y0: 80, y1: 140, name: 'the skybridge' }];
 const gauntletCourse = merge(
   needleCourse(),
-  { gates: [{ u: BRIDGE.u, v: 0, y: 26, w: 150, h: 36, name: 'under the Harbor Bridge' }] },
+  { gates: [{ u: BRIDGE.u, v: 0, y: 26, w: 150, h: 36, name: 'the gap under the Harbor Bridge' }] },
   { carve: [{ u0: -4300, u1: -350, v0: -340, v1: 340 }], ground: [{ u0: -4300, u1: -350, v0: -340, v1: 340, kind: 'avenue', keep: false }] },
   slalomTowers(GA_APEX, 49),
   avenueCourse(-1800, -560, GA_BRIDGE, 490),
@@ -415,7 +418,7 @@ const gauntlet = {
   weather: { preset: 'storm', rain: 0.7, lightning: 0.5, darkness: 0.6 },
   desc: 'All of it, in one approach, at night, in a thunderstorm: through the Needle, under the Harbor Bridge, through two gaps in the towers and down Grand Avenue under the skybridge. Then land, with the rain coming sideways. Five gates, one airliner, no second go.',
   tips: [
-    'It is the four missions before this one back to back: the Needle at 35 degrees of bank, the bridge under 150 ft, the gaps in a 25-degree weave, the avenue under 220 ft.',
+    'It is the four missions before this one back to back: the Needle at 35 degrees of bank, the bridge under 150 ft, the gaps in a 25-degree weave, the avenue under 240 ft.',
     'Fly the lights: the Needle\'s eye and every gap are framed in orange, the skybridge has red lights at its ends, the bridge deck is lit yellow.',
     'Gusts to 18 kt: small bank angles everywhere except in the eye, and do the checklist over the bay. Arm the spoilers (K) and set autobrake (L).',
   ],
@@ -440,9 +443,9 @@ const gauntlet = {
     if (!n) return null;
     const g = n.gate.name;
     if (g === 'the eye of the Needle') return n.dist > 450 ? 'The Needle first: line up on the eye, 250 ft.' : n.dist > 190 ? 'Roll right: 35 degrees, now.' : 'Hold the bank.';
-    if (g === 'under the Harbor Bridge') return c.ra > 155 ? 'Down to 100 ft over the water for the bridge.' : 'Under the bridge: hold 100 ft, wings level.';
-    if (/^gap/.test(g)) { const a = GA_APEX[+g.slice(4) - 1]; const off = c.v - a.v; return n.dist < 450 && Math.abs(off) > 10 ? `${g}: ${Math.round(Math.abs(off))} m ${off > 0 ? 'left' : 'right'}!` : `${g}: 60 m ${a.v > 0 ? 'right' : 'left'} of the centerline, ${Math.round(n.dist / 10) * 10} m.`; }
-    if (/skybridge/.test(g)) return Math.abs(c.v) > 25 ? `The avenue: ${Math.round(Math.abs(c.v))} m ${c.v > 0 ? 'left' : 'right'}.` : 'Down the avenue: under the skybridge, below 220 ft.';
+    if (g === 'the gap under the Harbor Bridge') return c.ra > 155 ? 'Down to 100 ft over the water for the bridge.' : 'Under the bridge: hold 100 ft, wings level.';
+    if (/^gap/.test(g)) { const a = GA_APEX[+g.slice(4) - 1]; const off = c.v - a.v; return n.dist < 450 && Math.abs(off) > 10 ? `${cap(g)}: ${Math.round(Math.abs(off))} m ${off > 0 ? 'left' : 'right'}!` : `${cap(g)}: 60 m ${a.v > 0 ? 'right' : 'left'} of the centerline, ${Math.round(n.dist / 10) * 10} m.`; }
+    if (/skybridge/.test(g)) return Math.abs(c.v) > 25 ? `The avenue: ${Math.round(Math.abs(c.v))} m ${c.v > 0 ? 'left' : 'right'}.` : 'Down the avenue: under the skybridge, below 240 ft on the altimeter.';
     return null;
   },
 };
