@@ -9,9 +9,9 @@
  *   the career board   every pilot's total across all twenty challenges
  *   per challenge      a top ten for each one, on its own sub-board
  *
- * It talks to `/api/scores` — a Cloudflare Worker on the same origin as the site (the
+ * It talks to `/api/scores` — a small score service on the same origin as the site (the
  * game is served from goodmarc.com/cleared-to-land/), so no CORS and no key. The
- * site repo owns that Worker and its registry; this file is the game's own small
+ * site repo owns that service and its registry; this file is the game's own small
  * client and deliberately duplicates nothing but the wire format.
  *
  * Everything degrades: with no network, or before the Worker exists, the game keeps
