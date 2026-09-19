@@ -922,6 +922,7 @@ button { font: inherit; }
   .overlay .door-set .door-foot { grid-template-columns: minmax(0, 1fr); grid-template-areas: "t" "c"; }
   .overlay .door-set .door-title { font-size: min(24px, 21cqw); }
   .overlay .door-go { width: 34px; height: 34px; }
+  .overlay .seg button { font-size: 12.5px; letter-spacing: 0.02em; }   /* "On approach" on one line */
   .overlay .fleet figcaption { font-size: 7.5px; letter-spacing: 0.04em; }
   .overlay .prog-big b { font-size: min(44px, 12vh); }
   .overlay .prog-big span { font-size: 14px; }
