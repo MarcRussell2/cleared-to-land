@@ -9,9 +9,12 @@
 //   3. each obstacle mission's course: it resolves the same way twice, the spawn is clear, the numbers each
 //      description quotes are true (printed), and every gate can be flown through anywhere inside its frame
 //      (wings level, gear down) without touching anything - a gate is never a trap;
-//   4. what is drawn IS what collides: src/art/city-look.js builds the course in Node and every instance of every
-//      mesh is checked against the prim it claims to draw (centre, axes, size), every solid drawn exactly once -
-//      for the three missions and for a course that uses every one of the engine's 14 kinds;
+//   4. what is drawn IS what collides (the drawing contract in the header of src/art/city-look.js): the course is
+//      built in Node and every vertex of every instance of every mesh is checked against the prim it claims to draw
+//      (inside it, within 0.5 m + 2%), and every prim's drawing must fill its volume - for the three missions and for
+//      a course that uses every one of the engine's 17 kinds (the city ladder's district, landmark and skybridge too);
+//  10. the city's budget: Metro City with The Gauntlet's course at the three quality tiers (draws, triangles a pass,
+//      textures, programs) and the same drawing contract - what the art department's city will be held to;
 //   5. gates and the mission runtime: pass / miss / wrong-way detection, the debrief lines, the points cap for a
 //      missed required gate, the bonus, the clamp, the HUD status line;
 //   6. the mission data (ids, n, fields, tips, touch words) and that no original site or challenge builds a field;
@@ -254,21 +257,31 @@ for (const sc of OBSTACLES_MISSIONS) {
   }
 }
 
-// ============================================================ 4. drawn = collides
-// Every kind the engine offers, in one course (the three missions use only some of them; the city ladder uses the
-// rest). The same course is flown in the page for stills of every kind (tools/fly-mission.mjs harbor-cranes --set).
+// ============================================================ 4. drawn = collides (the drawing contract)
+// The contract is the header of src/art/city-look.js: every solid is drawn from its own volume - anything drawn for a
+// prim lies inside it (grown by 0.5 m + 2% of the side) and the drawing of each prim reaches every face of it within
+// the same tolerance; every solid is drawn (the trunk under a spruce excepted); decoration (gate frames, the ground)
+// is never solid and the ground lies on the terrain. This is the check the art department's work is held to: it
+// reads the geometry of every mesh, instance by instance (or vertex by vertex through a `ctPrim` attribute), so it
+// holds whatever the art draws the volumes with. (Vertex-shader deformation is invisible to it, except the plain
+// look's declared ctTaper; draw real shapes with geometry.)
+// Every kind the engine offers, in one course (the three missions use only some of them; the city ladder the rest).
 const EVERY_KIND = { id: 'every-kind', site: 'harbor', course: {
   obstacles: [
     { kind: 'box', u: -3000, v: -60, w: 20, d: 10, h: 15, look: 'plain', color: 'concrete', tilt: 10 },
     { kind: 'tower', u: -2800, v: -150, w: 30, d: 30, h: 120, antenna: 12, name: 'the Meridian Tower' },
     { kind: 'tower', u: -2850, v: -220, w: 40, d: 24, h: 70, rot: 20, color: 2 },
+    { kind: 'tower', round: true, u: -2750, v: -300, w: 26, h: 150, taper: 0.8, name: 'a round tower', style: { cls: 'office', facade: 'glass', roof: 'spire', lit: 0.5 } },
+    { kind: 'tower', u: -2650, v: 420, w: 30, d: 30, h: 90, deck: 4, name: 'a tower on a pier', style: { cls: 'residential', facade: 'concrete', lit: 0.5 } },
     { kind: 'block', u: -2800, v: 150, w: 60, d: 25, h: 35 },
+    { kind: 'skybridge', a: { u: -2700, v: -60 }, b: { u: -2700, v: 60 }, y0: 70, y1: 90, d: 20 },
     { kind: 'cyl', u: -2600, v: -90, r: 4, r1: 2.5, h: 70 },
     { kind: 'mast', u: -2400, v: -120, h: 90, guys: true },
     { kind: 'cable', a: { u: -2200, v: -200, y: 22 }, b: { u: -2200, v: 200, y: 22 }, sag: 3, markers: 40 },
     { kind: 'powerline', type: 'hv', from: { u: -2000, v: -400 }, to: { u: -2000, v: 400 }, spans: 3, markers: 60 },
     { kind: 'powerline', type: 'pole', from: { u: -1900, v: -100 }, to: { u: -1900, v: 100 }, spans: 3 },
     { kind: 'bridge', u: -1500, v: 0, length: 300, deckY: 20, towerH: 40 },
+    { kind: 'bridge', u: -4200, v: 900, rot: 30, length: 600, deckY: 45, deckW: 26, towerH: 90, towerW: 8, towerD: 6, deck: 0, anchors: true, lamps: 60, piers: [-280, 280], name: 'the harbor bridge' },
     { kind: 'crane', type: 'tower', u: -1200, v: 120, h: 60, jib: 50, rot: 180 },
     { kind: 'crane', type: 'sts', u: -1000, v: 100, boom: 30 },
     { kind: 'quay', u: -800, v: 300, w: 60, d: 200, top: 3 },
@@ -277,94 +290,189 @@ const EVERY_KIND = { id: 'every-kind', site: 'harbor', course: {
     { kind: 'ship', type: 'tall', u: -600, v: -400, rot: 90 },
     { kind: 'tree', u: -500, v: 40, scale: 1 },
     { kind: 'treeWall', u: -400, from: -60, to: 60, step: 9, scale: 1.2, rows: 2, gap: { v: 0, w: 30 } },
+    { kind: 'landmark', type: 'checkerboard', u: -3600, v: -900, rot: 45, h: 90, r: 150, rTop: 55, boardW: 90, boardH: 70 },
+    { kind: 'district', u0: -3900, u1: -3300, v0: -700, v1: -250, block: 90, street: 20, h: [20, 80], seed: 9, style: { cls: 'residential', facade: 'concrete', roof: 'plant', lit: 0.45 } },
   ],
-  gates: [{ u: -1650, v: 0, y: 50, w: 60, h: 30, name: 'Gate 1' }],
+  gates: [{ u: -1650, v: 0, y: 50, w: 60, h: 30, name: 'Gate 1' }, { u: -2700, v: 0, y: 40, w: 40, h: 40, bank: 30, name: 'the banked gate' }],
+  ground: [{ u0: -3200, u1: -3000, v0: -200, v1: 0, kind: 'plaza' }, { u0: -3000, u1: -2900, v0: 0, v1: 200, kind: 'avenue' }],
 } };
 {
   const kinds = new Set(EVERY_KIND.course.obstacles.map((o) => o.kind));
-  ok(kinds.size === 14, `the every-kind course uses all 14 kinds (${[...kinds].join(', ')})`);
+  ok(kinds.size === 17, `the every-kind course uses all 17 kinds (${[...kinds].join(', ')})`);
+}
+const { WORLD_QUALITY } = await import('../src/art/quality.js');
+// The contract check. Returns { draws, tris, programs, texBytes, drawn, problems[] }.
+function checkDrawing(course, built, terrain) {
+  const problems = [], say2 = (m) => { if (problems.length < 8) problems.push(m); else problems.length === 8 && problems.push('...'); };
+  const n = course.prims.length;
+  // per prim: how far the drawing reaches along its own axes (boxes: min/max of each local axis; cylinders and
+  // capsules: the along-axis range and the largest radius reached relative to the surface there)
+  const lo = new Float64Array(n * 3).fill(Infinity), hi = new Float64Array(n * 3).fill(-Infinity), rad = new Float64Array(n).fill(0);
+  const drawn = new Uint8Array(n);
+  const P = new THREE.Vector3(), m4 = new THREE.Matrix4(), mw = new THREE.Matrix4(), S = new THREE.Vector3(), Q = new THREE.Quaternion();
+  const tolOf = (size) => 0.5 + 0.02 * size;
+  const visit = (i, x, y, z) => {
+    const p = course.prims[i];
+    drawn[i] = 1;
+    if (p.shape === 'box') {
+      const dx = x - p.cx, dy = y - p.cy, dz = z - p.cz;
+      const l = [dx * p.X[0] + dy * p.X[1] + dz * p.X[2], dx * p.Y[0] + dy * p.Y[1] + dz * p.Y[2], dx * p.Z[0] + dy * p.Z[1] + dz * p.Z[2]], h = [p.hx, p.hy, p.hz];
+      for (let k = 0; k < 3; k++) {
+        if (Math.abs(l[k]) > h[k] + tolOf(2 * h[k])) { say2(`${p.name} (prim ${i}, box): drawn ${(Math.abs(l[k]) - h[k]).toFixed(2)} m outside its volume on axis ${k}`); return; }
+        lo[i * 3 + k] = Math.min(lo[i * 3 + k], l[k]); hi[i * 3 + k] = Math.max(hi[i * 3 + k], l[k]);
+      }
+    } else if (p.shape === 'cyl') {
+      const f = p.y1 > p.y0 ? Math.min(1, Math.max(0, (y - p.y0) / (p.y1 - p.y0))) : 0, R = p.r0 + (p.r1 - p.r0) * f, d = Math.hypot(x - p.x, z - p.z);
+      const th = tolOf(p.y1 - p.y0), tr = tolOf(2 * Math.max(p.r0, p.r1));
+      if (y < p.y0 - th || y > p.y1 + th || d > R + tr) { say2(`${p.name} (prim ${i}, cylinder): drawn outside its volume (y ${y.toFixed(1)} in ${p.y0.toFixed(1)}..${p.y1.toFixed(1)}, r ${d.toFixed(2)} of ${R.toFixed(2)})`); return; }
+      lo[i * 3] = Math.min(lo[i * 3], y); hi[i * 3] = Math.max(hi[i * 3], y); rad[i] = Math.max(rad[i], R > 0 ? d / R : 1);
+    } else {
+      const ex = p.bx - p.ax, ey = p.by - p.ay, ez = p.bz - p.az, L2 = ex * ex + ey * ey + ez * ez, L = Math.sqrt(L2);
+      const t = L2 > 1e-9 ? ((x - p.ax) * ex + (y - p.ay) * ey + (z - p.az) * ez) / L2 : 0, tc = Math.min(1, Math.max(0, t));
+      const d = Math.hypot(x - p.ax - ex * tc, y - p.ay - ey * tc, z - p.az - ez * tc);
+      if (d > p.r + tolOf(2 * p.r) || (L > 0 && (t < -tolOf(L) / L - p.r / L || t > 1 + tolOf(L) / L + p.r / L))) { say2(`${p.name} (prim ${i}, capsule): drawn outside its volume (${d.toFixed(2)} m from its axis, radius ${p.r})`); return; }
+      lo[i * 3] = Math.min(lo[i * 3], t * L); hi[i * 3] = Math.max(hi[i * 3], t * L); rad[i] = Math.max(rad[i], p.r > 0 ? d / p.r : 1);
+    }
+  };
+  let draws = 0, tris = 0, texBytes = 0;
+  const programs = new Set(), textures = new Set();
+  for (const o of built.objects) {
+    if (o.userData.primer) continue;
+    draws++;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    for (const m of mats) {
+      if (!m) continue;
+      programs.add(m.customProgramCacheKey ? m.customProgramCacheKey() : m.type + ':' + m.name);
+      for (const k of ['map', 'normalMap', 'roughnessMap', 'emissiveMap', 'alphaMap', 'aoMap']) if (m[k] && !textures.has(m[k])) { textures.add(m[k]); const im = m[k].image; if (im && im.width) texBytes += im.width * im.height * 4; }
+    }
+    if (o.isPoints) continue;
+    const g = o.geometry, idx = g.index, pos = g.attributes.position;
+    tris += (idx ? idx.count : pos.count) / 3 * (o.isInstancedMesh ? o.count : 1);
+    if (o.userData.decor) {
+      // decoration on the ground: every vertex within 1.5 m of the terrain (or on its area's fixed height)
+      const fixed = course.ground.filter((a) => a.y != null).map((a) => a.y);
+      let off = 0;
+      for (let v = 0; v < pos.count; v += 7) {
+        P.fromBufferAttribute(pos, v);
+        const d = P.y - terrain.height(P.x, P.z);
+        if (!(d > -0.1 && d < 1.5) && !fixed.some((y) => Math.abs(P.y - y) < 1.5)) off++;
+      }
+      if (off) say2(`${o.name}: ${off} sampled vertices of the decoration are not on the ground`);
+      continue;
+    }
+    if (o.name === 'course/trees') {
+      // the spruce: at its crown prim's x, z, base and scale (the model is the world's)
+      const prim = o.userData.prim;
+      for (let k = 0; k < o.count; k++) {
+        o.getMatrixAt(k, m4); m4.decompose(P, Q, S);
+        const p = course.prims[prim[k]], want = p.base != null ? p.base : p.y0;
+        drawn[prim[k]] = 1;
+        if (!(near(P.x, p.x, 1e-3) && near(P.z, p.z, 1e-3) && near(P.y, want, 1e-3) && near(S.x, p.scale, 1e-4) && near(S.y, p.scale, 1e-4))) say2(`tree ${prim[k]} drawn at ${P.toArray().map((x) => x.toFixed(2))} x${S.x.toFixed(2)}, collides at ${p.x.toFixed(2)},${want.toFixed(2)},${p.z.toFixed(2)} x${p.scale}`);
+        if (!near(p.r0, look.OBSTACLE_TREE.radius * p.scale, 1e-6) || !near(p.y1 - want, look.OBSTACLE_TREE.height * p.scale, 1e-6)) say2(`tree ${prim[k]} collision size is not OBSTACLE_TREE x scale`);
+      }
+      continue;
+    }
+    o.updateMatrixWorld(true); mw.copy(o.matrixWorld);
+    const taper = g.attributes.ctTaper;
+    if (o.isInstancedMesh) {
+      const prim = o.userData.prim;
+      if (!prim || prim.length !== o.count) { say2(`${o.name}: an InstancedMesh drawing solids needs userData.prim for every instance`); continue; }
+      for (let k = 0; k < o.count; k++) {
+        const i = prim[k];
+        if (i < 0) continue;   // a gate frame: a marker
+        o.getMatrixAt(k, m4); m4.premultiply(mw);
+        const tp = taper ? taper.getX(k) : 1;
+        for (let v = 0; v < pos.count; v++) {
+          P.fromBufferAttribute(pos, v);
+          if (tp !== 1) { const f = 1 + (tp - 1) * Math.min(1, Math.max(0, P.y + 0.5)); P.x *= f; P.z *= f; }
+          P.applyMatrix4(m4); visit(i, P.x, P.y, P.z);
+        }
+      }
+    } else {
+      const cp = g.attributes.ctPrim;
+      if (!cp) { say2(`${o.name}: a Mesh drawing solids needs a ctPrim attribute (or userData.decor for decoration)`); continue; }
+      for (let v = 0; v < pos.count; v++) { const i = cp.getX(v); if (i < 0) continue; P.fromBufferAttribute(pos, v).applyMatrix4(mw); visit(i, P.x, P.y, P.z); }
+    }
+  }
+  // coverage: each prim's drawing reaches each of its faces
+  let missing = 0, thin = 0;
+  course.prims.forEach((p, i) => {
+    if (p.look === 'trunk') return;
+    if (!drawn[i]) { missing++; if (missing < 4) say2(`${p.name} (prim ${i}, ${p.kind}) is not drawn`); return; }
+    if (p.look === 'tree') return;
+    let short = null;
+    if (p.shape === 'box') { const h = [p.hx, p.hy, p.hz]; for (let k = 0; k < 3; k++) { const t = tolOf(2 * h[k]); if (hi[i * 3 + k] < h[k] - t || lo[i * 3 + k] > -h[k] + t) short = `axis ${k}: drawn ${lo[i * 3 + k].toFixed(1)}..${hi[i * 3 + k].toFixed(1)} of +-${h[k].toFixed(1)}`; } }
+    else if (p.shape === 'cyl') { const t = tolOf(p.y1 - p.y0); if (lo[i * 3] > p.y0 + t || hi[i * 3] < p.y1 - t || rad[i] < 0.9) short = `height ${lo[i * 3].toFixed(1)}..${hi[i * 3].toFixed(1)} of ${p.y0.toFixed(1)}..${p.y1.toFixed(1)}, radius ${(rad[i] * 100).toFixed(0)}%`; }
+    else { const L = Math.hypot(p.bx - p.ax, p.by - p.ay, p.bz - p.az), t = tolOf(L) + p.r; if (lo[i * 3] > t || hi[i * 3] < L - t || rad[i] < 0.9) short = `along ${lo[i * 3].toFixed(1)}..${hi[i * 3].toFixed(1)} of 0..${L.toFixed(1)}, radius ${(rad[i] * 100).toFixed(0)}%`; }
+    if (short) { thin++; if (thin < 4) say2(`${p.name} (prim ${i}, ${p.kind}) does not fill its volume: ${short}`); }
+  });
+  return { draws, tris: Math.round(tris), programs: programs.size, texBytes, missing, thin, problems };
 }
 {
-  const m4 = new THREE.Matrix4(), P = new THREE.Vector3(), Q = new THREE.Quaternion(), S = new THREE.Vector3(), ax = new THREE.Vector3();
   for (const sc of [...OBSTACLES_MISSIONS, EVERY_KIND]) {
     const { site, course } = planned(sc);
     const { Terrain } = await import('../src/world/terrain.js');
     const { siteFlats } = await import('../src/systems/scenarios.js');
     const terrain = new Terrain({ ...site.terrain, flats: siteFlats(site) });
-    const built = look.buildCourse(course.prims, course.gates, { terrain, night: true, quality: 'high', seed: course.seed, lights: course.lights });
+    const built = look.buildCourse(course.prims, course.gates, { terrain, night: true, quality: 'high', seed: course.seed, lights: course.lights, ground: course.ground });
     ok(built && Array.isArray(built.objects) && typeof built.update === 'function', `${sc.id}: buildCourse must return { objects, update }`);
-    const drawn = new Int32Array(course.prims.length);
-    let bad = 0, gateBars = 0, lights = 0;
-    const primers = [];
-    const flag = (msg) => { bad++; if (bad < 6) console.log('      ' + sc.id + ': ' + msg); };
+    const r = checkDrawing(course, built, terrain);
     for (const o of built.objects) {
       ok(!!o.name && (!o.material || !!o.material.name), `${sc.id}: every course object and material is named (${o.name})`);
-      if (o.isPoints) { lights += o.geometry.drawRange.count === Infinity ? o.geometry.attributes.position.count : o.geometry.drawRange.count; continue; }
-      if (!o.isInstancedMesh) { flag(`${o.name} is not instanced`); continue; }
-      if (o.userData.primer) {
-        // a shadow primer: one 1 mm instance on a solid's own geometry and material, casting, hidden after 0.5 s
-        o.getMatrixAt(0, m4); m4.decompose(P, Q, S);
-        ok(o.count === 1 && o.castShadow && S.x < 0.01 && built.objects.some((x) => x !== o && !x.userData.primer && x.geometry === o.geometry && x.material === o.material), `${sc.id}: ${o.name} is a 1 mm instance of a course mesh's own geometry and material`);
-        primers.push(o);
-        continue;
-      }
-      ok(o.frustumCulled !== false && !!o.boundingSphere, `${sc.id}: ${o.name} keeps its bounds for culling`);
-      const prim = o.userData.prim;
-      ok(prim && prim.length === o.count, `${sc.id}: ${o.name} carries the prim index of every instance`);
-      for (let k = 0; k < o.count; k++) {
-        o.getMatrixAt(k, m4);
-        const i = prim[k];
-        if (i < 0) { gateBars++; continue; }
-        const p = course.prims[i];
-        drawn[i]++;
-        m4.decompose(P, Q, S);
-        if (o.name === 'course/trees') {
-          const want = p.base != null ? p.base : p.y0;
-          if (!(near(P.x, p.x, 1e-3) && near(P.z, p.z, 1e-3) && near(P.y, want, 1e-3) && near(S.x, p.scale, 1e-4) && near(S.y, p.scale, 1e-4))) flag(`tree ${i} drawn at ${P.toArray().map((x) => x.toFixed(2))} x${S.x.toFixed(2)}, collides at ${p.x.toFixed(2)},${want.toFixed(2)},${p.z.toFixed(2)} x${p.scale}`);
-          // and the spruce's collision size is OBSTACLE_TREE's
-          if (!near(p.r0, look.OBSTACLE_TREE.radius * p.scale, 1e-6) || !near(p.y1 - want, look.OBSTACLE_TREE.height * p.scale, 1e-6)) flag(`tree ${i} collision size is not OBSTACLE_TREE x scale`);
-        } else if (p.shape === 'box') {
-          const e = m4.elements;
-          const cols = [[e[0], e[1], e[2]], [e[4], e[5], e[6]], [e[8], e[9], e[10]]];
-          const len = cols.map((c) => Math.hypot(...c));
-          const size = [2 * p.hx, 2 * p.hy, 2 * p.hz], axes = [p.X, p.Y, p.Z];
-          const okAxes = cols.every((c, j) => near(c[0] / len[j], axes[j][0], 1e-4) && near(c[1] / len[j], axes[j][1], 1e-4) && near(c[2] / len[j], axes[j][2], 1e-4));
-          if (!(near(e[12], p.cx, 1e-3) && near(e[13], p.cy, 1e-3) && near(e[14], p.cz, 1e-3) && len.every((l, j) => near(l, size[j], 1e-3)) && okAxes)) flag(`box ${i} (${p.name}) drawn differently from its volume`);
-        } else if (p.shape === 'cyl') {
-          if (!(near(P.x, p.x, 1e-3) && near(P.z, p.z, 1e-3) && near(P.y, (p.y0 + p.y1) / 2, 1e-3) && near(S.y, p.y1 - p.y0, 1e-3) && near(S.x, p.r0, 1e-4) && near(S.z, p.r0, 1e-4))) flag(`cylinder ${i} (${p.name}) drawn differently from its volume`);
-        } else {
-          const ball = p.ax === p.bx && p.ay === p.by && p.az === p.bz;
-          if (ball) { if (!(near(P.x, p.ax, 1e-3) && near(P.y, p.ay, 1e-3) && near(P.z, p.az, 1e-3) && near(S.x, p.r, 1e-4))) flag(`marker ${i} drawn differently`); continue; }
-          const len = Math.hypot(p.bx - p.ax, p.by - p.ay, p.bz - p.az);
-          ax.set(0, 1, 0).applyQuaternion(Q);
-          const d = [(p.bx - p.ax) / len, (p.by - p.ay) / len, (p.bz - p.az) / len];
-          if (!(near(P.x, (p.ax + p.bx) / 2, 1e-3) && near(P.y, (p.ay + p.by) / 2, 1e-3) && near(P.z, (p.az + p.bz) / 2, 1e-3) && near(S.y, len, 1e-3) && near(S.x, p.r, 1e-4) && near(Math.abs(ax.x * d[0] + ax.y * d[1] + ax.z * d[2]), 1, 1e-4))) flag(`tube ${i} (${p.name}) drawn differently from its capsule`);
-        }
-      }
+      if (!o.isPoints && !o.userData.primer && !o.userData.decor) ok(o.frustumCulled !== false && !!(o.boundingSphere || o.geometry.boundingSphere), `${sc.id}: ${o.name} keeps its bounds for culling`);
     }
-    // every solid drawn exactly once, except the trunks under a drawn spruce (the spruce model has its trunk)
-    let missing = 0, twice = 0;
-    course.prims.forEach((p, i) => { if (p.look === 'trunk') { if (drawn[i]) twice++; return; } if (drawn[i] === 0) missing++; else if (drawn[i] > 1) twice++; });
-    ok(missing === 0 && twice === 0, `${sc.id}: every solid drawn exactly once (${missing} missing, ${twice} twice)`);
-    ok(bad === 0, `${sc.id}: every drawn solid sits exactly on its collision volume (${bad} differ)`);
+    ok(r.problems.length === 0, `${sc.id}: every solid drawn inside its volume and filling it (${r.missing} not drawn, ${r.thin} not filled): ${r.problems.join('; ')}`);
+    let gateBars = 0, lights = 0;
+    const primers = built.objects.filter((o) => o.userData.primer);
+    for (const o of built.objects) {
+      if (o.isPoints) lights += o.geometry.drawRange.count === Infinity ? o.geometry.attributes.position.count : o.geometry.drawRange.count;
+      else if (o.isInstancedMesh && o.userData.prim && !o.userData.primer) for (const i of o.userData.prim) if (i < 0) gateBars++;
+    }
     ok(gateBars === course.gates.length * 4, `${sc.id}: four frame bars per gate (${gateBars})`);
     ok(lights === course.lights.length + course.gates.length * 4, `${sc.id}: the night lights are the course's obstacle lights and the gates' corners (${lights})`);
     // two primers, an instanced caster with instance colours and one without (the aerodrome's and the forest's kind);
     // they ride with the aircraft for the first half second, then hide for good
+    const m4 = new THREE.Matrix4(), P = new THREE.Vector3(), Q = new THREE.Quaternion(), S = new THREE.Vector3();
+    for (const o of primers) { o.getMatrixAt(0, m4); m4.decompose(P, Q, S); ok(o.count === 1 && o.castShadow && S.x < 0.01 && built.objects.some((x) => x !== o && !x.userData.primer && x.geometry === o.geometry && x.material === o.material), `${sc.id}: ${o.name} is a 1 mm instance of a course mesh's own geometry and material`); }
     ok(primers.length === 2 && primers.filter((o) => !!o.instanceColor).length === 1, `${sc.id}: two shadow primers, with and without instance colours (${primers.length})`);
     const acPos = new THREE.Vector3(123, 45, -678);
     built.update(0.04, 0.04, acPos);
     ok(primers.every((o) => o.visible && o.position.equals(acPos)), `${sc.id}: the shadow primers ride with the aircraft at the start`);
-    // blinking rewrites the colour buffer only on a toggle
     built.update(0.1, 0.1, acPos); built.update(0.1, 0.9, acPos); built.update(0.1, 1.6, acPos);
     ok(primers.every((o) => !o.visible), `${sc.id}: the shadow primers are hidden after half a second`);
-    say(`${sc.id}: ${built.objects.length - primers.length} draws (+${primers.length} shadow primers for 0.5 s), every one of ${course.prims.length} solids drawn on its own volume, ${gateBars} gate bars, ${lights} lights at night`);
+    say(`${sc.id}: ${r.draws} draws (+${primers.length} shadow primers for 0.5 s), ${course.prims.length} solids each drawn inside and filling its own volume, ${gateBars} gate bars, ${lights} lights at night, ${Math.round(r.tris / 1000)}k triangles`);
     // by day: no lights object at all
-    const day = look.buildCourse(course.prims, course.gates, { terrain, night: false, quality: 'high', seed: course.seed, lights: course.lights });
+    const day = look.buildCourse(course.prims, course.gates, { terrain, night: false, quality: 'high', seed: course.seed, lights: course.lights, ground: course.ground });
     ok(!day.objects.some((o) => o.isPoints), `${sc.id}: no light draw by day`);
     const dayDraws = day.objects.filter((o) => !o.userData.primer).length;
     ok(dayDraws <= 8, `${sc.id}: at most 8 draws for the whole course (${dayDraws})`);
   }
+}
+
+// ============================================================ 10. the city's budget (the art department's too)
+// Metro City with The Gauntlet's course (the most any flight there builds), at the three quality tiers: draws, the
+// triangles submitted in one pass (every instance counted), textures, programs, and the drawing contract above.
+{
+  const { CITY_MISSIONS } = await import('../src/missions/city.js');
+  const g = CITY_MISSIONS.find((s) => s.id === 'gauntlet');
+  const site = SITES.metro, course = ObstacleField.plan(site, g);
+  const { Terrain } = await import('../src/world/terrain.js');
+  const { siteFlats } = await import('../src/systems/scenarios.js');
+  const terrain = new Terrain({ ...site.terrain, flats: siteFlats(site) });
+  const BUDGET = { high: 450000, medium: 250000, low: 120000 };
+  const was = WORLD_QUALITY.detail;
+  for (const tier of ['high', 'medium', 'low']) {
+    WORLD_QUALITY.detail = tier;
+    const day = checkDrawing(course, look.buildCourse(course.prims, course.gates, { terrain, night: false, quality: tier, seed: course.seed, lights: course.lights, ground: course.ground }), terrain);
+    const nightB = look.buildCourse(course.prims, course.gates, { terrain, night: true, quality: tier, seed: course.seed, lights: course.lights, ground: course.ground });
+    const nightDraws = nightB.objects.filter((o) => !o.userData.primer).length;
+    ok(day.problems.length === 0, `metro + gauntlet (${tier}): every solid drawn inside and filling its volume: ${day.problems.join('; ')}`);
+    ok(day.draws <= 60 && nightDraws <= 61, `metro + gauntlet (${tier}): at most 60 draws by day, 61 at night (${day.draws}, ${nightDraws})`);
+    ok(day.tris <= BUDGET[tier], `metro + gauntlet (${tier}): at most ${BUDGET[tier] / 1000}k triangles a pass (${Math.round(day.tris / 1000)}k)`);
+    ok(day.texBytes <= 8 * 1024 * 1024 && day.programs <= 6, `metro + gauntlet (${tier}): textures at most 8 MB (${(day.texBytes / 1048576).toFixed(1)}), at most 6 programs (${day.programs})`);
+    say(`metro + gauntlet (${tier}): ${course.prims.length} solids, ${day.draws} draws by day (${nightDraws} at night), ${Math.round(day.tris / 1000)}k triangles a pass, ${day.programs} programs, ${(day.texBytes / 1048576).toFixed(1)} MB of textures`);
+  }
+  WORLD_QUALITY.detail = was;
 }
 
 // ============================================================ 5. gates and the mission runtime

@@ -34,12 +34,36 @@
 //   containers{ u, v, rot, rows, cols, tiers, seed }   a container yard, one solid per stack
 //   tree      { u, v, scale }   one obstacle spruce (the bush trees' look and size, OBSTACLE_TREE)
 //   treeWall  { u, from, to, step, scale, rows, rowGap, jitter, gap:{v, w} }   rows across the approach with a notch
-// Gates: { u, v, y, w, h, rot, name, required (default true), bonus (points, default 0; 5 for a bonus gate) }
-// - a rectangle w x h centred y above the threshold elevation, flown through along rot (0 = down the runway).
+// Added for the city ladder (src/missions/city.js):
+//   tower     also { round: true (a cylinder w across, `taper` top/bottom), deck | base (standing on a pier or an
+//             island rather than the ground), lights: 0 | 1 | 2 (obstacle lights on the roof), keep: false (no
+//             keep-out circle of its own), style (the look's hint, see below), top (roof above the threshold) }
+//   skybridge { a:{u,v}, b:{u,v}, y0, y1, d, name, style }   a building spanning from a to b, underside y0, top y1 (above
+//             the threshold), d deep: flown under, never over; red lights at its underside's ends
+//   landmark  { type:'checkerboard', u, v, rot, h, r, rTop, boardW, boardH, boardY, name, boardName }   a hill (a
+//             frustum, radius r at its foot and rTop at its crown, h tall) with a checkerboard board lying on the
+//             flank its local +X faces (rot 45: the south-east of a heading-north runway), floodlit, lit on top
+//   district  { u0, u1, v0, v1, rot, block, blockV, street, setback, lots, h:[low, high], peak:{u,v,r}, cap:{v,h},
+//             glide, glideV, steep, hMin, seed, style, ground }   a generated city block grid (BUILD.district has
+//             the details): buildings on land only, not on steep ground, clear of everything else in the course and
+//             of the `carve` rectangles; its streets become a `ground` area
+//   bridge    also { anchors (anchorage blocks, the cables tied down), piers:[local x, ...] (approach-span piers),
+//             lamps: metres (deck lamps every so many metres), towerW, towerD, style }; its prims say what they are
+//             (kind bridge-deck, bridge-pier, bridge-tower, bridge-anchor, cable)
+// A course may also carry `carve: [{ u0, u1, v0, v1 }]` (no district builds there: a mission clearing the site's
+// blocks for its own towers) and `ground: [{ u0, u1, v0, v1, kind: 'city' | 'avenue' | 'plaza' | 'apron', deck,
+// keep }]` (areas the look draws flat on the ground, never solid; see resolveCourse for the drawing order).
+// Look hints (`style` on a spec, `hint` on its prims; the plain look and the art department read them, the world
+// never does): { cls: 'residential' | 'office' | 'industrial' | 'landmark' | 'skybridge', facade: 'concrete' |
+// 'glass' | 'shed', roof: 'plant' | 'crown' | 'flat' | 'spire', lit: 0..1, height: 'low' | 'mid' | 'high' | 'super',
+// landmark, part }. The full list is the header of src/art/city-look.js, which is the drawing contract.
+// Gates: { u, v, y, w, h, rot, name, required (default true), bonus (points, default 0; 5 for a bonus gate), bank }
+// - a rectangle w x h centred y above the threshold elevation, flown through along rot (0 = down the runway); `bank`
+// (degrees) marks a gate that must be flown banked (the Needle's eye): only the tests read it.
 // Gates are markers, not solids: the frame is drawn but never collides. They are flown in array order (gatesStep()
 // below has the rules: passes, misses, skips, a go-around mending a miss).
 //
-// Resolved course (plan() output): { prims, gates, lights, keepOut, center, radius }. A prim is one collision
+// Resolved course (plan() output): { prims, gates, lights, keepOut, ground, center, radius }. A prim is one collision
 // volume: { shape:'box', cx,cy,cz, hx,hy,hz, X,Y,Z (unit axes) } | { shape:'cyl', x,z, y0,y1, r0,r1 } |
 // { shape:'cap', ax,ay,az, bx,by,bz, r }, plus { name, kind, look, color, group } and its bounds. The look draws
 // each prim as it is (look: 'building' | 'plain' | 'hull' | 'container' | 'steel' | 'wire' | 'marker' | 'tree' |
@@ -73,7 +97,10 @@ function runwayFrame(site) {
   const h = rw ? rw.heading * DEG : 0;
   const dir = { x: Math.sin(h), z: -Math.cos(h) }, right = { x: -dir.z, z: dir.x };
   const ox = rw ? rw.x : 0, oz = rw ? rw.z : 0, elev = rw ? rw.elevation : 0;
-  return { h, dir, right, elev, at: (u, v) => ({ x: ox + dir.x * u + right.x * v, z: oz + dir.z * u + right.z * v }) };
+  // the aim point (as world/airport.js resolves it) and the runway's glide path angle, for courses that must stay
+  // under the straight-in approach
+  const aimU = rw ? (rw.aimDistance || Math.min(400, rw.length * 0.15)) : 0, gs = (rw && rw.gsAngle ? rw.gsAngle : 3) * DEG;
+  return { h, dir, right, elev, aimU, gs, at: (u, v) => ({ x: ox + dir.x * u + right.x * v, z: oz + dir.z * u + right.z * v }) };
 }
 
 // Unit axes of a local frame yawed psi (radians from the runway's right vector, clockwise from above) and
@@ -123,6 +150,9 @@ class Placer {
   push(p, meta) { Object.assign(p, meta); this.c.prims.push(finishPrim(p)); return p; }
   // Where a compound stands: `base` (above the threshold elevation) or `deck` (above the water), else the ground.
   baseOf(s) { return s.deck != null ? (this.water != null ? this.water : 0) + s.deck : s.base != null ? this.fr.elev + s.base : null; }
+  // The straight-in glide path's height above the threshold elevation at u (3 degrees, or the runway's own angle,
+  // from the aim point; level with the aim point beyond it).
+  glide(u) { return Math.max(0, this.fr.aimU - u) * Math.tan(this.fr.gs); }
   // box centred at local (lx, ly, lz), size w (local X) x h (Y) x d (Z), tilted `tilt` degrees about local Z
   box(F, lx, ly, lz, w, h, d, meta, tilt = 0) {
     const [cx, cy, cz] = F.at(lx, ly, lz), A = axes(F.psi, tilt * DEG);
@@ -164,7 +194,9 @@ class Placer {
     return pt;
   }
   light(p, blink = false, color = 'red') { this.c.lights.push({ x: p[0], y: p[1], z: p[2], blink, color }); }
-  keep(x, z, r) { this.c.keepOut.push({ x, z, r }); }
+  // A circle kept free of the decorative forest and villages (terrain.nearFlat scans them all, per tree): none out
+  // on the water, where nothing grows anyway.
+  keep(x, z, r) { if (this.water == null || this.height(x, z) > this.water - 3) this.c.keepOut.push({ x, z, r }); }
 }
 
 // Obstacle trees: the bush strips' spruce (OBSTACLE_TREE: 4.04 m crown radius at the foliage base, 25 m tall at
@@ -183,31 +215,58 @@ const BUILD = {
     const F = P.frame(s.u, s.v, s.rot);
     const ground = s.y0 != null ? P.fr.elev + s.y0 : F.o[1] - 1;
     const top = s.y1 != null ? P.fr.elev + s.y1 : s.top != null ? P.fr.elev + s.top : F.o[1] + (s.h || 10);
-    P.box(F, 0, (ground + top) / 2 - F.o[1], 0, s.w || 10, top - ground, s.d || 10, { kind: s.kind, look: s.look || 'plain', color: s.color, name: s.name || 'a building', group: P.c.groups++ }, s.tilt || 0);
+    P.box(F, 0, (ground + top) / 2 - F.o[1], 0, s.w || 10, top - ground, s.d || 10, { kind: s.part || s.kind, look: s.look || 'plain', color: s.color, name: s.name || 'a building', group: P.c.groups++, hint: s.style }, s.tilt || 0);
     P.keep(F.o[0], F.o[2], Math.hypot(s.w || 10, s.d || 10) / 2 + 15);
   },
+  // A skybridge: a building spanning between two points (runway frame) from y0 to y1 above the threshold, `d` deep
+  // along the flight path; the city's version of a gate you can only fly under.
+  skybridge(P, s) {
+    const a = P.fr.at(s.a.u, s.a.v), b = P.fr.at(s.b.u, s.b.v);
+    const len = Math.hypot(b.x - a.x, b.z - a.z);
+    const X = [(b.x - a.x) / len, 0, (b.z - a.z) / len], Y = [0, 1, 0], Z = [-X[2], 0, X[0]];
+    const y0 = P.fr.elev + s.y0, y1 = P.fr.elev + s.y1, dd = s.d || 24;
+    P.push({ shape: 'box', cx: (a.x + b.x) / 2, cy: (y0 + y1) / 2, cz: (a.z + b.z) / 2, hx: len / 2, hy: (y1 - y0) / 2, hz: dd / 2, X, Y, Z },
+      { kind: 'skybridge', look: 'building', color: s.color, name: s.name || 'the skybridge', group: P.c.groups++, hint: s.style || { cls: 'skybridge', facade: 'glass', lit: 0.5 } });
+    // its underside is what a pilot aims under: two red lights at each end of it
+    for (const t of [0.08, 0.92]) P.light([a.x + (b.x - a.x) * t, y0 - 0.5, a.z + (b.z - a.z) * t], false);
+  },
   tower(P, s) {
-    const F = P.frame(s.u, s.v, s.rot);
+    // on a pier or an island (`deck` above the water, `base` above the threshold) or on the ground
+    const on = P.baseOf(s);
+    const F = P.frame(s.u, s.v, s.rot, on);
+    const round = !!s.round, d = round ? s.w : s.d;
     // seat it on the lowest ground under its footprint, so no corner floats on a slope
     let base = F.o[1];
-    for (const [a, b] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { const p = F.at(a * s.w / 2, 0, b * s.d / 2); base = Math.min(base, P.height(p[0], p[2])); }
-    base -= 1;
+    if (on == null) {
+      const rim = round ? [0, 1, 2, 3, 4, 5, 6, 7].map((k) => [Math.cos(k * Math.PI / 4), Math.sin(k * Math.PI / 4)]) : [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+      for (const [a, b] of rim) { const p = F.at(a * s.w / 2, 0, b * d / 2); base = Math.min(base, P.height(p[0], p[2])); }
+      base -= 1;
+    }
     const top = s.top != null ? P.fr.elev + s.top : F.o[1] + s.h;
     const g = P.c.groups++;
-    P.box(F, 0, (base + top) / 2 - F.o[1], 0, s.w, top - base, s.d, { kind: s.kind, look: 'building', color: s.color, name: s.name || (s.kind === 'block' ? 'a building' : 'a tower block'), group: g, floors: s.floors });
+    const meta = { kind: s.kind, look: 'building', color: s.color, name: s.name || (s.kind === 'block' ? 'a building' : 'a tower block'), group: g, floors: s.floors, hint: s.style };
+    // a round tower is a vertical cylinder (a frustum with `taper`: top radius / bottom radius)
+    if (round) P.cyl(F, 0, 0, base - F.o[1], top - F.o[1], s.w / 2, s.w / 2 * (s.taper || 1), meta);
+    else P.box(F, 0, (base + top) / 2 - F.o[1], 0, s.w, top - base, s.d, meta);
     const H = top - F.o[1];
     if (s.antenna) {
-      P.cyl(F, 0, 0, H, H + s.antenna, 0.35, 0.2, { kind: 'mast', look: 'steel', color: 'steel', name: s.name || 'a rooftop mast', group: g });
+      P.cyl(F, 0, 0, H, H + s.antenna, 0.35, 0.2, { kind: 'mast', look: 'steel', color: 'steel', name: s.name || 'a rooftop mast', group: g, hint: s.style });
       P.light(F.at(0, H + s.antenna + 0.5, 0), true);
     }
-    if (s.kind !== 'block' || H > 45) for (const [a, b] of [[-1, -1], [1, 1]]) P.light(F.at(a * (s.w / 2 - 0.6), H + 0.6, b * (s.d / 2 - 0.6)), H > 120);
-    P.keep(F.o[0], F.o[2], Math.hypot(s.w, s.d) / 2 + 20);
+    // obstacle lights: two roof corners (default), one in the middle of the roof over 60 m (`lights: 1`, the
+    // city's dense districts), or none; the tall ones blink
+    const lights = s.lights != null ? s.lights : 2;
+    const rr = round ? s.w / 2 * (s.taper || 1) * 0.7 : 0;
+    if (lights === 2 && (s.kind !== 'block' || H > 45)) for (const [a, b] of [[-1, -1], [1, 1]]) P.light(round ? F.at(a * rr, H + 0.6, b * rr) : F.at(a * (s.w / 2 - 0.6), H + 0.6, b * (s.d / 2 - 0.6)), H > 120);
+    else if (lights === 1 && H > 60 && !s.antenna) P.light(F.at(0, H + 0.6, 0), H > 150);
+    // (a district's buildings are kept clear by the district's own coarse circles: `keep: false`)
+    if (s.keep !== false) P.keep(F.o[0], F.o[2], Math.hypot(s.w, d) / 2 + 20);
   },
   block(P, s) { BUILD.tower(P, s); },
   cyl(P, s) {
     const F = P.frame(s.u, s.v, 0);
     const y0 = s.y0 != null ? s.y0 + P.fr.elev - F.o[1] : -1, y1 = s.y1 != null ? s.y1 + P.fr.elev - F.o[1] : s.h;
-    P.cyl(F, 0, 0, y0, y1, s.r, s.r1 != null ? s.r1 : s.r, { kind: s.kind, look: s.look || 'concrete', color: s.color, name: s.name || 'a chimney', group: P.c.groups++ });
+    P.cyl(F, 0, 0, y0, y1, s.r, s.r1 != null ? s.r1 : s.r, { kind: s.kind, look: s.look || 'concrete', color: s.color, name: s.name || 'a chimney', group: P.c.groups++, hint: s.style });
     P.keep(F.o[0], F.o[2], s.r + 15);
   },
   mast(P, s) {
@@ -269,30 +328,141 @@ const BUILD = {
     const F = P.frame(s.u, s.v, s.rot, P.baseOf(s));
     const L = s.length || 300, W = s.deckW || 22, T = s.deckT || 3.5, y = s.deckY || 30;
     const g = P.c.groups++, name = s.name || 'the bridge';
-    P.box(F, 0, y + T / 2, 0, L, T, W, { kind: 'bridge', look: 'concrete', color: 'concrete', name, group: g });
-    const th = s.towerH || 0;
+    // every part says what it is (kind), for the look: the deck, the piers, the towers and their portal beams,
+    // the anchorages, the main cables and the hangers
+    const part = (kind, look, p) => ({ kind, look, color: look === 'wire' ? undefined : s.color || 'concrete', name, group: g, hint: { part: p, ...(s.style || {}) } });
+    P.box(F, 0, y + T / 2, 0, L, T, W, part('bridge-deck', 'concrete', 'deck'));
+    const th = s.towerH || 0, tw = s.towerW || 4, td = s.towerD || 3;
+    // piers from the ground (or the water) up to the deck: under the towers, and any extra ones (`piers`: local x
+    // of each, metres along the deck from its middle) for the approach spans
+    const pierAt = (x, w, d) => { for (const z of [-W / 2 + d / 2, W / 2 - d / 2]) P.box(F, x, (y - 2) / 2 - 1, z, w, y + 2, d, part('bridge-pier', 'concrete', 'pier')); };
     for (const e of [-1, 1]) {
       const x = e * L * 0.42;
-      // piers from the ground (or the water) up to the deck; towers above it for a suspension bridge
-      for (const z of [-W / 2 + 1.5, W / 2 - 1.5]) P.box(F, x, (y - 2) / 2 - 1, z, 4, y + 2, 3, { kind: 'bridge', look: 'concrete', color: 'concrete', name, group: g });
+      pierAt(x, th ? tw : 4, th ? td : 3);
       if (th) {
-        for (const z of [-W / 2 - 1, W / 2 + 1]) P.box(F, x, y + T + th / 2, z, 4, th, 3, { kind: 'bridge', look: 'concrete', color: 'concrete', name, group: g });
-        P.box(F, x, y + T + th - 2, 0, 3, 3, W + 5, { kind: 'bridge', look: 'concrete', color: 'concrete', name, group: g });
+        // a tower leg each side of the deck, a portal beam across near the top
+        for (const z of [-W / 2 - td / 2 + 0.5, W / 2 + td / 2 - 0.5]) P.box(F, x, y + T + th / 2, z, tw, th, td, part('bridge-tower', 'concrete', 'tower'));
+        P.box(F, x, y + T + th - 2, 0, tw - 1, 3, W + 2 * td - 1, part('bridge-tower', 'concrete', 'portal'));
         P.light(F.at(x, y + T + th + 0.5, 0), true);
       }
     }
+    for (const x of s.piers || []) pierAt(x, 4, 3);
+    // anchorages at the two ends (a suspension bridge's cables are tied down there)
+    if (s.anchors) for (const e of [-1, 1]) P.box(F, e * (L / 2 - 12), (y + T + 4) / 2 - 1, 0, 24, y + T + 6, W + 8, part('bridge-anchor', 'concrete', 'anchor'));
     if (th) {
       for (const z of [-W / 2 - 1, W / 2 + 1]) {
         const top = (x) => F.at(x, y + T + th - 1, z);
-        // main cable: from each tower top down to the deck at mid-span and out to the anchorages
-        P.wire(top(-L * 0.42), top(L * 0.42), 0.45, th - 3, { kind: 'bridge', look: 'wire', name, group: g }, 16);
+        // main cable: from each tower top down to the deck at mid-span; with anchorages, back down to them
+        P.wire(top(-L * 0.42), top(L * 0.42), 0.45, th - 3, { ...part('cable', 'wire', 'main-cable'), color: undefined }, 16);
+        if (s.anchors) for (const e of [-1, 1]) P.wire(top(e * L * 0.42), F.at(e * (L / 2 - 12), y + T + 6, z), 0.45, 2, { ...part('cable', 'wire', 'main-cable'), color: undefined }, 6);
         for (let x = -L * 0.36; x <= L * 0.36; x += 18) {
           const t = (x + L * 0.42) / (L * 0.84), yc = y + T + th - 1 - 4 * (th - 3) * t * (1 - t);
-          if (yc - (y + T) > 2) P.cap(F, [x, y + T, z], [x, yc, z], 0.08, { kind: 'bridge', look: 'wire', name, group: g });
+          if (yc - (y + T) > 2) P.cap(F, [x, y + T, z], [x, yc, z], 0.08, { ...part('cable', 'wire', 'hanger'), color: undefined });
         }
       }
     }
+    // deck lamps along both edges (sodium at night), a lit line across the harbor
+    if (s.lamps) for (let x = -L / 2 + 20; x <= L / 2 - 20; x += s.lamps) for (const z of [-W / 2 + 0.5, W / 2 - 0.5]) P.light(F.at(x, y + T + 8, z), false, 'amber');
     for (let x = -L / 2; x <= L / 2; x += 40) { const p = F.at(x, 0, 0); P.keep(p[0], p[2], W); }
+  },
+  // A landmark on a hill: Checkerboard Hill, the approach's turning point. A hill (a frustum of earth and rock, `h`
+  // tall, radius `r` at its foot and `rTop` at its crown) with a painted board lying on its flank on the side its
+  // local +X faces (rot: clockwise from facing right of the runway; 45 faces the south-east of a heading-north
+  // runway), floodlit at night, an obstacle light on the crown.
+  landmark(P, s) {
+    const F = P.frame(s.u, s.v, s.rot);
+    const H = s.h || 110, R0 = s.r || 170, R1 = s.rTop != null ? s.rTop : R0 * 0.35;
+    // seat the hill on the lowest ground under its foot (sampled round the rim)
+    let base = F.o[1];
+    for (let k = 0; k < 12; k++) { const a = k * Math.PI / 6, p = F.at(Math.cos(a) * R0 * 0.8, 0, Math.sin(a) * R0 * 0.8); base = Math.min(base, P.height(p[0], p[2])); }
+    const b0 = base - 3 - F.o[1];
+    const g = P.c.groups++;
+    const hint = (p) => ({ landmark: s.type || 'checkerboard', part: p, ...(s.style || {}) });
+    P.cyl(F, 0, 0, b0, H, R0, R1, { kind: 'landmark', look: 'hill', color: 'hill', name: s.name || 'the hill', group: g, hint: hint('hill') });
+    // the board on the flank: from bY to bY + the board's height up the slope, 1.5 m proud of the surface
+    const flank = Math.atan2(H - b0, R0 - R1), rAt = (y) => R0 + (R1 - R0) * (y - b0) / (H - b0);
+    const bh = s.boardH || 90, bw = s.boardW || 110, y0 = s.boardY != null ? s.boardY : 8;
+    const nx = Math.sin(flank), ny = Math.cos(flank), off = 1.5 + 1.5;   // outward normal of the flank; half the board's 3 m
+    const y1 = y0 + bh * Math.sin(flank);
+    P.beam(F, [rAt(y0) + nx * off, y0 + ny * off, 0], [rAt(y1) + nx * off, y1 + ny * off, 0], 3, bw,
+      { kind: 'landmark', look: 'checker', color: 'checker', name: s.boardName || 'the checkerboard', group: g, hint: { ...hint('board'), squares: s.squares || [11, 8] } });
+    // floodlights at the board's foot, the obstacle light on the crown
+    for (const z of [-bw * 0.35, 0, bw * 0.35]) P.light(F.at(rAt(y0) + 18, y0 - 2, z), false, 'white');
+    P.light(F.at(0, H + 1, 0), true);
+    P.keep(F.o[0], F.o[2], R0 + 30);
+  },
+  // A city district: a street grid of blocks, each split into one to three lots with a building on each, generated
+  // from the course's own seed. Runway-frame rectangle u0..u1 x v0..v1; the grid is rotated `rot` degrees about its
+  // middle; `block` (and `blockV`) is the street pitch, `street` the street width, `setback` the space round each
+  // building on its lot. Heights: `h: [low, high]`, raised toward `peak: { u, v, r }`; `cap: { v, h }` keeps every
+  // building within |v| < cap.v at most cap.h metres tall (the approach corridor); `glide: m` keeps every building
+  // under the 3-degree glide path by that many metres. No building stands on the water or its edge, on ground that
+  // falls more than `steep` metres across its lot, in a `carve` rectangle, or near anything else in the course
+  // (its keep-out circles, the gates, a route flown low). `style` is the look's hint for the whole district
+  // ({ cls: 'residential' | 'office' | ..., facade, roof, lit }); each building's prim carries it with its height
+  // class. The district's ground (streets, pavements) is a `ground` area the look drapes over the terrain.
+  district(P, s, env) {
+    const rng = makeRng(((s.seed || 1) * 7727 + 131) >>> 0);
+    const a = (s.rot || 0) * DEG, ca = Math.cos(a), sa = Math.sin(a);
+    const pu = s.block || 100, pv = s.blockV || pu, st = s.street || 18, setback = s.setback != null ? s.setback : 4;
+    const cu = (s.u0 + s.u1) / 2, cv = (s.v0 + s.v1) / 2, R = Math.hypot(s.u1 - s.u0, s.v1 - s.v0) / 2;
+    const [hLo, hHi] = s.h || [20, 60];
+    const water = P.water != null ? P.water : -1e9;
+    const toRw = (p, q) => ({ u: cu + p * ca - q * sa, v: cv + p * sa + q * ca });
+    const style = s.style || { cls: 'residential' };
+    const hints = new Map();
+    const hintFor = (cls) => { let h = hints.get(cls); if (!h) { h = { ...style, height: cls }; hints.set(cls, h); } return h; };
+    const inCarve = (u, v, r) => env.carve.some((c) => u > c.u0 - r && u < c.u1 + r && v > c.v0 - r && v < c.v1 + r);
+    const nearKept = (x, z, r) => { for (let k = 0; k < env.kept; k++) { const o = P.c.keepOut[k]; const dx = x - o.x, dz = z - o.z, rr = o.r + r; if (dx * dx + dz * dz < rr * rr) return true; } return false; };
+    let built = 0;
+    for (let i = -Math.ceil(R / pu); i <= Math.ceil(R / pu); i++) for (let j = -Math.ceil(R / pv); j <= Math.ceil(R / pv); j++) {
+      const c = toRw(i * pu, j * pv);
+      if (c.u < s.u0 || c.u > s.u1 || c.v < s.v0 || c.v > s.v1) continue;
+      // one to three lots along the block's longer side
+      const bu = pu - st, bv = pv - st;
+      const n = s.lots ? s.lots : 1 + Math.floor(rng() * 2.6);
+      const along = bu >= bv;
+      for (let k = 0; k < n; k++) {
+        const r1 = rng(), r2 = rng(), r3 = rng(), r4 = rng();
+        const lotU = along ? bu / n : bu, lotV = along ? bv : bv / n;
+        const lp = i * pu + (along ? (k - (n - 1) / 2) * lotU : 0), lq = j * pv + (along ? 0 : (k - (n - 1) / 2) * lotV);
+        const { u, v } = toRw(lp, lq);
+        // the building: its lot less the setback, sometimes a little smaller still (a slab, a point block)
+        const d = Math.max(10, lotU - 2 * setback) * (0.8 + 0.2 * r1), w = Math.max(10, lotV - 2 * setback) * (0.8 + 0.2 * r2);
+        const half = Math.hypot(w, d) / 2;
+        if (inCarve(u, v, half)) continue;
+        const o = P.fr.at(u, v);
+        if (nearKept(o.x, o.z, half)) continue;
+        // the ground under it: on land, not on the shore, not on a cliff
+        let lo = Infinity, hi = -Infinity;
+        for (const [du, dv] of [[0, 0], [-d / 2, -w / 2], [d / 2, -w / 2], [d / 2, w / 2], [-d / 2, w / 2]]) {
+          const q = toRw(lp + du, lq + dv), p = P.fr.at(q.u, q.v), y = P.height(p.x, p.z);
+          lo = Math.min(lo, y); hi = Math.max(hi, y);
+        }
+        if (lo < water + 1.5 || hi - lo > (s.steep || 10)) continue;
+        // its height: the district's range, taller toward the peak, then the corridor's caps
+        let f = 0.5;
+        if (s.peak) f = Math.max(0, 1 - Math.hypot(u - s.peak.u, v - s.peak.v) / s.peak.r);
+        let h = hLo + (hHi - hLo) * Math.pow(f, 1.2) * (0.55 + 0.45 * r3) + (hHi - hLo) * 0.12 * (r4 - 0.5);
+        // (h is the height over the highest ground under it; the roof, above the threshold elevation, is capped)
+        let roof = hi - P.fr.elev + h;
+        if (s.cap && Math.abs(v) < s.cap.v) roof = Math.min(roof, hi - P.fr.elev + s.cap.h);
+        if (s.glide != null && Math.abs(v) < (s.glideV || 400)) roof = Math.min(roof, P.glide(u) - s.glide);
+        h = roof - (hi - P.fr.elev);
+        if (h < (s.hMin || 9)) continue;
+        const cls = h < 25 ? 'low' : h < 60 ? 'mid' : h < 150 ? 'high' : 'super';
+        const name = cls === 'low' ? 'a building' : style.cls === 'office' ? 'an office tower' : style.cls === 'industrial' ? 'a warehouse' : 'an apartment block';
+        BUILD.tower(P, { kind: h > 60 ? 'tower' : 'block', u, v, w, d, rot: s.rot || 0, top: roof, color: Math.floor(rng() * 6), style: hintFor(cls), name, lights: 1, keep: false });
+        built++;
+      }
+    }
+    // the district's ground: streets and pavements between the blocks
+    env.ground.push({ kind: s.ground || 'city', u0: s.u0, u1: s.u1, v0: s.v0, v1: s.v1, rot: s.rot || 0, pitchU: pu, pitchV: pv, street: st, cu, cv });
+    // keep the forest and the villages out of the whole district (coarse circles: the terrain scans them per tree)
+    for (let u = s.u0 + 150; u < s.u1 + 150; u += 300) for (let v = s.v0 + 150; v < s.v1 + 150; v += 300) {
+      const p = P.fr.at(Math.min(u, s.u1), Math.min(v, s.v1)); P.keep(p.x, p.z, 230);
+    }
+    return built;
   },
   crane(P, s) { (s.type === 'tower' ? towerCrane : stsCrane)(P, s); },
   ship(P, s) { (s.type === 'tall' ? tallShip : containerShip)(P, s); },
@@ -486,16 +656,21 @@ function tallShip(P, s) {
 export function resolveCourse(site, sc, opts = {}) {
   const specA = site && site.course, specB = sc && sc.course;
   if (!specA && !specB) return null;
-  const obstacles = [...((specA && specA.obstacles) || []), ...((specB && specB.obstacles) || [])];
-  const gatesIn = [...((specA && specA.gates) || []), ...((specB && specB.gates) || [])];
-  const clear = [...((specA && specA.clear) || []), ...((specB && specB.clear) || [])];
+  const all = (k) => [...((specA && specA[k]) || []), ...((specB && specB[k]) || [])];
+  const obstacles = all('obstacles'), gatesIn = all('gates'), clear = all('clear');
   if (!obstacles.length && !gatesIn.length) return null;
   const fr = runwayFrame(site);
   const terrain = opts.terrain || new Terrain({ ...site.terrain, flats: siteFlats(site) });
   const height = (x, z) => terrain.height(x, z);
-  const course = { prims: [], gates: [], lights: [], keepOut: [], groups: 0, seed: (site.terrain && site.terrain.seed) || 1, elev: fr.elev };
+  // ground: areas the look drapes over the terrain (streets, plazas, quays: never solid), from the districts and
+  // the spec's own `ground` list; resolved to world space below
+  const course = { prims: [], gates: [], lights: [], keepOut: [], ground: [], groups: 0, seed: (site.terrain && site.terrain.seed) || 1, elev: fr.elev };
   const P = new Placer(course, fr, height, terrain.waterLevel);
+  // Everything placed by hand first (site, then scenario), then the gates, the circles kept clear, a route flown
+  // low; the districts last, so a generated city grows round all of those and round the `carve` rectangles (a
+  // mission clearing the site's blocks where its own towers stand).
   for (const s of obstacles) {
+    if (s.kind === 'district') continue;
     const f = BUILD[s.kind];
     if (!f) throw new Error(`course: unknown obstacle kind "${s.kind}"`);
     f(P, s);
@@ -507,6 +682,8 @@ export function resolveCourse(site, sc, opts = {}) {
     course.gates.push({
       i, name: s.name || `Gate ${i + 1}`, x: p.x, y: fr.elev + s.y, z: p.z, w: s.w, h: s.h, n, r, psi,
       required: s.required != null ? !!s.required : !bonusGate, bonus: s.bonus != null ? s.bonus : bonusGate ? 5 : 0,
+      // flown banked (degrees, + right wing down): a gate narrower than the wingspan (the Needle's eye)
+      bank: s.bank || 0,
     });
     course.keepOut.push({ x: p.x, z: p.z, r: s.w / 2 + 25 });
   });
@@ -526,6 +703,35 @@ export function resolveCourse(site, sc, opts = {}) {
       }
       prev = { x: p.x, z: p.z, y };
     }
+  }
+  // the districts: a generated city round everything above
+  const env = { carve: all('carve'), kept: course.keepOut.length, ground: [] };
+  const siteGround = [], scGround = [];
+  for (const [spec, list] of [[specA, siteGround], [specB, scGround]]) {
+    for (const s of (spec && spec.obstacles) || []) if (s.kind === 'district') { env.ground = list; BUILD.district(P, s, env); }
+  }
+  // The ground areas, in world space: a rectangle (origin at its (u0, v0) corner, unit vectors along +u and +v,
+  // lengths) and, for a street grid, the grid's origin, its two axes and its pitches. In drawing order, first drawn
+  // wins where two overlap (the look skips a cell already covered): the mission's own areas, its districts' streets,
+  // the site's areas, the site's districts' streets - which also skip the mission's `carve` rectangles, where the
+  // mission put its own towers.
+  const rect = (g) => { const o = fr.at(g.u0, g.v0); return { x: o.x, z: o.z, ux: fr.dir.x, uz: fr.dir.z, vx: fr.right.x, vz: fr.right.z, lu: g.u1 - g.u0, lv: g.v1 - g.v0 }; };
+  const scCarve = ((specB && specB.carve) || []).map(rect);
+  const ordered = [...((specB && specB.ground) || []), ...scGround, ...((specA && specA.ground) || []), ...siteGround.map((g) => ({ ...g, skip: scCarve }))];
+  for (const g of ordered) {
+    const o = fr.at(g.u0, g.v0), a = (g.rot || 0) * DEG;
+    const gc = fr.at(g.cu != null ? g.cu : (g.u0 + g.u1) / 2, g.cv != null ? g.cv : (g.v0 + g.v1) / 2);
+    // the grid's axes: the runway's u and v turned `rot` clockwise (seen from above)
+    const pu = [fr.dir.x * Math.cos(a) + fr.right.x * Math.sin(a), fr.dir.z * Math.cos(a) + fr.right.z * Math.sin(a)];
+    const pv = [-fr.dir.x * Math.sin(a) + fr.right.x * Math.cos(a), -fr.dir.z * Math.sin(a) + fr.right.z * Math.cos(a)];
+    course.ground.push({
+      kind: g.kind || 'plaza', x: o.x, z: o.z, ux: fr.dir.x, uz: fr.dir.z, vx: fr.right.x, vz: fr.right.z, lu: g.u1 - g.u0, lv: g.v1 - g.v0,
+      // flat at this world height (an island's apron: `deck` metres above the water), else draped on the terrain
+      y: g.deck != null ? (terrain.waterLevel != null ? terrain.waterLevel : 0) + g.deck : null,
+      grid: g.pitchU ? { x: gc.x, z: gc.z, p: pu, q: pv, pitchP: g.pitchU, pitchQ: g.pitchV || g.pitchU, street: g.street || 18 } : null,
+      skip: g.skip || [],
+    });
+    if (g.keep !== false && !g.pitchU) for (let u = g.u0; u <= g.u1; u += 150) for (let v = g.v0; v <= g.v1; v += 150) { const p = fr.at(u, v); course.keepOut.push({ x: p.x, z: p.z, r: 120 }); }
   }
   let mnx = Infinity, mxx = -Infinity, mnz = Infinity, mxz = -Infinity;
   for (const p of course.prims) { mnx = Math.min(mnx, p.min[0]); mxx = Math.max(mxx, p.max[0]); mnz = Math.min(mnz, p.min[2]); mxz = Math.max(mxz, p.max[2]); }
@@ -710,7 +916,7 @@ export class ObstacleField {
   }
 
   build(scene, opts = {}) {
-    this.look = look.buildCourse(this.prims, this.gates, { terrain: this.terrain, night: !!opts.night, quality: opts.quality, seed: this.course.seed, lights: this.course.lights });
+    this.look = look.buildCourse(this.prims, this.gates, { terrain: this.terrain, night: !!opts.night, quality: opts.quality, seed: this.course.seed, lights: this.course.lights, ground: this.course.ground });
     for (const o of this.look.objects) scene.add(o);
     return this.look;
   }
