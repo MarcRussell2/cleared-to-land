@@ -2,6 +2,7 @@
 import { DEG } from '../config.js';
 import { ALL_NEW_SITES, NEW_MISSIONS } from '../missions/index.js';
 import { buildFreeFlight } from '../missions/free.js';
+import { WEATHER_PRESETS } from './weather.js';
 
 export const SITES = {
   bayfield: {
@@ -236,6 +237,12 @@ export function resolveScenario(sc, rng = Math.random, settings = null) {
     s.weather = { preset, events: [] };
     if (k >= 0.88) s.weather.events.push({ type: 'squall', at: { type: 'dist', value: 600 + rng() * 500 }, shift: (rng() < 0.5 ? -1 : 1) * (25 + rng() * 30), speed: Math.round(s.wind.speed + 6 + rng() * 6), rain: 0.9 });
     if (preset === 'storm' || preset === 'rain' || preset === 'snow') s.vis = Math.min(s.vis, preset === 'storm' ? 5000 : 7000);
+    // A dead-stick spin starts its glide 780 m up (above), where every preset's cloud base but none would put it
+    // inside the cloud: a whiteout with the engine failing. Its base is lifted to 150 m above the start instead.
+    // Nothing is drawn for it and no draw moves, so a pinned seed replays everything it did (the physics too: the
+    // cloud base is only what the look and the lightning read).
+    const ceil = WEATHER_PRESETS[preset].ceiling;
+    if (s.failures[0] && s.failures[0].name === 'engine' && s.spawn.alt != null && ceil != null && ceil < s.spawn.alt + 150) s.weather.ceiling = s.spawn.alt + 150;
   }
   return s;
 }

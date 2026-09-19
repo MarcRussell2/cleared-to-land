@@ -537,6 +537,16 @@ for (const m of WEATHER_MISSIONS) {
   ok(same, 'Roulette: the weather is drawn after everything else, so every spin keeps its aircraft, field, time, wind, weight, failure and spawn (300 seeds)');
   ok(got >= 100 && got <= 165, `Roulette: ${got} of 300 spins bring weather (${Object.entries(kinds).map(([k, n]) => k + ' ' + n).join(', ')})`);
   ok(SCENARIOS.filter((s) => s.id !== 'roulette' && !s.weather).every((s) => !resolveScenario(s, makeRng(7), {}).weather), 'no other challenge picks up weather it did not ask for');
+  // a dead-stick spin (the engine fails 780 m up) never starts its glide inside the cloud
+  let glides = 0, inCloud = 0;
+  for (let seed = 1; seed <= 1000; seed++) {
+    const s = resolveScenario(base, makeRng(seed), { approach: 'short' });
+    if (!s.weather || s.failures[0].name !== 'engine' || s.spawn.alt == null) continue;
+    glides++;
+    const c = resolveWeatherSpec(s.weather).ceiling;
+    if (c != null && c < s.spawn.alt + 150) inCloud++;
+  }
+  ok(glides > 50 && inCloud === 0, `Roulette: none of the ${glides} dead-stick glides in 1000 spins with weather starts within 150 m of the cloud base (${inCloud})`);
   const spins = [];
   for (let seed = 1; spins.length < 6 && seed < 400; seed++) {
     const s = resolveScenario(base, makeRng(seed), { approach: 'short' });
