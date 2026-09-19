@@ -647,6 +647,7 @@ export class FailureRuntime {
     }
     if (touch && touch.setFailureButtons) touch.setFailureButtons([]);
     if (hud && hud.setExtraKeys) hud.setExtraKeys([]);
+    if (hud && hud.clearFailureDisplay) hud.clearFailureDisplay();
   }
 
   // main.js makes the mission runtime right after this one and asks it, not this, for the debrief and the hints. On the

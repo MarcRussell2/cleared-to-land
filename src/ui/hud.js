@@ -122,6 +122,9 @@ export class HUD {
 
   // The failure drills on the key strip while they apply: [[label, [[keycap, action]]], ...] (failureEffects.js).
   setExtraKeys(list) { this.extraKeys = list || []; this.keyMode = ''; }
+  // A new flight: nothing has failed, before its first frame (a dark HUD left from the last flight would otherwise
+  // swallow the new one's first callout). failureEffects.js calls it from its constructor.
+  clearFailureDisplay() { this.failures(null, null, 0, 0, true); }
 
   // Touch / small-screen layout: smaller tapes and ADI, the side columns kept clear for the thumbs (style.css #hud.compact).
   setCompact(on) {
