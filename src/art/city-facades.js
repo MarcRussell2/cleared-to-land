@@ -10,6 +10,12 @@
 // levels, anchored to the facade. Typical distant red-channel mean is 0.0144
 // (lit fraction 0.4); points peak at 0.36, close windows at 0.28, LED rings
 // at 0.12. These linear radiances account for the engine's night exposure.
+// Day curtain walls use box-integrated spandrels and frames: unresolved lines
+// retain their area average. Reflection is masked by opaque panels; interior
+// tone varies smoothly, not by individual panes. Night keeps the prior finish.
+// Day flats carry area-scaled painted roof relief (12 high, 4 medium, 0 low);
+// the enclosing material substitutes the compile-time roof loop bound per tier.
+// Day Needle floor bands are 0.45 m tinted reflective glass; office panels stay opaque.
 export const CITY_FACADES = /* glsl */ `
     bool flats = style == 6.0;
     float fh = flats ? 2.8 : 3.6;
@@ -47,12 +53,12 @@ export const CITY_FACADES = /* glsl */ `
         }
         diffuseColor.rgb = mix(wall, vec3(0.025, 0.038, 0.043), pane * aa);
         if (p.y < 3.0) {
-          float sign = step(1.8, p.y) * step(p.y, 2.5) * bay * aa;
+          float shopSign = step(1.8, p.y) * step(p.y, 2.5) * bay * aa;
           vec3 paint = mix(vec3(0.15, 0.055, 0.035), vec3(0.065, 0.14, 0.12), step(0.5, variation));
-          diffuseColor.rgb = mix(wall * 0.32, paint, sign);
+          diffuseColor.rgb = mix(wall * 0.32, paint, shopSign);
         }
         ctGloss = 0.35 * pane * aa;
-      } else {
+      } else if (ctNight > 0.5) {
         // Fritted glass between floors; each frame fades at its OWN pixel width.
         float spandrel = 1.0 - smoothstep(0.2, 0.25 + fw.y, f.y);
         diffuseColor.rgb = glass * (1.0 - (style == 10.0 ? 0.10 : 0.18) * spandrel * aa);
@@ -63,6 +69,28 @@ export const CITY_FACADES = /* glsl */ `
           * (1.0 - smoothstep(0.5, 1.5, fw.y / (0.05 / fh)));
         diffuseColor.rgb *= 1.0 - 0.3 * max(mullion, floorLine);
         ctGloss = 0.82 - 0.12 * mullion;
+      } else {
+        // Integrate physical coverage across the pixel, including whole periods.
+        // A 1 m panel / 3.6 m floor therefore keeps its 28% area at any range.
+        float spandrel = ctBand(cell.y, fw.y, (style == 10.0 ? 0.45 : 1.05) / fh);
+        float mullion = ctBand(cell.x + 0.5 * (0.07 / bw), fw.x, 0.07 / bw);
+        float column = style == 10.0 ? 0.0 : ctBand(s / (bw * 4.0) + 0.025,
+          fw.x / 4.0, 0.4 / (bw * 4.0));
+        float frame = 1.0 - (1.0 - mullion) * (1.0 - column);
+        vec3 dayGlass = mix(wall * 0.34, vec3(0.105, 0.17, 0.205), 0.55);
+        // Broad smooth interior variation, attenuated before it becomes subpixel.
+        float interior = sin(cell.y * 1.7 + mod(seedI, 19.0))
+          * (1.0 - smoothstep(0.25, 1.5, fw.y));
+        dayGlass *= 0.97 + 0.025 * interior;
+        float panelPick = ctCellHash(vec2(0.0), seedI, 41.0);
+        vec3 panelTone = mix(vec3(0.042, 0.048, 0.052), wall * 0.23, panelPick);
+        if (style == 10.0) panelTone = dayGlass * 0.65;
+        diffuseColor.rgb = mix(dayGlass, panelTone, spandrel);
+        diffuseColor.rgb = mix(diffuseColor.rgb, dayGlass * 0.50, frame);
+        ctGloss = mix(mix(0.88, style == 10.0 ? 0.44 : 0.055, spandrel), 0.09, frame);
+        ctDayGlass = 1.0;
+        // Smooth vision glass yields a narrow sun glint; opaque panels stay rough.
+        ctGlassRoughness = mix(mix(style == 10.0 ? 0.085 : 0.14, style == 10.0 ? 0.30 : 0.70, spandrel), 0.62, frame);
       }
       // Dark floors, curtains, dim rooms and occasional cool fluorescent offices.
       float occupied = step(1.0 - litFrac, ctCellHash(id, seedI, 1.0)) * step(flats ? 0.08 : 0.22, floorPick);
@@ -97,12 +125,15 @@ export const CITY_FACADES = /* glsl */ `
       float rim = step(0.035, min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y)));
       diffuseColor.rgb = wall * mix(0.84, 0.39, rim);
       if (ctDetail > 0.5) {
-        // Zero to four items per roof, with independent centres and metre sizes.
+        // Day flats scale with area; preserve the approved night roof layout.
         // Signed masks paint a shadow edge and top; no geometry leaves the roof.
         float bare = step(0.22, ctCellHash(vec2(0.0), seedI, 23.0));
         vec2 roofFW = max(fwidth(p.xz), vec2(0.01));
-        for (int item = 0; item < 4; item++) {
-          if (ctDetail < 1.5 && item > 1) break;
+        bool crowded = flats && ctNight < 0.5;
+        float itemCount = crowded ? min(ctDetail > 1.5 ? 12.0 : 4.0,
+          floor(3.0 + ctSize.x * ctSize.z / 240.0)) : (ctDetail > 1.5 ? 4.0 : 2.0);
+        for (int item = 0; item < CT_ROOF_LIMIT; item++) {
+          if (float(item) >= itemCount) break;
           float k = float(item);
           float pick = ctCellHash(vec2(k, 0.0), seedI, 24.0);
           vec2 centre = mix(vec2(0.22), vec2(0.78), vec2(pick, ctCellHash(vec2(k, 1.0), seedI, 25.0)));
@@ -110,17 +141,18 @@ export const CITY_FACADES = /* glsl */ `
           vec2 halfSize = min(ctSize.xz * 0.09, vec2(1.0 + 2.4 * pick, 0.8 + 1.6 * ctCellHash(vec2(k, 2.0), seedI, 26.0)));
           vec2 delta = p.xz - centre * ctSize.xz;
           float width = max(roofFW.x, roofFW.y);
-          float shape = item == 2 ? length(delta) - min(halfSize.x, halfSize.y)
+          bool tank = crowded ? mod(k, 4.0) == 2.0 : item == 2;
+          float shape = tank ? length(delta) - min(halfSize.x, halfSize.y)
             : max(abs(delta.x) - halfSize.x, abs(delta.y) - halfSize.y);
           float mask = 1.0 - smoothstep(-width * 0.5, width * 0.5, shape);
           vec2 shadowDelta = delta - vec2(0.55, -0.55);
-          float shadowShape = item == 2 ? length(shadowDelta) - min(halfSize.x, halfSize.y)
+          float shadowShape = tank ? length(shadowDelta) - min(halfSize.x, halfSize.y)
             : max(abs(shadowDelta.x) - halfSize.x, abs(shadowDelta.y) - halfSize.y);
           float shadow = 1.0 - smoothstep(-width * 0.5, width * 0.5, shadowShape);
-          float present = bare * step(k * 0.2, pick) * rim;
+          float present = bare * (crowded ? 1.0 : step(k * 0.2, pick)) * rim;
           diffuseColor.rgb *= 1.0 - 0.48 * shadow * present;
           float highlight = clamp(0.5 + (delta.y - delta.x) / max(halfSize.x + halfSize.y, 0.1), 0.0, 1.0);
-          vec3 top = wall * (item == 0 ? 0.25 : item == 2 ? 0.22 + 0.25 * highlight : 0.42 + 0.16 * highlight);
+          vec3 top = wall * (item == 0 ? 0.25 : tank ? 0.22 + 0.25 * highlight : 0.42 + 0.16 * highlight);
           diffuseColor.rgb = mix(diffuseColor.rgb, top, mask * present);
         }
       }

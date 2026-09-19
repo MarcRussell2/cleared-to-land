@@ -107,12 +107,16 @@
 // sunlit white about 0.8, nothing but lamps above 1; nothing allocated per frame - update() only rewrites the
 // lights' colours when a blinker toggles (and moves the two shadow primers during the first half second).
 // city-facades.js holds the facade/roof shader: close individual windows, two blended
-// integer-hashed super-cell levels at range, thin filtered mullions, fritted glass,
+// integer-hashed super-cell levels at range, area-filtered mullions and spandrels,
 // painted roof relief and concrete weathering. Night preserves albedo and uses sparse
 // low-average window emission. The Needle has metre-high LED rings; streets have
 // local sodium pools and static points in the course's single night LightSet.
 // Bridge structure, the rocky hill and floodlit board retain their surface styles.
-// Quality removes stains on medium, reduces roof items from four to two, and removes
+// Day glass reflects a soft ground/sky horizon, with opaque bands masking the sheen,
+// smooth interior tones and a narrow Needle glint. Night retains its approved finish.
+// Day hill colour adds tilted scrub bands, descending ribs and a greener foot.
+// Day corrections: reflective Needle floor bands; crisp crown-biased hill rock with 3-6 m high-tier detail.
+// Quality removes stains on medium, caps day flats' roof items at twelve/four, and removes
 // roof/AC relief on low. No new textures; collision geometry and primers stay intact.
 // Solids program keys include the quality tier baked into their shader source.
 import * as THREE from 'three';
@@ -238,6 +242,15 @@ float ctHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453
 // a window, a stack, a panel: the hash of an integer cell and the instance's integer seed, kept small (mod 289) so the
 // hash's sine never sees a large argument (the same cell gives the same number on every pixel, on every GPU)
 float ctCellHash(vec2 cell, float seed, float k) { return ctHash(mod(cell + vec2(seed * 7.0 + k, seed * 13.0 + 3.0 * k), 289.0)); }
+// Integral of a periodic unit-height band. Whole cycles contribute their exact
+// area; retain only the local phase to avoid subtracting large height values.
+float ctBandIntegral(float x, float duty) { return floor(x) * duty + min(fract(x), duty); }
+float ctBand(float x, float footprint, float duty) {
+  float w = max(footprint, 0.0001), phase = fract(x);
+  float coverage = (ctBandIntegral(phase + w * 0.5, duty)
+    - ctBandIntegral(phase - w * 0.5, duty)) / w;
+  return clamp(mix(coverage, duty, smoothstep(1.0, 3.0, w)), 0.0, 1.0);
+}
 // Integrated square point: fixed integer super-cells, analytically filtered edges.
 // Each level covers 16% of its area; 0.25 occupancy * 0.36 radiance gives 0.0144.
 float ctWindowPoints(vec2 cell, vec2 footprint, float scale, float seed, float probability) {
@@ -251,6 +264,8 @@ float ctNoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 
       .replace('#include <color_fragment>', `#include <color_fragment>
 float ctGloss = 0.0;
 float ctMatte = 0.0;
+float ctDayGlass = 0.0;
+float ctGlassRoughness = 0.18;
 vec3 ctEmit = vec3(0.0);
 {
   // (seed: a hull's waterline in metres; for everything else an integer, 0..999, read back exactly with seedI)
@@ -258,7 +273,7 @@ vec3 ctEmit = vec3(0.0);
   vec3 n = ctNrm, p = ctLocal;
   bool side = abs(n.y) < 0.5;
   if (style == 1.0 || style == 6.0 || style == 10.0) {
-${CITY_FACADES}
+${CITY_FACADES.replace('CT_ROOF_LIMIT', detail === 'high' ? '12' : detail === 'medium' ? '4' : '0')}
   } else if (style == 2.0) {
     // container stacks (a 2.6 m tier by a 2.44 m row): a run of three rows shares one line's colour, with one box in
     // four an odd one out, from a muted palette weighted to navy, grey and rust (CONTAINER_SHARE); ribbed along the
@@ -309,6 +324,32 @@ ${CITY_FACADES}
     if (ctDetail > 0.5) rk = rk * 0.65 + ctNoise(slope / vec2(6.0, 3.0)) * 0.35;
     float rockiness = smoothstep(0.43, 0.65, rk + 0.18 * smoothstep(0.55, 1.0, p.y / max(ctSize.y, 1.0)));
     diffuseColor.rgb = mix(ctHill[0] * (0.62 + 0.42 * rk), ctHill[1] * (0.55 + 0.35 * rk), rockiness);
+    if (ctNight < 0.5) {
+      // Position-based 3D slope coordinates avoid the angular seam and normal
+      // facets. Tilted strata and long ribs break the frustum's level symmetry.
+      vec2 hillXZ = p.xz - ctSize.xz * 0.5;
+      float warp = ctNoise(hillXZ / 55.0);
+      float strata = ctNoise(vec2((p.y + hillXZ.x * 0.28 + hillXZ.y * 0.17) / 16.0,
+        warp * 3.0));
+      float ribs = ctNoise(hillXZ / 18.0 + vec2(p.y * 0.016, -p.y * 0.01));
+      float crownRock = smoothstep(0.45, 1.0, p.y / max(ctSize.y, 1.0));
+      float rockField = strata * 0.35 + ribs * 0.65 + 0.12 * crownRock;
+      float rockDetail = 0.5;
+      if (ctDetail > 1.5) {
+        vec2 rockUV = (hillXZ + vec2(p.y * 0.35, -p.y * 0.25)) / vec2(3.0, 6.0);
+        float resolved = 1.0 - smoothstep(0.25, 1.0, max(fwidth(rockUV.x), fwidth(rockUV.y)));
+        rockDetail = mix(0.5, ctNoise(rockUV), resolved);
+        rockField += 0.22 * (rockDetail - 0.5);
+      }
+      // Roughly a third exposed rock, with crisp outcrops along descending ribs.
+      float rockAA = max(0.03, fwidth(rockField));
+      float stone = smoothstep(0.61 - rockAA, 0.61 + rockAA, rockField);
+      vec3 scrub = ctHill[0] * (0.58 + 0.48 * strata);
+      vec3 dayRock = vec3(0.20, 0.20, 0.19) * (0.68 + 0.24 * ribs + 0.16 * rockDetail);
+      diffuseColor.rgb = mix(scrub, dayRock, stone);
+      float foot = 1.0 - smoothstep(4.0, 25.0 + 15.0 * warp, p.y);
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.032, 0.061, 0.023), foot * 0.8);
+    }
     ctMatte = 1.0;
   } else if (style == 12.0) {
     // the checkerboard: 10 m squares on the board's broad faces (its local Y faces), a grey frame round the edges
@@ -358,17 +399,28 @@ ${CITY_FACADES}
   }
 }`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
-roughnessFactor = mix(mix(roughnessFactor, 0.18, ctGloss), 1.0, ctMatte);`)
+roughnessFactor = mix(mix(roughnessFactor, 0.18, ctGloss), 1.0, ctMatte);
+roughnessFactor = mix(roughnessFactor, ctGlassRoughness, ctDayGlass);`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
 totalEmissiveRadiance += ctEmit;
 // by day the glass gives back a little of the sky, most at a glancing angle (a modest stand-in for a reflection:
 // the facade reads as glass, not as holes); the fog is applied after this, like to everything else
 if (ctGloss > 0.0) {
   float ctF = pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 3.0);
-  totalEmissiveRadiance += ctGloss * (1.0 - ctNight) * mix(0.12, 0.62, ctF) * vec3(0.30, 0.40, 0.52);
+  vec3 ctReflection = vec3(0.30, 0.40, 0.52);
+  if (ctDayGlass > 0.5) {
+    // Reflect the eye-to-surface ray in view space, then rotate into world
+    // space: positive world y sees sky, negative sees ground. No extra varying.
+    vec3 ctRay = inverseTransformDirection(reflect(-normalize(vViewPosition), normal), viewMatrix);
+    float ctHorizon = smoothstep(-0.22, 0.28, ctRay.y);
+    ctReflection = mix(vec3(0.065, 0.075, 0.070), vec3(0.25, 0.34, 0.44), ctHorizon);
+    ctReflection = mix(ctReflection, vec3(0.20, 0.23, 0.25),
+      0.28 * (1.0 - smoothstep(0.0, 0.35, abs(ctRay.y))));
+  }
+  totalEmissiveRadiance += ctGloss * (1.0 - ctNight) * mix(0.12, 0.62, ctF) * ctReflection;
 }`);
   };
-  m.customProgramCacheKey = () => `ctl-course-solids-v10-${detail}`;
+  m.customProgramCacheKey = () => `ctl-course-solids-v12-${detail}`;
   return m;
 }
 
