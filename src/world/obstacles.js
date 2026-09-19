@@ -381,7 +381,7 @@ function stsCrane(P, s) {
   // girder: from the backreach end to the boom hinge, on top of the portal
   const hx = G / 2 + 2;
   P.box(F, (hx - G / 2 - back) / 2, H + 2, 0, hx + G / 2 + back, 4, 6, { ...steel, name: s.name ? s.name : 'a container crane' });
-  P.box(F, -G / 2 - back + 8, H + 8, 0, 16, 8, 12, { ...steel, look: 'white', color: 'house' });   // machinery house
+  P.box(F, -G / 2 - back + 8, H + 8, 0, 16, 8, 12, { ...steel, look: 'plain', color: 'house' });   // machinery house (no windows)
   // the boom: hinged at (hx, H+2), `out` metres long, raised by `boom`
   const bx = hx + Math.cos(boom) * out, by = H + 2 + Math.sin(boom) * out;
   P.beam(F, [hx, H + 2, 0], [bx, by, 0], 4, 6, { ...steel, kind: 'boom', name: s.boomName || 'the crane boom' });

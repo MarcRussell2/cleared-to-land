@@ -10,7 +10,8 @@
 //      description quotes are true (printed), and every gate can be flown through anywhere inside its frame
 //      (wings level, gear down) without touching anything - a gate is never a trap;
 //   4. what is drawn IS what collides: src/art/city-look.js builds the course in Node and every instance of every
-//      mesh is checked against the prim it claims to draw (centre, axes, size), every solid drawn exactly once;
+//      mesh is checked against the prim it claims to draw (centre, axes, size), every solid drawn exactly once -
+//      for the three missions and for a course that uses every one of the engine's 14 kinds;
 //   5. gates and the mission runtime: pass / miss / wrong-way detection, the debrief lines, the points cap for a
 //      missed required gate, the bonus, the clamp, the HUD status line;
 //   6. the mission data (ids, n, fields, tips, touch words) and that no original site or challenge builds a field;
@@ -250,9 +251,38 @@ for (const sc of OBSTACLES_MISSIONS) {
 }
 
 // ============================================================ 4. drawn = collides
+// Every kind the engine offers, in one course (the three missions use only some of them; the city ladder uses the
+// rest). The same course is flown in the page for stills of every kind (tools/fly-mission.mjs harbor-cranes --set).
+const EVERY_KIND = { id: 'every-kind', site: 'harbor', course: {
+  obstacles: [
+    { kind: 'box', u: -3000, v: -60, w: 20, d: 10, h: 15, look: 'plain', color: 'concrete', tilt: 10 },
+    { kind: 'tower', u: -2800, v: -150, w: 30, d: 30, h: 120, antenna: 12, name: 'the Meridian Tower' },
+    { kind: 'tower', u: -2850, v: -220, w: 40, d: 24, h: 70, rot: 20, color: 2 },
+    { kind: 'block', u: -2800, v: 150, w: 60, d: 25, h: 35 },
+    { kind: 'cyl', u: -2600, v: -90, r: 4, r1: 2.5, h: 70 },
+    { kind: 'mast', u: -2400, v: -120, h: 90, guys: true },
+    { kind: 'cable', a: { u: -2200, v: -200, y: 22 }, b: { u: -2200, v: 200, y: 22 }, sag: 3, markers: 40 },
+    { kind: 'powerline', type: 'hv', from: { u: -2000, v: -400 }, to: { u: -2000, v: 400 }, spans: 3, markers: 60 },
+    { kind: 'powerline', type: 'pole', from: { u: -1900, v: -100 }, to: { u: -1900, v: 100 }, spans: 3 },
+    { kind: 'bridge', u: -1500, v: 0, length: 300, deckY: 20, towerH: 40 },
+    { kind: 'crane', type: 'tower', u: -1200, v: 120, h: 60, jib: 50, rot: 180 },
+    { kind: 'crane', type: 'sts', u: -1000, v: 100, boom: 30 },
+    { kind: 'quay', u: -800, v: 300, w: 60, d: 200, top: 3 },
+    { kind: 'containers', u: -800, v: 70, rows: 4, cols: 3, tiers: 4 },
+    { kind: 'ship', type: 'container', u: -600, v: 400, rot: 90, length: 200, beam: 30 },
+    { kind: 'ship', type: 'tall', u: -600, v: -400, rot: 90 },
+    { kind: 'tree', u: -500, v: 40, scale: 1 },
+    { kind: 'treeWall', u: -400, from: -60, to: 60, step: 9, scale: 1.2, rows: 2, gap: { v: 0, w: 30 } },
+  ],
+  gates: [{ u: -1650, v: 0, y: 50, w: 60, h: 30, name: 'Gate 1' }],
+} };
+{
+  const kinds = new Set(EVERY_KIND.course.obstacles.map((o) => o.kind));
+  ok(kinds.size === 14, `the every-kind course uses all 14 kinds (${[...kinds].join(', ')})`);
+}
 {
   const m4 = new THREE.Matrix4(), P = new THREE.Vector3(), Q = new THREE.Quaternion(), S = new THREE.Vector3(), ax = new THREE.Vector3();
-  for (const sc of OBSTACLES_MISSIONS) {
+  for (const sc of [...OBSTACLES_MISSIONS, EVERY_KIND]) {
     const { site, course } = planned(sc);
     const { Terrain } = await import('../src/world/terrain.js');
     const { siteFlats } = await import('../src/systems/scenarios.js');
@@ -381,6 +411,11 @@ for (const sc of OBSTACLES_MISSIONS) {
   ok(mr5.score({ points: 90, grade: 'x', gradeIdx: 0, lines: [], headline: '' }, acOk, {}).points === 97, 'a bonus gate adds its points');
   ok(mr5.score({ points: 98, grade: 'x', gradeIdx: 0, lines: [], headline: '' }, acOk, {}).points === 100, 'the total is clamped at 100');
   ok(mr5.score({ points: 0, grade: 'CRASH', gradeIdx: 5, lines: [], headline: 'Crashed' }, { crashed: true, stats: {} }, {}).points === 0, 'a crash stays at 0 whatever the gates');
+  // the closest shave: a line after a landing, none after a crash (which says what was hit)
+  g5.closestD = 3.2; g5.closestName = 'the test crane';
+  const shave = (r) => r.lines.some((l) => l.k === 'Closest shave' && /3\.2 m from the test crane/.test(l.v));
+  ok(shave(mr5.score({ points: 90, grade: 'x', gradeIdx: 0, lines: [], headline: '' }, acOk, {})), 'a landing lists the closest shave');
+  ok(!shave(mr5.score({ points: 0, grade: 'CRASH', gradeIdx: 5, lines: [], headline: 'Crashed' }, { crashed: true, stats: {} }, {})), 'a crash does not list a closest shave');
   // never reached: not flown, fails the mission
   const g6 = new ObstacleField(course);
   const mr6 = new MissionRuntime({ ...sc, id: 't' }, { world: { obstacles: g6 } });

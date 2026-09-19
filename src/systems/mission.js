@@ -7,10 +7,10 @@
 //   - a REQUIRED gate that is missed (flown past outside its frame, or never reached before the flight ends)
 //     fails the mission: the debrief says which, the headline says so, and the points are capped at MISSION_CAP
 //     (the landing still shows its own lines: you did land, and how well);
-//   - a BONUS gate passed adds its `bonus` points (the default is 5; one in the harbour is worth 10);
-//   - the closest the airframe came to any solid is a debrief line ("Closest shave: 3.1 m from the crane boom"),
-//     and a pass within 5 m gets a callout in flight. Flavour only: no points.
-// status() is the HUD status line ("Gates 1/3 · the harbour exit 1.2 km"); hint() the scenario's own hint
+//   - a BONUS gate passed adds its `bonus` points (the default is 5; one in the harbor is worth 10);
+//   - the closest the airframe came to any solid is a debrief line ("Closest shave: 3.1 m from the crane boom"; not
+//     after a crash, which says what was hit), and a pass within 5 m gets a callout in flight. Flavor only.
+// status() is the HUD status line ("Gates 1/3 · the harbor exit 1.2 km"); hint() the scenario's own hint
 // function, handed { ac, ra (ft), d (m to the threshold), t, u, v (runway frame), mission }.
 //
 // score(result, ac, approach) returns a NEW result ({ points, grade, gradeIdx, lines, headline }), clamped
@@ -82,7 +82,7 @@ export class MissionRuntime {
     return this.sc.hint(c);
   }
 
-  // Extra text for the HUD status line (e.g. "Gates 1/3 · the harbour exit 1.2 km"), or ''.
+  // Extra text for the HUD status line (e.g. "Gates 1/3 · the harbor exit 1.2 km"), or ''.
   status() {
     if (!this.gates.length) return '';
     const n = this.next();
@@ -104,7 +104,7 @@ export class MissionRuntime {
         line('Gates', `${this.passed}/${this.gates.length}` + (this.bonus ? ` (+${this.bonus})` : ''), missedRequired.length ? 'bad' : 'good');
         for (const g of this.gates) if (g.state !== 'passed') line(g.state === 'pending' ? 'Not flown' : 'Missed gate', g.name + (g.required ? '' : ' (bonus)'), g.required ? 'bad' : 'warn');
       }
-      if (f.closestD < 15 && f.closestName) line('Closest shave', `${Math.max(0, f.closestD).toFixed(1)} m from ${f.closestName}`, f.closestD < 3 ? 'warn' : '');
+      if (f.closestD < 15 && f.closestName && !ac.crashed) line('Closest shave', `${Math.max(0, f.closestD).toFixed(1)} m from ${f.closestName}`, f.closestD < 3 ? 'warn' : '');
       const flown = !ac.crashed && ac.stats.touchdown;
       if (flown) {
         out.points = Math.max(0, Math.min(100, Math.round(out.points + this.bonus)));
