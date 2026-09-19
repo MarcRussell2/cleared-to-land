@@ -39,6 +39,10 @@ export class Carrier {
     this.vel = headingToVec(this.heading, new THREE.Vector3()).multiplyScalar(this.speed);
     this.t = 0;
     this.heave = 0; this.heaveRate = 0; this.pitch = 0; this.roll = 0;
+    // Deck-motion phases (radians) for the storm missions: zero unless a seed is given, which leaves the motion
+    // exactly as it always was (tools/test-carrier.mjs, Carrier Qual, Night Trap). See setMotionSeed().
+    this.phase = [0, 0, 0, 0, 0, 0, 0];
+    if (opts.seed != null) this.setMotionSeed(opts.seed);
     // landing area geometry (ship-local)
     this.angle = -9 * DEG; // angled deck to port
     this.rampLocal = new THREE.Vector3(10, DECK_H, 160);
@@ -120,16 +124,37 @@ export class Carrier {
     return new THREE.Vector3(this.rampLocal.x + this.landDirLocal.x * u + this.landRightLocal.x * v, DECK_H, this.rampLocal.z + this.landDirLocal.z * u + this.landRightLocal.z * v);
   }
 
+  // A storm's sea (src/systems/weather.js): the swell's phases come from the flight seed, so the deck is not at
+  // the same point of its cycle on every approach. Without a call the phases stay zero.
+  setMotionSeed(seed) {
+    let s = (seed >>> 0) || 1;
+    for (let i = 0; i < this.phase.length; i++) { s = (s * 1103515245 + 12345) >>> 0; this.phase[i] = (s / 4294967296) * Math.PI * 2; }
+  }
+
   update(dt) {
     this.t += dt;
     this.pos.addScaledVector(this.vel, dt);
     const s = this.seaState;
     const t = this.t;
+    const ph = this.phase;
     const heavePrev = this.heave;
-    this.heave = 1.6 * s * Math.sin((2 * Math.PI * t) / 9.0) + 0.5 * s * Math.sin((2 * Math.PI * t) / 4.3 + 1);
+    this.heave = 1.6 * s * Math.sin((2 * Math.PI * t) / 9.0 + ph[0]) + 0.5 * s * Math.sin((2 * Math.PI * t) / 4.3 + 1 + ph[1]);
+    this.pitch = 1.4 * DEG * s * Math.sin((2 * Math.PI * t) / 12.5 + 0.7 + ph[2]);
+    this.roll = 2.2 * DEG * s * Math.sin((2 * Math.PI * t) / 15.5 + 2.1 + ph[3]);
+    if (s > 1) {
+      // A storm sea: a long swell under the usual motion, and more roll. A swell much longer than the ship lifts
+      // it bodily more than it tips it (pitch follows the wave's slope, which a long wave keeps small), so the
+      // pitch eases from its sea-state-1 amplitude to three quarters of it by 1.2. That is also what keeps the
+      // ramp landable: 160 m of deck behind the pivot turn each degree of pitch into 2.8 m of ramp travel, and a
+      // ramp that moves more than the hook clears it by makes a strike luck, not a pilot's error.
+      // The short sea keeps its sea-state-1 heave; the new swell is long (13 s) and grows with the storm.
+      const e = s - 1;
+      const k = Math.min(1, e / 0.2), ease = 1 - 0.25 * k * k * (3 - 2 * k);
+      this.heave = 1.6 * Math.sin((2 * Math.PI * t) / 9.0 + ph[0]) + 0.5 * Math.sin((2 * Math.PI * t) / 4.3 + 1 + ph[1]) + 1.5 * e * Math.sin((2 * Math.PI * t) / 13.0 + ph[4]);
+      this.pitch = 1.4 * DEG * ease * Math.sin((2 * Math.PI * t) / 12.5 + 0.7 + ph[2]) + 0.3 * DEG * e * Math.sin((2 * Math.PI * t) / 7.7 + ph[5]);
+      this.roll += 2.5 * DEG * e * Math.sin((2 * Math.PI * t) / 11.0 + ph[6]);
+    }
     this.heaveRate = dt > 0 ? (this.heave - heavePrev) / dt : 0;
-    this.pitch = 1.4 * DEG * s * Math.sin((2 * Math.PI * t) / 12.5 + 0.7);
-    this.roll = 2.2 * DEG * s * Math.sin((2 * Math.PI * t) / 15.5 + 2.1);
     this.qYaw.setFromAxisAngle(new THREE.Vector3(0, 1, 0), -this.heading);
     const qp = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.pitch);
     const qr = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), this.roll);

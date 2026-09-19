@@ -1,5 +1,6 @@
 // Synthesized audio (no sample files): engines, wind, stall horn, gear horn, tires, impacts, callouts.
 import { KT, clamp, lerp } from './config.js';
+import { WeatherAudio } from './audio-weather.js';   // rain, storm wind, thunder (src/systems/weather.js state)
 
 function noiseBuffer(ctx, seconds = 2) {
   const n = ctx.sampleRate * seconds;
@@ -83,6 +84,7 @@ export class AudioSys {
     this.rollSrc = c.createBufferSource(); this.rollSrc.buffer = this.noise; this.rollSrc.loop = true; this.rollSrc.playbackRate.value = 0.25;
     this.rollLP = c.createBiquadFilter(); this.rollLP.type = 'lowpass'; this.rollLP.frequency.value = 100;
     this.rollSrc.connect(this.rollLP); this.rollLP.connect(this.rollGain); this.rollSrc.start();
+    this.wx = new WeatherAudio(this);
     this.ready = true;
     this.t = 0;
   }
@@ -144,6 +146,7 @@ export class AudioSys {
     const roughK = ac.legs.some((l) => l.contact && l.kind !== 'runway' && l.kind !== 'deck') ? 2.0 : 1;
     this.rollGain.gain.setTargetAtTime(roll * 0.18 * roughK * (cockpit ? 1.3 : 0.8), now, 0.1);
     this.rollLP.frequency.setTargetAtTime(70 + roll * 160 * roughK, now, 0.1);
+    if (this.wx) this.wx.update(ac, ctx, dt, now);
     this.processSpeech();
   }
 
