@@ -9,21 +9,28 @@
 //      from 9 km out (free flight, Autoland and the look and perf tools fly it), and its districts generate the same
 //      city twice, on land, off the runway;
 //   3. each mission's course: resolves the same way twice, the spawn is 40 m clear, every point inside every gate can
-//      be flown wings level (the Needle's: see 4), and the numbers the descriptions quote are true;
-//   4. the Needle: the gap is 33 m (narrower than the 34.3 m span), the Condor's probe footprint banked 0-45 degrees
-//      (printed), a perfect turn through it clears at 30, 35 and 40 degrees and wings level hits;
-//   5. flights with the real physics (tools/fly-mission.mjs simulate(), the code the page runs): every mission landed
-//      by RoutePilot on two seeds with every gate, and a deliberately wrong line into what the mission is about.
+//      be flown wings level (the Needle's: see 4), the numbers the descriptions quote are true, the gates under the
+//      skybridges and the bridge stop the fin's height under their undersides, Downtown has its second row;
+//   4. the Needle: the gap (narrower than the 34.3 m span), the Condor's probe footprint banked 0-45 degrees (printed,
+//      and the widths and fin height the texts quote), a perfect turn through it on the pilot's circle at 28, 30 and
+//      35 degrees and on RoutePilot's at 40 clears it, wings level hits, and the window at 30 and 35;
+//   5. flights with the real physics (tools/fly-mission.mjs simulate(), the code the page runs): every mission flown by
+//      RoutePilot on ten seeds - no crash, every gate on at least nine, a median of at least 60 points - and a
+//      deliberately wrong line into what the mission is about;
+//   6. the autopilot switched off and on inside the Needle's turn, 300 m before the eye: it keeps the arc and gets
+//      through;
+//   7. the Needle flown by a pilot who does only what the HUD hint says, never past the Assist's 35 degrees.
 import { installDomStub } from './dom-stub.mjs';
 installDomStub();
 const THREE = await import('three');
-const { DEG, makeRng } = await import('../src/config.js');
+const { DEG, KT, makeRng } = await import('../src/config.js');
 const { AIRCRAFT } = await import('../src/aircraft/defs.js');
 const { hullProbes } = await import('../src/aircraft/hulls.js');
 const { ObstacleField } = await import('../src/world/obstacles.js');
 const { SITES, SCENARIOS, resolveScenario, siteFlats } = await import('../src/systems/scenarios.js');
 const { MISSION_GROUPS } = await import('../src/missions/index.js');
-const { CITY_MISSIONS, CITY_SITES } = await import('../src/missions/city.js');
+const { CITY_MISSIONS, CITY_SITES, NEEDLE } = await import('../src/missions/city.js');
+const { RoutePilot } = await import('../src/systems/routepilot.js');
 const { Terrain } = await import('../src/world/terrain.js');
 const { touchify } = await import('../src/touch.js');
 const { simulate } = await import('./fly-mission.mjs');
@@ -123,6 +130,8 @@ function sweep(field, x, y, z, psi, phi = 0, id = 'condor') {
   // the board faces the south-east of a runway heading north: its broad face's normal (the box's Y) points +x, +z
   const nrm = board.Y[0] > 0 ? board.Y : board.Y.map((c) => -c);
   ok(nrm[0] > 0.4 && nrm[2] > 0.4, `the checkerboard faces the south-east, down the line of the turn (normal ${nrm.map((c) => c.toFixed(2)).join(', ')})`);
+  const sq = board.hint && board.hint.squares;
+  ok(sq && sq.every((n) => Number.isInteger(n)) && Math.abs(sq[0] * 10 - 2 * board.hz) < 0.01 && Math.abs(sq[1] * 10 - 2 * board.hx) < 0.01, `the board's hint names whole 10 m squares, [across, up] (${JSON.stringify(sq)} on ${(2 * board.hz).toFixed(0)} x ${(2 * board.hx).toFixed(0)} m)`);
 }
 
 // ============================================================ 3. the courses
@@ -159,7 +168,26 @@ for (const sc of CITY_MISSIONS) {
   const avenue = course.prims.filter((p) => p.name === 'an office tower' && Math.abs(p.cx - rw.x) < 140 && -(p.cz - rw.z) < -600 && -(p.cz - rw.z) > -3600);
   const shorter = avenue.filter((p) => p.max[1] - rw.elevation < glideCG(-(p.cz - rw.z)) + 20);
   ok(avenue.length > 40 && shorter.length === 0, `Downtown: every tower on the avenue is taller than the glide path at its feet (${avenue.length} towers, ${shorter.length} not)`);
-  say(`Downtown: skybridges ${u0.map((s) => `${Math.round(-s.u)} m out, underside ${s.under.toFixed(0)} m (the path ${glideCG(s.u).toFixed(0)})`).join('; ')}; ${avenue.length} towers along the avenue, all above the path`);
+  const second = course.prims.filter((p) => p.hint && p.hint.cls === 'office' && p.hint.roof === 'flat' && Math.abs(p.cx - rw.x) > 150);
+  ok(second.length > 60, `Downtown: the second row of offices behind the avenue's towers stands (${second.length} buildings; the mission's carve spares its own districts)`);
+  say(`Downtown: skybridges ${u0.map((s) => `${Math.round(-s.u)} m out, underside ${s.under.toFixed(0)} m (the path ${glideCG(s.u).toFixed(0)})`).join('; ')}; ${avenue.length} towers along the avenue, all above the path; ${second.length} offices in the row behind`);
+}
+{
+  // every gate under something (a skybridge, the bridge deck) tops out the fin's height and half a metre under it
+  const fin = Math.max(...hullProbes(AIRCRAFT.condor).probes.map((p) => Math.max(p.y, p.y + (p.fy || 0)) + p.r));
+  let n = 0;
+  for (const sc of CITY_MISSIONS) {
+    const course = courseOf(sc);
+    for (const g of course.gates) {
+      if (!/under/.test(g.name)) continue;
+      // the structure over the gate: the lowest underside of a skybridge or deck within 60 m of it
+      const over = course.prims.filter((p) => (p.kind === 'skybridge' || p.kind === 'bridge-deck') && Math.hypot(p.cx - g.x, p.cz - g.z) < Math.max(60, p.hx + 5) && p.cy - p.hy > g.y);
+      const under = Math.min(...over.map((p) => p.cy - p.hy)), top = g.y + g.h / 2;
+      n++;
+      ok(over.length && top + fin <= under - 0.4 && top + fin >= under - 1, `${sc.id}: ${g.name} tops out ${(under - top).toFixed(2)} m under the underside (the fin needs ${fin.toFixed(2)}, and the rest is the half metre)`);
+    }
+  }
+  say(`the ${n} gates under skybridges and the bridge stop half a metre plus the fin (${fin.toFixed(2)} m) under the structure`);
 }
 
 // ============================================================ 4. the Needle
@@ -169,10 +197,10 @@ for (const sc of CITY_MISSIONS) {
   const towers = course.prims.filter((p) => p.shape === 'cyl' && p.name === 'the Needle' && p.look === 'building');
   ok(towers.length === 2, 'the Needle: two round towers');
   const gap = Math.hypot(towers[0].x - towers[1].x, towers[0].z - towers[1].z) - towers[0].r0 - towers[1].r0;
-  ok(Math.abs(gap - 33) < 0.05 && gap < AIRCRAFT.condor.span, `the Needle: the gap is ${gap.toFixed(2)} m, narrower than the Condor's ${AIRCRAFT.condor.span} m span`);
-  // the probe footprint banked (horizontal width across the flight path, flaps 30, gear down)
+  ok(Math.abs(gap - NEEDLE.gap) < 0.05 && gap < AIRCRAFT.condor.span, `the Needle: the gap is ${gap.toFixed(2)} m, narrower than the Condor's ${AIRCRAFT.condor.span} m span`);
+  // the probe footprint banked (horizontal width across the flight path, flaps 30, gear down), and the fin's top
   const Hh = hullProbes(AIRCRAFT.condor), rows = [];
-  for (const deg of [0, 25, 30, 35, 40, 45]) {
+  for (const deg of [0, 15, 20, 25, 30, 35, 40, 45]) {
     const f = deg * DEG; let lo = Infinity, hi = -Infinity;
     for (const p of [...Hh.probes.map((q) => ({ x: q.x, y: q.y + 0.75 * (q.fy || 0), r: q.r })), ...Hh.gear]) {
       const lat = p.x * Math.cos(f) + p.y * Math.sin(f); lo = Math.min(lo, lat - p.r); hi = Math.max(hi, lat + p.r);
@@ -180,13 +208,15 @@ for (const sc of CITY_MISSIONS) {
     rows.push({ deg, w: hi - lo, mid: (hi + lo) / 2 });
   }
   const w = (d) => rows.find((r) => r.deg === d).w;
-  ok(w(0) > gap && w(30) < gap && w(35) < gap - 2.5, `the Condor's footprint: ${rows.map((r) => `${r.deg} deg ${r.w.toFixed(1)} m`).join(', ')}: wider than the gap wings level, narrower banked 30 degrees or more`);
-  // a perfect turn through the gap (the path the route and the gate are built on: through the gate's middle less the
-  // 0.95 m lean, radius 836 m), flown at each bank, and the same line wings level
-  const psi = g.psi, R = 836, nx = Math.cos(psi), nz = Math.sin(psi);
-  const Gx = g.x - 0.95 * nx, Gz = g.z - 0.95 * nz, Cx = Gx + R * nx, Cz = Gz + R * nz;
-  const turn = (bank, off = 0) => {
-    const ac = fakeAc('condor', 0, g.y, 0), e = new THREE.Euler();
+  ok(w(0) > gap && w(20) < gap && w(35) < gap - 3.5, `the Condor's footprint: ${rows.map((r) => `${r.deg} deg ${r.w.toFixed(1)} m`).join(', ')}: wider than the gap wings level, narrower banked 20 degrees or more`);
+  ok([30, 35, 40, 45].every((d) => Math.abs(w(d) - NEEDLE.width[d]) < 0.6) && Math.abs(w(0) - 35) < 0.6, `the widths the texts quote (CONDOR_WIDTH ${JSON.stringify(NEEDLE.width)}, 35 wings level) match the hull`);
+  const fin = Math.max(...Hh.probes.map((p) => Math.max(p.y, p.y + (p.fy || 0)) + p.r));
+  ok(fin <= NEEDLE.fin && fin > NEEDLE.fin - 0.25, `the fin stands ${fin.toFixed(2)} m over the CG (FIN ${NEEDLE.fin} in city.js, the under-gates' allowance, at least that)`);
+  // a perfect turn through the eye, on each line: the pilot's circle (radius NEEDLE.r) and RoutePilot's (NEEDLE.rAp),
+  // both through the gate's middle (the aim point) at the gate's heading, flown at a steady bank; the same wings level
+  const psi = g.psi, nx = Math.cos(psi), nz = Math.sin(psi);
+  const turn = (R, bank, off = 0) => {
+    const Cx = g.x + R * nx, Cz = g.z + R * nz, ac = fakeAc('condor', 0, g.y, 0), e = new THREE.Euler();
     let hit = null;
     for (let k = 0; k <= 200; k++) {
       const th = psi - 0.25 + k * 0.5 / 200;
@@ -197,29 +227,39 @@ for (const sc of CITY_MISSIONS) {
     }
     return { hit, clear: field.closestD };
   };
-  const res = [30, 35, 40].map((b) => ({ b, ...turn(b) }));
-  ok(res.every((r) => !r.hit), `the Needle: a perfect turn through the eye clears it at 30, 35 and 40 degrees of bank (${res.map((r) => `${r.b}: ${r.hit || r.clear.toFixed(2) + ' m'}`).join(', ')})`);
-  const level = turn(0);
+  const res = [28, 30, 35].map((b) => ({ b, ...turn(NEEDLE.r, b) }));
+  ok(res.every((r) => !r.hit), `the Needle: the pilot's circle flown through the eye clears it at 28, 30 and 35 degrees of bank (${res.map((r) => `${r.b}: ${r.hit || r.clear.toFixed(2) + ' m'}`).join(', ')})`);
+  const ap = turn(NEEDLE.rAp, NEEDLE.apBank);
+  ok(!ap.hit && ap.clear > 2, `the Needle: RoutePilot's circle at ${NEEDLE.apBank} degrees clears it by ${ap.hit || ap.clear.toFixed(2) + ' m'}`);
+  const level = turn(NEEDLE.r, 0);
   ok(!!level.hit, `the Needle: the same line wings level hits (${level.hit})`);
-  // the window at 35 degrees: how far off the line the turn can be flown and still clear
-  let lo = 0, hi = 0;
-  for (let o = 0; o <= 3; o += 0.1) { if (turn(35, o).hit) break; hi = o; }
-  for (let o = 0; o <= 3; o += 0.1) { if (turn(35, -o).hit) break; lo = o; }
-  ok(hi + lo >= 2.5, `the Needle: at 35 degrees the window is ${(hi + lo).toFixed(1)} m wide (${lo.toFixed(1)} m inside, ${hi.toFixed(1)} m outside the line)`);
-  say(`the Needle: gap ${gap.toFixed(1)} m; clears at 30/35/40 degrees by ${res.map((r) => r.clear.toFixed(2)).join('/')} m; window at 35 degrees ${(hi + lo).toFixed(1)} m; wings level: ${level.hit}`);
+  // the window: how far off the line the turn can be flown and still clear, at 30 and 35 degrees
+  const windowAt = (b) => { let lo = 0, hi = 0; for (let o = 0; o <= 4; o += 0.1) { if (turn(NEEDLE.r, b, o).hit) break; hi = o; } for (let o = 0; o <= 4; o += 0.1) { if (turn(NEEDLE.r, b, -o).hit) break; lo = o; } return { lo, hi }; };
+  const w30 = windowAt(30), w35 = windowAt(35);
+  ok(w30.lo + w30.hi >= 2 && w35.lo + w35.hi >= 3.5, `the Needle: the window is ${(w30.lo + w30.hi).toFixed(1)} m at 30 degrees, ${(w35.lo + w35.hi).toFixed(1)} m at 35 (${w35.lo.toFixed(1)} inside, ${w35.hi.toFixed(1)} outside the line)`);
+  say(`the Needle: gap ${gap.toFixed(1)} m; the pilot's circle clears at 28/30/35 degrees by ${res.map((r) => r.clear.toFixed(2)).join('/')} m, RoutePilot's at ${NEEDLE.apBank} by ${ap.clear.toFixed(2)} m; window ${(w30.lo + w30.hi).toFixed(1)} m at 30, ${(w35.lo + w35.hi).toFixed(1)} m at 35; wings level: ${level.hit}; the fin ${fin.toFixed(2)} m over the CG`);
 }
 
 // ============================================================ 5. flights with the real physics
+// RoutePilot on ten seeds each (the two named ones and 1-8): no crash, every gate on at least nine of the ten, a median
+// of at least 60 points; then the same seed flying the same flight, and the wrong lines.
+const SEEDS = [307, 4271, 1, 2, 3, 4, 5, 6, 7, 8];
+const gatesOk = (r) => r.gates.length > 0 && r.gates.every((x) => /: passed$/.test(x));
 {
   const results = {};
   for (const sc of CITY_MISSIONS) {
-    for (const seed of [307, 4271]) {
+    const rs = [];
+    for (const seed of SEEDS) {
       const r = await simulate(sc.id, { seed });
-      results[sc.id + seed] = r;
-      const all = r.gates.every((g) => /: passed$/.test(g));
-      ok(!r.crashed && r.touchdown && all && r.points >= 40, `${sc.id} RoutePilot seed ${seed}: lands with every gate (${r.crashed ? r.reason : r.points + ' ' + r.grade}; ${r.gates.join(', ')})`);
-      console.log(`PASS ${sc.id} seed ${seed}: ${r.points} ${r.grade}, touchdown ${r.touchdown ? `${r.touchdown.u} m in, ${r.touchdown.fpm} fpm, ${r.touchdown.kt} kt` : '-'}; gates ${r.gates.filter((g) => /passed$/.test(g)).length}/${r.gates.length}; closest ${r.closest}`);
+      results[sc.id + seed] = r; rs.push(r);
+      if (seed === 307 || seed === 4271) ok(!r.crashed && r.touchdown && gatesOk(r) && r.points >= 40, `${sc.id} RoutePilot seed ${seed}: lands with every gate (${r.crashed ? r.reason : r.points + ' ' + r.grade}; ${r.gates.join(', ')})`);
     }
+    const crashed = rs.filter((r) => r.crashed).length, allGates = rs.filter((r) => !r.crashed && r.touchdown && gatesOk(r)).length;
+    const pts = rs.map((r) => (r.crashed ? 0 : r.points)).sort((a, b) => a - b), med = (pts[4] + pts[5]) / 2;
+    const fpm = rs.filter((r) => r.touchdown).map((r) => r.touchdown.fpm).sort((a, b) => a - b);
+    ok(crashed === 0 && allGates >= 9 && med >= 60, `${sc.id}: RoutePilot over ${SEEDS.length} seeds - no crash (${crashed}), every gate on at least 9 (${allGates}), median at least 60 (${med})`);
+    const cl = rs.filter((r) => r.closest).map((r) => parseFloat(r.closest)).sort((a, b) => a - b);
+    console.log(`PASS ${sc.id}: RoutePilot on ${SEEDS.length} seeds: ${allGates}/${SEEDS.length} with every gate, points ${pts[0]}-${pts[pts.length - 1]} (median ${med}), touchdown ${fpm[0]}-${fpm[fpm.length - 1]} fpm${cl.length ? `, closest ${cl[0].toFixed(1)}-${cl[cl.length - 1].toFixed(1)} m` : ''}; seed 307 ${results[sc.id + 307].points} ${results[sc.id + 307].grade}, 4271 ${results[sc.id + 4271].points} ${results[sc.id + 4271].grade}`);
   }
   // the same seed flies the same flight
   const again = await simulate('the-needle', { seed: 307 });
@@ -246,6 +286,65 @@ for (const sc of CITY_MISSIONS) {
     const r = await simulate(id, { seed: 307, ...o });
     ok(r.crashed && want.test(r.reason), `${id}: ${what} must end ${want} (got ${r.crashed ? r.reason : 'no crash: ' + r.points + ' ' + r.grade})`);
     console.log(`PASS ${id}: ${what} ends "${r.reason}" after ${r.t} s (${r.part})`);
+  }
+}
+
+// ============================================================ 6. the autopilot switched off and on inside the turn
+// game.setAutopilot(false) then (true) makes a fresh RoutePilot that resumes where the airplane is along the route.
+// Inside the Needle's arc it must keep the arc's own circle (a chord from the airplane to the arc's end runs 40 m
+// inside it, into the inner tower): switched 300 m before the eye, banked, it must still go through and land.
+{
+  const g = byId('the-needle').course.gates[0];
+  const before = (dist) => (ac, t, mission) => {
+    const eyeG = mission.gates[0];
+    return eyeG.state === 'pending' && (eyeG.x - ac.pos.x) * eyeG.n[0] + (eyeG.z - ac.pos.z) * eyeG.n[2] < dist;
+  };
+  void g;
+  for (const [id, seed] of [['the-needle', 307], ['the-needle', 4], ['the-needle', 5], ['gauntlet', 307]]) {
+    const r = await simulate(id, { seed, resume: before(300) });
+    ok(!!r.resumed && !r.crashed && r.touchdown && gatesOk(r), `${id} seed ${seed}: the autopilot switched off and on 300 m before the eye (at ${r.resumed ? r.resumed.t + ' s' : '-'}) still goes through and lands (${r.crashed ? r.reason : r.points + ' ' + r.grade}; ${r.gates.join(', ')})`);
+    console.log(`PASS ${id} seed ${seed}: resumed at ${r.resumed && r.resumed.t} s, 300 m before the eye: ${r.crashed ? r.reason : r.points + ' ' + r.grade}, closest ${r.closest}`);
+  }
+}
+
+// ============================================================ 7. the Needle flown the way the hint says
+// A pilot who does what the HUD hint says and no more: holds the run-in line (steering for a point 600 m ahead on it,
+// as a pilot lining up visually does) until "Roll right now", then the bank the hint shows, never past the Assist's
+// 35 degrees, rounded to the degree it prints; 60 m past the eye the autopilot is switched on to take it home. It must go
+// through the eye on every seed in The Needle's wind, and on at least 7 of 10 in the Gauntlet's 18-kt gusts (with
+// the 35-degree limit the room there is a metre; RoutePilot, at 40 degrees, always gets through).
+{
+  const HINT_CAP = 35;
+  const hintPilot = (ac, world, sc, mission) => {
+    const rp = new RoutePilot(ac, world, sc), tgt = { x: 0, z: 0 }, ctx = { ac, ra: 0, d: 0, t: 0 };
+    let cmd = 0, rolled = false, handed = null;
+    return { update(dt) {
+      if (handed) { handed.update(dt); return; }
+      ctx.t += dt; ctx.ra = ac.radioAlt / 0.3048;
+      const eyeG = mission.gates[0];
+      if (eyeG.state !== 'pending' && (ac.pos.x - eyeG.x) * eyeG.n[0] + (ac.pos.z - eyeG.z) * eyeG.n[2] > 60) { handed = new RoutePilot(ac, world, sc); handed.update(dt); return; }
+      const h = mission.hint(ctx) || '';
+      let m;
+      if ((m = /Roll right now: (\d+)/.exec(h))) { cmd = Math.min(HINT_CAP, +m[1]); rolled = true; } else if ((m = /^Bank (\d+) degrees/.exec(h))) { cmd = Math.min(HINT_CAP, +m[1]); rolled = true; }
+      if (!rolled) {
+        const rw2 = world.runway, P = NEEDLE.path, dx = ac.pos.x - rw2.threshold.x, dz = ac.pos.z - rw2.threshold.z;
+        const u = dx * rw2.dir.x + dz * rw2.dir.z, v = dx * rw2.right.x + dz * rw2.right.z;
+        const s = (u - P.S.u) * P.d0.u + (v - P.S.v) * P.d0.v + 600, tu = P.S.u + P.d0.u * s, tv = P.S.v + P.d0.v * s;
+        tgt.x = rw2.threshold.x + rw2.dir.x * tu + rw2.right.x * tv; tgt.z = rw2.threshold.z + rw2.dir.z * tu + rw2.right.z * tv;
+        rp.steer(dt, tgt, rw2.elevation + NEEDLE.alt, 0, NEEDLE.kt * KT, 15);
+      } else rp.steer(dt, tgt, world.runway.elevation + NEEDLE.alt, 0, NEEDLE.kt * KT, HINT_CAP, { sgn: 1, ff: cmd * DEG, corr: 0 });
+    } };
+  };
+  for (const [id, need] of [['the-needle', 10], ['gauntlet', 7]]) {
+    const rows = []; let through = 0;
+    for (let seed = 1; seed <= 10; seed++) {
+      const r = await simulate(id, { seed, makePilot: hintPilot });
+      const passed = /: passed$/.test(r.gates[0]) && !(r.crashed && /Needle/.test(r.reason));
+      if (passed) through++;
+      rows.push(`${seed}: ${passed ? (r.crashed ? 'through, then ' + r.reason : 'through, ' + r.points) : r.reason || r.gates[0]}`);
+    }
+    ok(through >= need, `${id}: flown the way the hint says, never past 35 degrees, through the eye on at least ${need} of 10 seeds (${through}: ${rows.join('; ')})`);
+    console.log(`PASS ${id}: flown the way the hint says (35 degrees at most): through the eye on ${through} of 10 seeds (${rows.join('; ')})`);
   }
 }
 

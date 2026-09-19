@@ -13,8 +13,9 @@
 //      built in Node and every vertex of every instance of every mesh is checked against the prim it claims to draw
 //      (inside it, within 0.5 m + 2%), and every prim's drawing must fill its volume - for the three missions and for
 //      a course that uses every one of the engine's 17 kinds (the city ladder's district, landmark and skybridge too);
-//  10. the city's budget: Metro City with The Gauntlet's course at the three quality tiers (draws, triangles a pass,
-//      textures, programs) and the same drawing contract - what the art department's city will be held to;
+//  10. the city's budget: every course a flight at Metro City builds (free flight and the six missions) at the three
+//      quality tiers (draws, triangles a pass, textures, programs counted by the variants three compiles) and the same
+//      drawing contract on the biggest of them and on the Gauntlet at night - what the art department's city is held to;
 //   5. gates and the mission runtime: pass / miss / wrong-way detection, the debrief lines, the points cap for a
 //      missed required gate, the bonus, the clamp, the HUD status line;
 //   6. the mission data (ids, n, fields, tips, touch words) and that no original site or challenge builds a field;
@@ -451,29 +452,81 @@ function checkDrawing(course, built, terrain) {
 }
 
 // ============================================================ 10. the city's budget (the art department's too)
-// Metro City with The Gauntlet's course (the most any flight there builds), at the three quality tiers: draws, the
-// triangles submitted in one pass (every instance counted), textures, programs, and the drawing contract above.
+// Every course a flight at Metro City builds - free flight and each of the six city missions - at the three quality
+// tiers: draws, the triangles submitted in one pass (every instance counted), textures and programs; and the drawing
+// contract above in full on the biggest of them at every tier and on the Gauntlet (flown at night).
+// Programs are counted the way three compiles them: a material's program key once for each variant it is drawn with -
+// instanced with instance colours, instanced without, a plain mesh, points - shadow primers included (they are there
+// to compile variants). The plain look compiles 3 of its own: course/solids with and without instance colours (the
+// second is the shadow primer's) and course/ground, as the page census shows; the lights are the world's LightSet
+// program (ctl-lights-v2), shared, not counted. A whole scene may compile at most 70 with the Condor's cockpit shown,
+// and Checkerboard reaches 67 with the plain look (tools/perf-probe.mjs --scene checkerboard --camera cockpit): the
+// city may compile 3 more of its own, so CITY_PROGRAMS is 6.
+const CITY_PROGRAMS = 6, SHARED_PROGRAMS = new Set(['ctl-lights-v2']);
+function programsOf(built) {
+  const keys = new Set();
+  for (const o of built.objects) {
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    for (const m of mats) {
+      if (!m) continue;
+      const key = m.customProgramCacheKey ? m.customProgramCacheKey() : m.type + ':' + m.name;
+      if (SHARED_PROGRAMS.has(key)) continue;
+      keys.add(`${key}|${o.isInstancedMesh ? (o.instanceColor ? 'instanced+colour' : 'instanced') : o.isPoints ? 'points' : 'mesh'}`);
+    }
+  }
+  return keys;
+}
+function budgetOf(built) {
+  let draws = 0, tris = 0, texBytes = 0;
+  const textures = new Set();
+  for (const o of built.objects) {
+    if (o.userData.primer) continue;
+    draws++;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    for (const m of mats) for (const k of ['map', 'normalMap', 'roughnessMap', 'emissiveMap', 'alphaMap', 'aoMap']) if (m && m[k] && !textures.has(m[k])) { textures.add(m[k]); const im = m[k].image; if (im && im.width) texBytes += im.width * im.height * 4; }
+    if (o.isPoints) continue;
+    const g = o.geometry, idx = g.index, pos = g.attributes.position;
+    tris += (idx ? idx.count : pos.count) / 3 * (o.isInstancedMesh ? o.count : 1);
+  }
+  return { draws, tris: Math.round(tris), texBytes, programs: programsOf(built) };
+}
 {
   const { CITY_MISSIONS } = await import('../src/missions/city.js');
-  const g = CITY_MISSIONS.find((s) => s.id === 'gauntlet');
-  const site = SITES.metro, course = ObstacleField.plan(site, g);
   const { Terrain } = await import('../src/world/terrain.js');
   const { siteFlats } = await import('../src/systems/scenarios.js');
+  const site = SITES.metro;
   const terrain = new Terrain({ ...site.terrain, flats: siteFlats(site) });
   const BUDGET = { high: 450000, medium: 250000, low: 120000 };
+  const build = (course, tier, night) => look.buildCourse(course.prims, course.gates, { terrain, night, quality: tier, seed: course.seed, lights: course.lights, ground: course.ground });
+  const courses = [{ id: 'free flight', course: ObstacleField.plan(site, { id: 'free' }) }, ...CITY_MISSIONS.map((sc) => ({ id: sc.id, course: ObstacleField.plan(site, sc), night: sc.time > 19.5 || sc.time < 6 }))];
   const was = WORLD_QUALITY.detail;
+  const rows = { high: [], medium: [], low: [] };
+  let biggest = null;
   for (const tier of ['high', 'medium', 'low']) {
     WORLD_QUALITY.detail = tier;
-    const day = checkDrawing(course, look.buildCourse(course.prims, course.gates, { terrain, night: false, quality: tier, seed: course.seed, lights: course.lights, ground: course.ground }), terrain);
-    const nightB = look.buildCourse(course.prims, course.gates, { terrain, night: true, quality: tier, seed: course.seed, lights: course.lights, ground: course.ground });
-    const nightDraws = nightB.objects.filter((o) => !o.userData.primer).length;
-    ok(day.problems.length === 0, `metro + gauntlet (${tier}): every solid drawn inside and filling its volume: ${day.problems.join('; ')}`);
-    ok(day.draws <= 60 && nightDraws <= 61, `metro + gauntlet (${tier}): at most 60 draws by day, 61 at night (${day.draws}, ${nightDraws})`);
-    ok(day.tris <= BUDGET[tier], `metro + gauntlet (${tier}): at most ${BUDGET[tier] / 1000}k triangles a pass (${Math.round(day.tris / 1000)}k)`);
-    ok(day.texBytes <= 8 * 1024 * 1024 && day.programs <= 6, `metro + gauntlet (${tier}): textures at most 8 MB (${(day.texBytes / 1048576).toFixed(1)}), at most 6 programs (${day.programs})`);
-    say(`metro + gauntlet (${tier}): ${course.prims.length} solids, ${day.draws} draws by day (${nightDraws} at night), ${Math.round(day.tris / 1000)}k triangles a pass, ${day.programs} programs, ${(day.texBytes / 1048576).toFixed(1)} MB of textures`);
+    for (const c of courses) {
+      const day = budgetOf(build(c.course, tier, false)), night = budgetOf(build(c.course, tier, true));
+      ok(day.draws <= 60 && night.draws <= 61, `${c.id} (${tier}): at most 60 draws by day, 61 at night (${day.draws}, ${night.draws})`);
+      ok(day.tris <= BUDGET[tier] && night.tris <= BUDGET[tier], `${c.id} (${tier}): at most ${BUDGET[tier] / 1000}k triangles a pass (${Math.round(Math.max(day.tris, night.tris) / 1000)}k)`);
+      const progs = new Set([...day.programs, ...night.programs]);
+      ok(day.texBytes <= 8 * 1024 * 1024 && progs.size <= CITY_PROGRAMS, `${c.id} (${tier}): textures at most 8 MB (${(day.texBytes / 1048576).toFixed(1)}), at most ${CITY_PROGRAMS} programs of its own counted by variant (${progs.size}: ${[...progs].join(', ')})`);
+      rows[tier].push(`${c.id} ${c.course.prims.length} solids ${day.draws}/${night.draws} draws ${Math.round(day.tris / 1000)}k ${progs.size} progs`);
+      if (tier === 'high' && (!biggest || day.tris > biggest.tris)) biggest = { ...c, tris: day.tris };
+    }
+    say(`the city's budget (${tier}): ${rows[tier].join('; ')}`);
   }
+  // the drawing contract on the biggest course at every tier, and on the Gauntlet at night
+  for (const tier of ['high', 'medium', 'low']) {
+    WORLD_QUALITY.detail = tier;
+    const r = checkDrawing(biggest.course, build(biggest.course, tier, false), terrain);
+    ok(r.problems.length === 0, `${biggest.id} (${tier}, the biggest city course): every solid drawn inside and filling its volume: ${r.problems.join('; ')}`);
+  }
+  WORLD_QUALITY.detail = 'high';
+  const g = courses.find((c) => c.id === 'gauntlet');
+  const rg = checkDrawing(g.course, build(g.course, 'high', true), terrain);
+  ok(rg.problems.length === 0, `gauntlet (night): every solid drawn inside and filling its volume: ${rg.problems.join('; ')}`);
   WORLD_QUALITY.detail = was;
+  say(`the city's contract: ${biggest.id} (the biggest, ${biggest.course.prims.length} solids, ${Math.round(biggest.tris / 1000)}k triangles at high) drawn inside and filling every volume at all three tiers, and the Gauntlet at night`);
 }
 
 // ============================================================ 5. gates and the mission runtime

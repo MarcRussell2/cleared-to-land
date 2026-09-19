@@ -48,6 +48,7 @@ export async function simulate(id, opts = {}) {
   const { Terrain } = await import('../src/world/terrain.js');
   const { ObstacleField } = await import('../src/world/obstacles.js');
   const { MissionRuntime } = await import('../src/systems/mission.js');
+  const { Weather } = await import('../src/systems/weather.js');
   const { RoutePilot } = await import('../src/systems/routepilot.js');
   const { Autoland } = await import('../src/systems/autopilot.js');
   const { scoreLanding, vrefFor } = await import('../src/systems/scoring.js');
@@ -93,7 +94,10 @@ export async function simulate(id, opts = {}) {
   const w = sc.wind;
   wind.set({ dir: w.dir != null ? w.dir : ((heading * RAD + (w.rel || 0)) + 720) % 360, speed: w.speed || 0, gust: w.gust, turb: w.turb || 0, shear: w.shear || 0, seed });
   wind.groundY = rw.elevation;
-  const env = { wind: (p, t, o) => wind.at(p, t, o), ground, carrier: null };
+  // the weather model (src/systems/weather.js) as main.js wires it: its overlay on top of the physics wind, its update
+  // before each physics step; a scenario without `weather` has none
+  const weather = sc.weather ? new Weather(sc.weather, { seed, wind, world, scenario: sc }) : null;
+  const env = { wind: (p, t, o) => { wind.at(p, t, o); if (weather) weather.addWind(p, t, o); return o; }, ground, carrier: null };
   ac.stallSign = seed % 2 ? 1 : -1;
   // spawn: main.js spawn() for a runway site
   const sp = sc.spawn, dist = sp.dist || 5000, g0 = { y: 0, n: new THREE.Vector3(), vel: new THREE.Vector3() };
@@ -111,15 +115,21 @@ export async function simulate(id, opts = {}) {
   for (const e of ac.engines) e.throttle = ac.input.throttle;
   if (def.spoilers && def.id === 'condor') ac.input.spoilerArmed = false;
   ac._derive();
-  const mission = new MissionRuntime(sc, { world });
+  const mission = new MissionRuntime(sc, { world, weather });
   if (field) field.reset(ac);
-  const pilot = opts.pilot === 'none' ? null : sc.route ? new RoutePilot(ac, world, sc) : new Autoland(ac, world, sc);
+  // opts.makePilot(ac, world, sc, mission): a pilot of the caller's own ({ update(dt) }: a scripted hand-flown line);
+  // opts.resume(ac, t, mission): when it first returns true, the autopilot is switched off and on again there, as
+  // game.setAutopilot(false / true) does (a fresh RoutePilot that resumes where the airplane is along the route)
+  let pilot = opts.makePilot ? opts.makePilot(ac, world, sc, mission) : opts.pilot === 'none' ? null : sc.route ? new RoutePilot(ac, world, sc) : new Autoland(ac, world, sc);
+  let resumed = null;
   const ap = { gsErr: 0, locErr: 0, spdErr: 0, gsSamples: 0, tdU: 0, tdV: 0, stopU: 0, offRunway: false, overran: false, noseDownSpeed: null, runway: rw };
   const track = [];
   let t = 0, endT = 0, n = 0, hitName = null;
   for (; n < maxFrames; n++) {
     t += dt;
+    if (opts.resume && !resumed && opts.resume(ac, t, mission)) { pilot = new RoutePilot(ac, world, sc); resumed = { t: +t.toFixed(2) }; }
     if (pilot) pilot.update(dt);
+    if (weather) weather.update(dt, t, ac);
     ac.step(dt, env);
     if (field && !ac.crashed) { const h = field.hit(ac); if (h) { hitName = h; ac.crash('Hit ' + h); } }
     for (const e of ac.events) if ((e.type === 'nosestrike' || e.type === 'belly') && ap.noseDownSpeed == null) ap.noseDownSpeed = ac.gs;
@@ -161,6 +171,8 @@ export async function simulate(id, opts = {}) {
     points: result.points, grade: result.grade, headline: result.headline, lines: result.lines.map((l) => `${l.k}: ${l.v}`),
     gates: field ? field.gates.map((g) => `${g.name}: ${g.state}`) : [], closest: field && field.closestD < 1e8 ? `${field.closestD.toFixed(1)} m from ${field.closestName}` : null,
     touchdown: ac.stats.touchdown ? { u: +ap.tdU.toFixed(0), v: +ap.tdV.toFixed(1), fpm: Math.round(ac.stats.touchdown.vs / 0.00508), kt: Math.round(ac.stats.touchdown.ias / KT) } : null,
+    resumed: resumed || undefined,
+    gatesAt: field ? field.gates.map((g) => (g.at ? { lat: +g.at.lat.toFixed(2), up: +g.at.up.toFixed(2) } : null)) : [],
     track: opts.track ? track : undefined,
   };
 }
@@ -324,6 +336,7 @@ async function main() {
     else if (a === '--set') o.set = JSON.parse(args[++i]);
     else if (a === '--tag') o.tag = args[++i];
     else if (a === '--track') o.track = +args[++i];
+    else if (a === '--debug') o.debug = true;
     else if (a === '--render') o.render = +args[++i];
   }
   if (!o.node && existsSync(`${ROOT}/web/index.html`)) {

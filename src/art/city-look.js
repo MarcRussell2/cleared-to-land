@@ -61,15 +61,26 @@
 //      four corners of every gate are drawn (more are welcome within the budget: street lamps, window glow).
 //   4b. Gates stay visible markers: the plain look's four bars a gate (instances with prim -1), or a decoration mesh
 //      named with "gate" in it.
-//   5. Budgets for the whole course (tools/test-obstacles.mjs section 10 measures Metro City with The Gauntlet's
-//      course, the biggest): at most 60 draws by day (+1 for the lights at night) and, submitted per pass counting
-//      every instance, 450k triangles at high, 250k at medium, 120k at low; canvas textures at most 8 MB in all; at
-//      most 6 programs of its own. (The plain look below: 5 draws by day, 6 at night, 138k / 88k / 69k triangles.)
+//   5. Budgets for the whole course (tools/test-obstacles.mjs section 10 measures every course a flight at Metro City
+//      builds - free flight and the six missions; the biggest is The Needle's, 5,053 solids): at most 60 draws by day
+//      (+1 for the lights at night) and, submitted per pass counting every instance, 450k triangles at high, 250k at
+//      medium, 120k at low; canvas textures at most 8 MB in all; at most 6 PROGRAMS of its own, counted the way three
+//      compiles them - a material's program key once per variant it is drawn with (instanced with instance colours,
+//      instanced without, plain mesh, points; the shadow primers count), the world's shared LightSet program not
+//      counted. The plain look compiles 3 (course/solids with and without instance colours, course/ground); a whole
+//      scene may compile 70 with the Condor's cockpit shown and Checkerboard reaches 67 with the plain look, so the
+//      city has room for 3 more, not 3 more materials: one material drawn both with and without instance colours is
+//      two. (The plain look: 4-6 draws by day, one more at night, 141k / 92k / 74k triangles at the three tiers.)
 //   6. The shadow primers (below) stay: two 1 mm instanced casters, with and without instance colours.
+//   7. The shadow pass draws GEOMETRY with its own depth material: vertex-shader shaping (the plain look's ctTaper, the
+//      thin members' widening) is invisible to it and to the contract check. Build any shape that casts a visible
+//      shadow as geometry (the plain look builds each frustum among the round buildings and the hill that way).
 //
 // ---- The plain look (this file as the city ladder left it: the brief asks the art department to replace it)
-// Draw calls: one InstancedMesh per geometry - boxes, cylinders, tubes, marker balls, trees - sharing ONE material
-// and program (course/solids) except the trees; one draped Mesh for the ground (course/ground); one LightSet at night.
+// Draw calls: one InstancedMesh per geometry - boxes, thin cylinders, round buildings and the hill (one mesh per
+// taper: a frustum's taper is in its geometry, so its shadow is a frustum), tubes, marker balls, trees - sharing ONE
+// material and program (course/solids) except the trees; one draped Mesh for the ground (course/ground); one LightSet
+// at night.
 // Plus, for the first half second of a flight only, two 1 mm "shadow primers" (instanced casters with and without
 // instance colours) riding with the aircraft (userData.primer), so the shadow pass compiles both instanced depth
 // programs in the first frame, and not when the course or the aerodrome first reaches the sun's shadow box
@@ -82,8 +93,11 @@
 //                 3 gate stripes, 4 ship's hull, 5 painted lattice, 6 house / flats (small windows), 7 wood, 8 wire,
 //                 9 steel member (8 and 9 are the thin ones), 10 round glass facade, 11 hill, 12 checkerboard,
 //                 13 shed cladding
-//   ctSeed  float per-instance variation (windows, container colours); for a hull, its waterline above the keel
-//   ctTaper float top radius / bottom radius of a frustum (1 for everything else)
+//   ctSeed  float per-instance variation, an INTEGER 0..999 (windows, container colours; the shader reads it back with
+//                 floor(x + 0.5): an interpolated varying carries rounding noise, and a hash of it is noise per pixel,
+//                 so the lit windows speckled and crawled); for a hull, its waterline above the keel, in metres
+//   ctTaper float top radius / bottom radius of a thin frustum, tapered in the vertex shader (1 for everything else,
+//                 the round buildings and the hill included: their taper is in their geometry)
 //   ctLit   float the fraction of its windows lit at night (the hint's `lit`; 0.4 without one)
 //   (the shader's local coordinates run from the box's lower corner, in metres: windows, tiers and the waterline
 //   are measured from the base)
@@ -210,6 +224,9 @@ varying vec3 ctNrm;
 varying vec3 ctInfo;
 varying vec3 ctSize;
 float ctHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+// a window, a stack, a panel: the hash of an integer cell and the instance's integer seed, kept small (mod 289) so the
+// hash's sine never sees a large argument (the same cell gives the same number on every pixel, on every GPU)
+float ctCellHash(vec2 cell, float seed, float k) { return ctHash(mod(cell + vec2(seed * 7.0 + k, seed * 13.0 + 3.0 * k), 289.0)); }
 float ctNoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(ctHash(i), ctHash(i + vec2(1.0, 0.0)), f.x), mix(ctHash(i + vec2(0.0, 1.0)), ctHash(i + 1.0), f.x), f.y); }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
@@ -217,7 +234,8 @@ float ctGloss = 0.0;
 float ctMatte = 0.0;
 vec3 ctEmit = vec3(0.0);
 {
-  float style = floor(ctInfo.x + 0.5), seed = ctInfo.y, litFrac = ctInfo.z;
+  // (seed: a hull's waterline in metres; for everything else an integer, 0..999, read back exactly with seedI)
+  float style = floor(ctInfo.x + 0.5), seed = ctInfo.y, seedI = floor(ctInfo.y + 0.5), litFrac = ctInfo.z;
   vec3 n = ctNrm, p = ctLocal;
   bool side = abs(n.y) < 0.5;
   if (style == 1.0 || style == 6.0 || style == 10.0) {
@@ -230,13 +248,13 @@ vec3 ctEmit = vec3(0.0);
     float win = step(0.14, f.x) * step(f.x, 0.86) * step(0.30, f.y) * step(f.y, 0.86);
     if (style == 6.0) win *= step(0.62, f.y + 0.2);
     float aa = clamp(1.6 - 2.2 * max(fwidth(cell.x), fwidth(cell.y)), 0.0, 1.0);
-    vec3 glass = vec3(0.045, 0.055, 0.065) * (0.8 + 0.4 * ctHash(floor(cell) + seed));
+    vec3 glass = vec3(0.045, 0.055, 0.065) * (0.8 + 0.4 * ctCellHash(floor(cell), seedI, 0.0));
     if (side) {
       diffuseColor.rgb = mix(diffuseColor.rgb, mix(diffuseColor.rgb, glass, 0.55), 1.0 - aa);
       diffuseColor.rgb = mix(diffuseColor.rgb, glass, win * aa);
       ctGloss = mix(0.45, win, aa) * (style == 6.0 ? 0.6 : 1.0);   // (far away, where the windows are finer than a pixel, the facade keeps half the sheen)
-      float lit = step(1.0 - litFrac, ctHash(floor(cell) * 1.37 + seed * 3.1));
-      vec3 lamp = mix(vec3(1.0, 0.72, 0.42), vec3(0.75, 0.82, 0.9), step(0.8, ctHash(floor(cell) + 7.7)));
+      float lit = step(1.0 - litFrac, ctCellHash(floor(cell), seedI, 1.0));
+      vec3 lamp = mix(vec3(1.0, 0.72, 0.42), vec3(0.75, 0.82, 0.9), step(0.8, ctCellHash(floor(cell), seedI, 2.0)));
       // at night a lit window glows; where the windows get finer than a pixel the facade fades to their average
       // glow instead of sparkling
       ctEmit = lamp * ctNight * mix(0.2 * litFrac, 0.45 * win * lit, aa);
@@ -249,8 +267,8 @@ vec3 ctEmit = vec3(0.0);
     // length, dark seams between boxes. Where a box gets smaller than about three pixels the stack fades to the
     // palette's average colour, and the ribs and seams fade out, so a yard at range is a quiet block, not confetti.
     vec2 q = vec2(p.y / 2.6, p.z / 2.44), cq = floor(q);
-    float h = ctHash(vec2(floor(cq.y / 3.0) + 0.37, seed));
-    if (ctHash(cq + seed * 1.7 + 11.0) < 0.25) h = ctHash(cq + seed + 5.3);
+    float h = ctCellHash(vec2(floor(cq.y / 3.0), 0.0), seedI, 3.0);
+    if (ctCellHash(cq, seedI, 4.0) < 0.25) h = ctCellHash(cq, seedI, 5.0);
     int ci = h < ${cut[0]} ? 0 : h < ${cut[1]} ? 1 : h < ${cut[2]} ? 2 : h < ${cut[3]} ? 3 : h < ${cut[4]} ? 4 : h < ${cut[5]} ? 5 : h < ${cut[6]} ? 6 : 7;
     vec2 fq = fract(q), wq = fwidth(q);
     diffuseColor.rgb = mix(ctPal[ci], ctPalMean, clamp(3.0 * max(wq.x, wq.y) - 0.8, 0.0, 1.0));
@@ -284,7 +302,7 @@ vec3 ctEmit = vec3(0.0);
     float aa = clamp(1.4 - 3.0 * fwidth(p.y), 0.0, 1.0);
     diffuseColor.rgb *= mix(0.62, mix(0.25, 1.0, member), aa);
   } else if (style == 7.0) {
-    diffuseColor.rgb *= 0.85 + 0.15 * fract(sin(p.y * 3.1 + seed) * 43.7);
+    diffuseColor.rgb *= 0.85 + 0.15 * fract(sin(p.y * 3.1 + seedI) * 43.7);
   } else if (style == 11.0) {
     // the hill: grass, with rock where the noise says so and on the crown (a frustum: its side is all slope)
     float ang = atan(n.z, n.x) * ctSize.x;
@@ -327,7 +345,7 @@ if (ctGloss > 0.0) {
   totalEmissiveRadiance += ctGloss * (1.0 - ctNight) * mix(0.06, 0.55, ctF) * vec3(0.30, 0.36, 0.44);
 }`);
   };
-  m.customProgramCacheKey = () => 'ctl-course-solids-v7';
+  m.customProgramCacheKey = () => 'ctl-course-solids-v8';
   return m;
 }
 
@@ -520,7 +538,7 @@ export function buildCourse(prims, gates, opts = {}) {
     c.setRGB(...colorOf(p, i));
     const style = p.look === 'building' ? facadeOf(p) : STYLE[p.look] != null ? STYLE[p.look] : 0;
     // a hull's seed is its waterline above the keel (the shader paints below it)
-    return { size: [2 * p.hx, 2 * p.hy, 2 * p.hz], style, seed: style === 4 ? (p.water || 0) - (p.cy - p.hy) : rng() * 100, lit: litOf(p), prim: i };
+    return { size: [2 * p.hx, 2 * p.hy, 2 * p.hz], style, seed: style === 4 ? (p.water || 0) - (p.cy - p.hy) : Math.floor(rng() * 1000), lit: litOf(p), prim: i };
   }, true);
 
   // ---- cylinders and frustums: masts, poles, chimneys, the ships' masts, round towers, the hill
@@ -528,16 +546,26 @@ export function buildCourse(prims, gates, opts = {}) {
   const segRound = detail === 'low' ? 12 : detail === 'medium' ? 16 : 24;
   // (round buildings and the hill need more sides than a mast: a separate geometry, the same material)
   const roundish = (p) => p.look === 'building' || p.look === 'hill';
-  const cylFill = (list) => (k, M, c) => {
+  const taperOf = (p) => (p.r0 > 0 ? p.r1 / p.r0 : 1);
+  // (geoTaper: the taper the geometry already has - the instance then carries ctTaper 1 and the shader leaves it)
+  const cylFill = (list, geoTaper = 1) => (k, M, c) => {
     const i = list[k], p = prims[i];
     M.makeScale(p.r0, p.y1 - p.y0, p.r0).setPosition(p.x, (p.y0 + p.y1) / 2, p.z);
     c.setRGB(...colorOf(p, i));
     const style = p.look === 'building' ? 10 : p.look === 'hill' ? 11 : p.look === 'truss' ? 5 : p.look === 'wood' ? 7 : p.look === 'steel' ? 0 : STYLE[p.look] || 0;
-    return { size: [p.r0, p.y1 - p.y0, p.r0], style, seed: rng() * 100, taper: p.r0 > 0 ? p.r1 / p.r0 : 1, lit: litOf(p), prim: i };
+    return { size: [p.r0, p.y1 - p.y0, p.r0], style, seed: Math.floor(rng() * 1000), taper: geoTaper !== 1 ? 1 : taperOf(p), lit: litOf(p), prim: i };
   };
   const thinCyl = lists.cyl.filter((i) => !roundish(prims[i])), fatCyl = lists.cyl.filter((i) => roundish(prims[i]));
   batch('course/cylinders', new THREE.CylinderGeometry(1, 1, 1, seg, 1, false), thinCyl.length, cylFill(thinCyl), true);
-  batch('course/rounds', new THREE.CylinderGeometry(1, 1, 1, segRound, 1, false), fatCyl.length, cylFill(fatCyl), true);
+  // round buildings and the hill, by taper: straight ones share one mesh; each frustum's taper is built into its own
+  // geometry (radius `taper` at the top), so its shadow is a frustum too - the shadow pass draws the geometry with
+  // its own depth material and never sees the shader's ctTaper (a 170 m hill cast the shadow of a 170 m cylinder)
+  const byTaper = new Map();
+  for (const i of fatCyl) { const t = Math.round(taperOf(prims[i]) * 1000) / 1000; if (!byTaper.has(t)) byTaper.set(t, []); byTaper.get(t).push(i); }
+  for (const [t, list] of [...byTaper.entries()].sort((a, b) => b[0] - a[0])) {
+    if (t === 1) batch('course/rounds', new THREE.CylinderGeometry(1, 1, 1, segRound, 1, false), list.length, cylFill(list), true);
+    else batch(`course/rounds-taper-${t}`, new THREE.CylinderGeometry(t, 1, 1, segRound, 1, false), list.length, cylFill(list, t), true);
+  }
 
   // ---- tubes: wires, lattice members, stays and spars, the bridge's cables, from a to b with their radius
   batch('course/tubes', new THREE.CylinderGeometry(1, 1, 1, detail === 'low' ? 4 : 6, 1, true), lists.tube.length, (k, M, c) => {

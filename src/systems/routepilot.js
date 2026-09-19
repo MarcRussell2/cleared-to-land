@@ -20,7 +20,7 @@
 //   bank   bank limit on this leg, degrees (default per aircraft; an arc leg's default is 20 more)
 //   arc    'L' | 'R': the leg TO this waypoint is a circular arc of radius r (metres) turning that way (the shorter
 //          arc from the previous waypoint; design the legs either side tangent to it). An arc is flown on its own
-//          law (below), not pure pursuit: the Needle's eye leaves the airliner a 3 m window at 35 degrees of bank.
+//          law (below), not pure pursuit: the Needle's eye leaves the airliner a 5.8 m window at 40 degrees of bank.
 // After the last waypoint: `join` - L1 onto the extended centreline, and down (or up) onto Autoland's glide path
 // (hDes = aim + distance x tan(glideslope) + CG height) at Vref; hand over when lined up (|v| and track error
 // small, on the path, on speed, wings level, for three seconds), or at the latest six seconds before the aim point
@@ -30,20 +30,30 @@
 //   lateral   L1 guidance (lateral acceleration 2 V^2 sin(eta) / L1 toward a point L1 ahead on the line), as a
 //             bank angle limited per aircraft, through the same roll and yaw-damper loops as Autoland; fly-by
 //             corners lead the turn by R tan(turn / 2) (never onto an arc: the target is held on the line up to it);
-//   arcs      (the city's turns, 2026-09-19) the bank the radius needs at this ground speed, atan(V^2 / g r), plus a
-//             correction for being off the circle (ARC_LAW: k per metre outside, kd per m/s drifting outward, an
-//             integral), rolled into half a roll's time (roll rate and lag per aircraft, TUNE.roll/rollLag) before the
-//             arc begins, on the feed-forward alone until it does; a firmer turn coordinator (a quick roll to 35
-//             degrees in the airliner skidded 5 degrees on the stock gain), and the pull the turn needs fed forward
-//             and closed on the load factor (TUNE.nStick: the stick per extra g; the attitude loop alone only pulled
-//             once the airplane sank, and the swing in g tightened and widened the turn by turns). A route ending in
-//             an arc hands over to the join half a roll early, so the roll-out ends on the centerline. Measured: the
-//             Needle's eye passed with 1.1-1.4 m to spare over five seeds, at 34-36 degrees of bank;
+//   arcs      (the city's turns, 2026-09-19; reworked 2026-09-18 after review) the bank the radius needs at this
+//             ground speed, atan(V^2 / g r), plus a correction for being off the circle (ARC_LAW: k per metre
+//             outside, kd per m/s drifting outward, an integral), started ahead of the arc by ARC_LAW.half of the roll
+//             (at the rate below) and the roll's lag (TUNE.rollLag), on the feed-forward alone until the arc begins.
+//             The arc's own roll loop: a bank reference moved toward that command at no more than ARC_LAW.rate (15
+//             degrees a second, a roll the airliner can follow), tracked stiffly with its roll rate fed forward and an
+//             integral near it. The stock loop (the one Autoland uses) let a roll to 40 degrees overshoot to 46 and
+//             creep back over five seconds, and the path loop chased the swing: with it the Needle's eye was passed
+//             off by up to 2 m and bank 30-38 instead of 36 (one seed in thirty hit the tower). Also a firmer turn
+//             coordinator (a quick roll to 35 degrees in the airliner skidded 5 degrees on the stock gain), and the
+//             pull the turn needs fed forward and closed on the load factor (TUNE.nStick: the stick per extra g; the
+//             attitude loop alone only pulled once the airplane sank). A route ending in an arc hands over to the
+//             join half a roll early, so the roll-out ends on the centerline. Measured on the Needle's 40-degree arc
+//             (its 34 m gap) over 100 seeds: the eye passed every time, 1.7 m to spare at the closest (median 2.3),
+//             bank 37-42 there; the Gauntlet's, in 18-kt gusts: every time, 1.1 m at the closest (median 1.8); switched
+//             off and on 300 m before the eye, 20 seeds of 20, 1.0 m at the closest. The gains are the Condor's; the
+//             others get them scaled by their roll rate, unproven on arcs;
 //   vertical  the route's height as a vertical-speed feed-forward (its slope over the next `la` seconds, so a
 //             waypoint's change of slope is flown as a curve that starts just before it) plus kh x the height error,
 //             turned into a pitch attitude (flight path + the slowly filtered 1-g angle of attack, alpha x cos(bank),
 //             which is the attitude of a level turn whatever the bank) plus a proportional and integral term on the
-//             flight-path error; the pitch damper leaves alone the steady nose-up rate of a banked turn;
+//             flight-path error; the pitch damper leaves alone the steady nose-up rate of a banked turn. (Those two
+//             were added for the city's arcs but act on every leg: they moved Harbor Cranes' seed-307 landing from 93
+//             points to 92 and seed 4271's from 64 to 63, and nothing else the suite flies;)
 //   speed     throttle PI plus a flight-path feed-forward (it takes thrust to climb), speedbrakes on the Condor
 //             when it is fast at idle, stall protection as in Autoland (with a jammed elevator both pitch with the
 //             trim alone).
@@ -59,7 +69,10 @@
 //   - Autoland's own internal state is never written (it used to be handed a pitch reference; ten seeds of each
 //     mission landed as well or better without it: The Notch median 485 -> 321 fpm).
 // A route engaged mid-flight (the autopilot switched on late) resumes at the leg the airplane is on, by progress
-// along the route; at the start of a flight the whole route is flown, even a leg that heads away from the runway.
+// along the route (an arc measured along its own circle); at the start of a flight the whole route is flown, even a
+// leg that heads away from the runway. Resumed inside an arc, the arc keeps its circle (tools/test-city.mjs switches
+// the autopilot off and on 300 m before the Needle's eye, in the bank, and it must still go through), and a pilot
+// switched on mid-flight starts bumpless: its pitch and throttle integrals start where the airplane already is.
 // Deterministic: no randomness at all.
 import { KT, DEG, clamp, wrapPi } from '../config.js';
 import { Aircraft } from '../physics/aircraft.js';
@@ -80,11 +93,15 @@ const TUNE = {
 };
 const TRIM_RATE = 0.05;   // trim units per second while blending to the approach trim in the join
 const RESUME_PENALTY = 1500;   // metres added to a leg that runs against the airplane's track when resuming
-// Arc legs (the city's turns): the cross-track law's gains - bank (rad) per metre outside the arc, per m/s of
-// drift outward, and the integral's rate and limit - and how early (seconds of flight) the roll into or out of an
-// arc starts, so the airplane arrives on the arc already banked instead of swinging wide of it.
-// (one object, read as the airplane flies: tools/test-city.mjs prints what the law does with it)
-export const ARC_LAW = { k: 0.0163, kd: 0.065, ki: 0.0025, iMax: 5 * DEG, lead: 0.5, yaw: 5, yawFF: 0.15, pullLead: 0, kn: 3 };
+// Arc legs (the city's turns): the cross-track law's gains - bank (rad) per metre outside the arc (k), per m/s of
+// drift outward (kd), the integral's rate and limit (ki, iMax) - the least lead (s) into or out of an arc, the turn
+// coordinator (yaw per rad of sideslip, rudder per aileron), the load-factor loop (kn), and the arc's roll loop: the
+// bank reference's most rate (deg/s) and approach gain (kr, 1/s), the share of the aircraft's own roll rate fed
+// forward (ffk: the Condor rolls about 28 degrees a second per unit of aileron at 150 kt, not the 17 its full roll
+// averages), the stiffness on the reference (rk per rad, rd per rad/s, ri per rad s), and the lead into an arc as a
+// share of the roll (half) and of the roll's lag (lag). One object, read as the airplane flies: the tuning harnesses
+// change it in place.
+export const ARC_LAW = { k: 0.012, kd: 0.05, ki: 0.0025, iMax: 5 * DEG, lead: 0.5, yaw: 5, yawFF: 0.15, pullLead: 0, kn: 3, rate: 15, kr: 1.5, ffk: 0.5, rk: 10, rd: 4, ri: 4, half: 0.4, lag: 1 };
 const G = 9.81;
 
 // A leg from A ({x, z, y}) to the waypoint B: a straight line, or (B.arc 'L' / 'R') the circular arc of radius B.r
@@ -136,6 +153,7 @@ export class RoutePilot {
     this.t = 0;
     const rw = this.rw = world.runway || null;
     this.wps = [];
+    let from = null;   // where the first leg starts, when not at the airplane (an arc resumed into)
     if (rw && Array.isArray(sc.route)) {
       for (const w of sc.route) {
         const v = w.v || 0;
@@ -145,22 +163,28 @@ export class RoutePilot {
           arc: w.arc === 'L' || w.arc === 'R' ? w.arc : null, r: w.r,
         });
       }
-      // switched on mid-flight (not at the start of a flight): resume where the airplane is along the route (an arc
-      // resumed into is flown as a straight line to its end: the airplane is not where the arc begins)
+      // switched on mid-flight (not at the start of a flight): resume where the airplane is along the route. A
+      // straight leg resumed into runs from the airplane; an ARC keeps its own circle - its leg still runs from the
+      // waypoint before it - and the arc law closes whatever offset the airplane has from it (a chord from the
+      // airplane to the arc's end cuts inside the circle: 40 m inside it on the Needle's turn, into the inner tower).
       if (ac.time > 1) {
-        this.wps = this.wps.slice(this.resumeAt());
-        if (this.wps.length && this.wps[0].arc) this.wps[0] = { ...this.wps[0], arc: null };
+        const k = this.resumeAt();
+        if (k > 0 && k < this.wps.length && this.wps[k].arc) from = this.wps[k - 1];
+        this.wps = this.wps.slice(k);
       }
     }
     this.i = 0;
-    this.start = { x: ac.pos.x, z: ac.pos.z, y: ac.pos.y };
+    this.start = from ? { x: from.x, z: from.z, y: from.y } : { x: ac.pos.x, z: ac.pos.z, y: ac.pos.y };
     this.legs = [];                               // makeLeg() for each leg, built as the route is flown
     this._pr = { s: 0, e: 0 }; this._pt = { x: 0, z: 0 };
     this.eInt = 0;                                // the arc law's integral (rad)
     this.thr0 = ac.input.throttle;
     this.g0 = ac.gs > 1 ? Math.atan2(ac.vs, ac.gs) : 0;
-    this.alphaF = ac.aero.alpha || 0;
-    this.pInt = 0; this.tInt = 0;
+    // (the 1-g angle of attack, see steer(): the angle of attack over the load factor, so a pilot switched on in a
+    // turn pulling harder than a level turn does not start from a nose-high attitude and climb out of it)
+    this.alphaF = (ac.aero.alpha || 0) / Math.max(ac.gload || 1, 0.5);
+    this.pInt = 0; this.tInt = 0; this.rInt = 0; this.bankRef = null;
+    this.bumpless = ac.time > 1;                  // switched on mid-flight: see steer()
     this.trimApp = undefined;                     // the approach trim (apTrim aircraft), computed when the join starts
     this.dbg = { hDes: 0, vsDes: 0, pitchCmd: 0, gDes: 0, bankCmd: 0, xte: NaN };
     if (!rw) this.handOver();                     // the carrier: nothing to route, Autoland flies it
@@ -180,7 +204,9 @@ export class RoutePilot {
   // its direction and the airplane's track (nothing for a leg flown the airplane's way, the whole penalty for one
   // flown against it): the first waypoint itself (the route has not begun), every leg the airplane has not passed the
   // end of (resume at that leg's end), and the join (only once past the last waypoint: the distance to the extended
-  // centreline, along the runway heading). The cheapest wins.
+  // centreline, along the runway heading). The cheapest wins. A leg is measured by its own geometry (makeLeg): an
+  // arc by the distance off its circle and its direction where the airplane is along it. Called once, when the pilot
+  // is switched on.
   resumeAt() {
     const p = this.ac.pos, w = this.wps, n = w.length, rw = this.rw;
     if (!n) return 0;
@@ -188,13 +214,14 @@ export class RoutePilot {
     const turn = (dx, dz) => RESUME_PENALTY * (1 - (dx * tx + dz * tz) / (Math.hypot(dx, dz) || 1)) / 2;
     let best = 0, bestCost = Math.hypot(w[0].x - p.x, w[0].z - p.z) + turn(w[0].x - p.x, w[0].z - p.z);
     let past = n === 1 && (w[0].x - p.x) * tx + (w[0].z - p.z) * tz < 0;
+    const o = { s: 0, e: 0 }, q = { x: 0, z: 0 }, q2 = { x: 0, z: 0 };
     for (let j = 1; j < n; j++) {
-      const a = w[j - 1], b = w[j];
-      const dx = b.x - a.x, dz = b.z - a.z, L = Math.hypot(dx, dz) || 1;
-      const s = ((p.x - a.x) * dx + (p.z - a.z) * dz) / L;
-      if (s >= L) { if (j === n - 1) past = true; continue; }
-      const c = Math.max(s, 0) / L;
-      const cost = Math.hypot(a.x + dx * c - p.x, a.z + dz * c - p.z) + turn(dx, dz);
+      const g = makeLeg(w[j - 1], w[j]);
+      const s = g.proj(p.x, p.z, o).s;
+      if (s >= g.L) { if (j === n - 1) past = true; continue; }
+      const c = clamp(s, 0, g.L - 1);
+      g.at(c, q); g.at(c + 1, q2);   // the closest point on the leg, and the leg's direction there
+      const cost = Math.hypot(q.x - p.x, q.z - p.z) + turn(q2.x - q.x, q2.z - q.z);
       if (cost < bestCost) { bestCost = cost; best = j; }
     }
     if (past) {
@@ -247,8 +274,8 @@ export class RoutePilot {
     // ends onto one.
     // (the lead: half the time the roll between this leg's bank and the next one's takes, as distance flown)
     const next = this.i + 1 < n ? this.leg(this.i + 1) : null;
-    const bankOf = (g) => (g && g.arc ? g.arc * Math.atan(V * V / (G * g.r)) : 0);
-    const lead = V * Math.max(ARC_LAW.lead, 0.5 * Math.abs(bankOf(next) - bankOf(leg)) / (T.roll * DEG) + T.rollLag);
+    const rr = Math.min(ARC_LAW.rate, T.roll);
+    const lead = V * Math.max(ARC_LAW.lead, ARC_LAW.half * Math.abs(this.bankOf(next, V) - this.bankOf(leg, V)) / (rr * DEG) + ARC_LAW.lag * T.rollLag);
     let arcLeg = null;
     if (leg.arc && !(L - s < lead && next && !next.arc)) arcLeg = L - s < lead && next && next.arc ? next : leg;
     else if (!leg.arc && next && next.arc && L - s < lead) arcLeg = next;
@@ -283,6 +310,9 @@ export class RoutePilot {
     if (B.flap != null && !ac.failures.has('flapsStuck')) inp.flapCmd = B.flap;
     if (B.gear != null && this.def.gearRetract) inp.gearCmd = B.gear;
   }
+
+  // The steady bank leg g needs at ground speed V (0 on a straight leg; + right).
+  bankOf(g, V) { return g && g.arc ? g.arc * Math.atan(V * V / (G * g.r)) : 0; }
 
   // Leg i (cached): from the start (i = 0) or waypoint i - 1 to waypoint i.
   leg(i) {
@@ -354,7 +384,22 @@ export class RoutePilot {
       const eta = wrapPi(Math.atan2(tx, -tz) - ac.track);
       bankCmd = clamp(Math.atan(2 * V * V * Math.sin(eta) / (dist * 9.81)), -bl, bl);
     }
-    inp.roll = clamp(2.5 * (bankCmd - ac.euler.roll) + 0.8 * ac.omega.z, -1, 1);
+    if (arc) {
+      // (the arc's own roll loop: a bank reference moved toward the command at no more than ARC_LAW.rate - a roll the
+      // airliner can follow - and tracked stiffly, its roll rate fed forward, with an integral near it: the stock loop
+      // below lets a roll to 40 degrees overshoot to 46 and creep, and the path loop then chases the swing. The gains
+      // were measured on the Condor, scaled for the others by their roll rate: only the Condor is proven on arcs.)
+      const rs = 17 / T.roll;
+      if (this.bankRef == null) this.bankRef = ac.euler.roll;
+      const refRate = clamp(ARC_LAW.kr * (bankCmd - this.bankRef), -ARC_LAW.rate * DEG, ARC_LAW.rate * DEG);
+      this.bankRef += refRate * dt;
+      const err = this.bankRef - ac.euler.roll, rate = -ac.omega.z;
+      if (Math.abs(err) < 3 * DEG) this.rInt = clamp(this.rInt + rs * ARC_LAW.ri * err * dt, -0.3, 0.3);
+      inp.roll = clamp(ARC_LAW.ffk * refRate / (T.roll * DEG) + rs * (ARC_LAW.rk * err + ARC_LAW.rd * (refRate - rate)) + this.rInt, -1, 1);
+    } else {
+      this.rInt = 0; this.bankRef = null;
+      inp.roll = clamp(2.5 * (bankCmd - ac.euler.roll) + 0.8 * ac.omega.z, -1, 1);
+    }
     const rollRate = -ac.omega.z;   // (d roll / dt: the body roll rate, its sign as the damper above uses it)
     // (on an arc, a firmer turn coordinator: a quick roll to 35 degrees in the airliner skidded 5 degrees on the stock
     // gain, and a skid in a bank is lift lost; plus rudder with the aileron against its adverse yaw)
@@ -370,10 +415,15 @@ export class RoutePilot {
     // sag by a quarter of alpha while the bank came in, so the turn lost lift and swung wide)
     this.alphaF += (ac.aero.alpha * Math.cos(ac.euler.roll) - this.alphaF) * Math.min(1, dt / T.ta);
     const gErr = gDes - gam;
+    // (switched on mid-flight, the first step is bumpless: the integrals start where the pitch and the throttle
+    // already are, so the airplane is not pitched up or down by a controller starting cold - in a 40-degree turn a
+    // cold start pitched it up 3 degrees, the climb tightened the turn, and the Needle's eye was passed 1.5 m inside)
+    if (this.bumpless) this.pInt = clamp(ac.euler.pitch - (gDes + this.alphaF + T.gp * gErr), -0.1, 0.1);
     this.pInt = clamp(this.pInt + T.gi * gErr * dt, -0.1, 0.1);
     let pitchCmd = gDes + this.alphaF + T.gp * gErr + this.pInt;
     // ---- speed
     const err = vT - ac.ias;
+    if (this.bumpless) { this.tInt = clamp(-(T.kt * err + T.kg * (gDes - this.g0)), -0.6, 0.6); this.bumpless = false; }
     this.tInt = clamp(this.tInt + T.ki * err * dt, -0.6, 0.6);
     let thr = clamp(this.thr0 + T.kt * err + this.tInt + T.kg * (gDes - this.g0), 0, 1);
     if (def.spoilers) inp.spoiler = thr < 0.03 && err < -8 * KT ? 1 : 0;

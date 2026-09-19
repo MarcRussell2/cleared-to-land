@@ -253,37 +253,60 @@ degrees at 155 kt), the Skylark and the Trailblazer.
 
 ## The city ladder (Metro City and "The city", n 44-49)
 
-*Written 2026-09-19 with the six missions of `src/missions/city.js`, on the engine above.*
+*Written 2026-09-19 with the six missions of `src/missions/city.js`, on the engine above; revised the same week after
+review (the Needle's line and cue, the arc law, the under-gates, the budget test).*
 
 - **Metro City** (`CITY_SITES.metro`): the coast style, terrain seed 638 and `coastX` 500, found by scanning seeds for
   a coast that crosses the extended centerline (water under it 4 to 7.7 km out, land for the last 4 km). A 3,000 m
-  runway heading north with ILS, lights and PAPI. Its course is the shared skyline: six generated districts (4,544
+  runway heading north with ILS, lights and PAPI. Its course is the shared skyline: six generated districts (4,542
   buildings), Checkerboard Hill, the Harbor Bridge, Container Island, a sea wall. **Nothing in it touches the
   straight-in path** (the 3-degree path is 34 m clear at the closest, checked from 9 km out): free flight, Autoland,
   the looksheet and perf-probe fly it. Mission-only things (the avenue, the skybridges, the slalom towers, the
   Needle) live in the missions' courses.
 - **Districts** grow round everything placed by hand: resolveCourse places the hand-placed kinds, then the gates, the
-  `clear` circles and a low route's corridor, and only then the districts, which avoid all of those and the course's
-  `carve` rectangles. A mission clears the site's blocks where its own towers stand with `carve`, and gives that
-  ground its own look with `ground` (`avenue`, `plaza`). A district adds coarse keep-out circles (230 m) for the
-  forest instead of one per building (the terrain scans them linearly per tree), and no circle is kept out on the water.
+  `clear` circles and a low route's corridor, and only then the districts, which avoid all of those and the `carve`
+  rectangles. A mission clears the SITE's blocks where its own towers stand with `carve` (its own districts are spared:
+  Downtown's second row stands inside its carve), and gives that ground its own look with `ground` (`avenue`,
+  `plaza`). A district adds coarse keep-out circles (230 m) for the forest instead of one per building (the terrain
+  scans them linearly per tree), and no circle is kept out on the water.
 - **The look** is a plain working look (`src/art/city-look.js`), and its header is the drawing contract for the art
   department's pass (the brief: `docs/briefs/city/city-look.txt`). `tools/test-obstacles.mjs` section 4 checks the
   contract (every drawn vertex inside its prim's volume, every prim's drawing filling it, over 17 kinds) and section 10
-  the city's budget (Metro City with the Gauntlet's course: at most 60 draws, 450k / 250k / 120k triangles a pass).
-- **Routes with arcs** (`arc: 'L' | 'R', r`): the Needle's eye leaves the Condor a 3 m window at 35 degrees of bank, and
-  pure pursuit misses it by metres. See the header of `src/systems/routepilot.js` for the law and what it took (the
-  pitch damper fought the turn's steady pitch rate; the attitude target sagged with the bank; the load factor
-  lagged). Design the legs either side of an arc tangent to it; S-curves (`sCurve()` in city.js) are two arcs.
+  the city's budget on every course a flight at Metro City builds (free flight and the six missions, at three tiers):
+  at most 60 draws, 450k / 250k / 120k triangles a pass, and at most 6 programs of its own **counted by variant** (a
+  material drawn with and without instance colours is two programs; the plain look is 3, and Checkerboard reaches 67
+  of the scene's 70 with the cockpit shown). Shapes that cast a shadow are geometry: the shadow pass never runs a
+  material's onBeforeCompile (the plain look's round frustums, the hill among them, are tapered geometry now).
+- **Gates under something** (the skybridges, the bridge deck) are built by `underGate()`: the CG between a floor and
+  the underside less the Condor's fin (`FIN`, 9.1 m; the hull's fin tops out at 9.02) and half a metre, so a crossing
+  that takes the whole airplane under counts. (They used to stop 12 m under, and a clean pass 2-3 m under a skybridge
+  scored MISSED GATE.) The tips and hints quote those heights from the same numbers (`altFt`, `raFt`).
+- **Routes with arcs** (`arc: 'L' | 'R', r`): see the header of `src/systems/routepilot.js` for the arc law. The arcs
+  have their own roll loop (a bank reference moved at no more than 15 degrees a second, tracked stiffly): the stock
+  loop let a roll to 40 degrees overshoot to 46 and creep back, and the path loop chased the swing. Design the legs
+  either side of an arc tangent to it; S-curves (`sCurve()` in city.js) are two arcs. Switched off and on inside an
+  arc, RoutePilot keeps the arc's own circle (a chord from the airplane would cut inside it).
 - **End a route on Autoland's path, including the CG height** (`onPath(u)` in city.js adds the Condor's 4.1 m), near
-  Vref (146 kt), and let a level run under the path end where it meets it (`meetPath(alt)`): a route that ended 4-8 m
-  under the path made the join dive and chase it, and Autoland, handed that, landed hard. Handovers after short
-  finals still land firmer than a straight-in Autoland: the proofs land 48-99 points, all gates, on two seeds.
-- **A banked footprint leans into the turn**: the fin and the winglets tilt toward the low wing, so the Condor's
-  footprint at 35 degrees sits about a metre inside the turn from its CG. The Needle's gap is placed accordingly;
-  `tools/test-city.mjs` flies a kinematic perfect turn through it at 30, 35 and 40 degrees and wings level.
-- **The Needle's gap** is 33 m: the Condor's probe footprint is 35.0 m wings level, 31.3 m at 30 degrees, 29.9 at 35,
-  28.2 at 40, 26.3 at 45. Tighten it (NEEDLE_GAP in city.js) once the flight-physics review removes the Assist's
-  35-degree bank limit.
-- **Perf** (the RTX 4080, high, 1920x1080): Checkerboard by day 104 fps median, 132 draws (24 shadow), 457k triangles,
-  62 programs; the Gauntlet at night 120 fps, 96 draws, 271k; 64 programs with the cockpit shown.
+  Vref (146 kt), and let a level run under the path end where it meets it (`meetPath(alt)`). Handovers after short
+  finals land firmer than a long straight-in, and Autoland lands crabbed, so a strong crosswind costs it about 20
+  points whatever the route does: Checkerboard's wind is 11 kt from 25 degrees right (it was 12 gusting 18 from 50,
+  where even a stock straight-in Autoland scored a median of 58 and RoutePilot 47, a third of its landings DAMAGED).
+- **The Needle** (48, and 49's first gate): two lines through the same aim point. The pilot's is a 35-degree turn at
+  150 kt in still air (NEEDLE_R 867 m) from the line the flight starts on; the tips describe it, and the HUD hint is a
+  flight director on it (`needleCue`: a countdown to the roll, then the bank to hold, which the wind moves: 29-33
+  degrees at the eye in both missions' winds). RoutePilot's is a 40-degree turn through the same eye (NEEDLE_R_AP
+  723 m). The gap is 34 m: the Condor's probe footprint is 35.0 m wings level (winglets), 31.3 at 30 degrees, 29.9 at
+  35, 28.2 at 40, 26.3 at 45, and its middle leans about a metre toward the low wing, so the gap's middle sits
+  NEEDLE_LEAN inside the aim point and the gate frame is centred on the aim point. A 33 m gap left a pilot held to
+  the Assist's 35 degrees about a metre at the 29-33 degrees the director asks for. **TIGHTEN LATER** (NEEDLE_GAP,
+  NEEDLE_BANK, NEEDLE_AP_BANK in city.js) once the flight-physics review removes the Assist's bank limit.
+- **What the suite proves** (`tools/test-city.mjs`): RoutePilot on ten seeds per mission (no crash, every gate on nine
+  or more, a median of at least 60), the wrong line into each obstacle, the autopilot switched off and on 300 m
+  before the eye, and a pilot who does only what the HUD hint says, never past 35 degrees: through the eye on every
+  seed in the Needle's wind and on 8 of 10 in the Gauntlet's 18-kt gusts, where the Assist's limit leaves about a
+  metre (RoutePilot, at 40 degrees, gets through on all of them).
+- **Perf**: PERF_LINE
+- **Measuring on the Intel proxy**: `--gpu intel` pins an adapter by a LUID that changes at every boot; perf-probe now
+  refuses the run when the page renders on another vendor's GPU. Read the current LUIDs (dxgi EnumAdapters1) and pass
+  `--gpu <high,low>`. The review measured the phone proxy that way (UHD 770, phone medium): Checkerboard 7.0 / 8.0 ms
+  GPU at p50 / p95, 71 fps, loadSite 2,350 ms, against the stock heavy challenge's 7.0 / 9.2 ms, 56 fps, 1,912 ms.

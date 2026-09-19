@@ -51,7 +51,7 @@
 //             lamps: metres (deck lamps every so many metres), towerW, towerD, style }; its prims say what they are
 //             (kind bridge-deck, bridge-pier, bridge-tower, bridge-anchor, cable)
 // A course may also carry `carve: [{ u0, u1, v0, v1 }]` (no district builds there: a mission clearing the site's
-// blocks for its own towers) and `ground: [{ u0, u1, v0, v1, kind: 'city' | 'avenue' | 'plaza' | 'apron', deck,
+// blocks for its own towers - a mission's carve spares its own districts, a site's clears every district) and `ground: [{ u0, u1, v0, v1, kind: 'city' | 'avenue' | 'plaza' | 'apron', deck,
 // keep }]` (areas the look draws flat on the ground, never solid; see resolveCourse for the drawing order).
 // Look hints (`style` on a spec, `hint` on its prims; the plain look and the art department read them, the world
 // never does): { cls: 'residential' | 'office' | 'industrial' | 'landmark' | 'skybridge', facade: 'concrete' |
@@ -385,7 +385,7 @@ const BUILD = {
     const nx = Math.sin(flank), ny = Math.cos(flank), off = 1.5 + 1.5;   // outward normal of the flank; half the board's 3 m
     const y1 = y0 + bh * Math.sin(flank);
     P.beam(F, [rAt(y0) + nx * off, y0 + ny * off, 0], [rAt(y1) + nx * off, y1 + ny * off, 0], 3, bw,
-      { kind: 'landmark', look: 'checker', color: 'checker', name: s.boardName || 'the checkerboard', group: g, hint: { ...hint('board'), squares: s.squares || [11, 8] } });
+      { kind: 'landmark', look: 'checker', color: 'checker', name: s.boardName || 'the checkerboard', group: g, hint: { ...hint('board'), squares: s.squares || [bw / 10, bh / 10] } });
     // floodlights at the board's foot, the obstacle light on the crown
     for (const z of [-bw * 0.35, 0, bw * 0.35]) P.light(F.at(rAt(y0) + 18, y0 - 2, z), false, 'white');
     P.light(F.at(0, H + 1, 0), true);
@@ -704,10 +704,12 @@ export function resolveCourse(site, sc, opts = {}) {
       prev = { x: p.x, z: p.z, y };
     }
   }
-  // the districts: a generated city round everything above
-  const env = { carve: all('carve'), kept: course.keepOut.length, ground: [] };
+  // the districts: a generated city round everything above. A mission's `carve` clears the SITE's blocks (where the
+  // mission puts its own towers), not the mission's own districts; a site's `carve` clears every district.
+  const env = { carve: null, kept: course.keepOut.length, ground: [] };
   const siteGround = [], scGround = [];
-  for (const [spec, list] of [[specA, siteGround], [specB, scGround]]) {
+  for (const [spec, list, carve] of [[specA, siteGround, all('carve')], [specB, scGround, (specA && specA.carve) || []]]) {
+    env.carve = carve;
     for (const s of (spec && spec.obstacles) || []) if (s.kind === 'district') { env.ground = list; BUILD.district(P, s, env); }
   }
   // The ground areas, in world space: a rectangle (origin at its (u0, v0) corner, unit vectors along +u and +v,
