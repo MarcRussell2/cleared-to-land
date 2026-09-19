@@ -92,7 +92,7 @@
 //   ctBox   vec4  size in metres (x, y, z) and the style: 0 plain, 1 glass office facade, 2 container stack,
 //                 3 gate stripes, 4 ship's hull, 5 painted lattice, 6 house / flats (small windows), 7 wood, 8 wire,
 //                 9 steel member (8 and 9 are the thin ones), 10 round glass facade, 11 hill, 12 checkerboard,
-//                 13 shed cladding
+//                 13 shed cladding, 14 bridge deck, 15 bridge towers/portal
 //   ctSeed  float per-instance variation, an INTEGER 0..999 (windows, container colours; the shader reads it back with
 //                 floor(x + 0.5): an interpolated varying carries rounding noise, and a hash of it is noise per pixel,
 //                 so the lit windows speckled and crawled); for a hull, its waterline above the keel, in metres
@@ -106,7 +106,11 @@
 // onBeforeCompile; seeded randomness only (makeRng from the course seed); no point or spot lights; linear colours,
 // sunlit white about 0.8, nothing but lamps above 1; nothing allocated per frame - update() only rewrites the
 // lights' colours when a blinker toggles (and moves the two shadow primers during the first half second).
+// Metro art pass: dark distance-filtered windows, curtain walls, painted roof plant,
+// concrete weathering and bridge structure. Collision geometry and primers stay intact.
+// Quality removes fine weathering on medium and roof/AC relief on low; no textures.
 import * as THREE from 'three';
+import { CITY_FACADES } from './city-facades.js';
 import { makeRng } from '../config.js';
 import { LightSet } from './lights.js';
 import { buildObstacleTrees } from './world-vegetation.js';
@@ -126,9 +130,9 @@ const COLORS = {
   buildings: [[0.30, 0.30, 0.29], [0.36, 0.33, 0.28], [0.20, 0.23, 0.26], [0.42, 0.40, 0.36], [0.26, 0.20, 0.16], [0.14, 0.16, 0.18]],
   // the city's buildings by facade: weathered concrete and tile for the flats, aluminium and dark frames for the
   // offices, cladding for the sheds; the Needle's glass
-  flats: [[0.36, 0.34, 0.30], [0.42, 0.40, 0.36], [0.30, 0.30, 0.29], [0.40, 0.36, 0.30], [0.33, 0.35, 0.36], [0.45, 0.43, 0.40]],
+  flats: [[0.43, 0.39, 0.30], [0.50, 0.47, 0.39], [0.28, 0.29, 0.28], [0.44, 0.32, 0.29], [0.30, 0.39, 0.35], [0.49, 0.48, 0.44]],
   offices: [[0.20, 0.23, 0.26], [0.16, 0.19, 0.22], [0.26, 0.27, 0.28], [0.12, 0.14, 0.17], [0.30, 0.30, 0.29], [0.18, 0.20, 0.20]],
-  shed: [0.30, 0.31, 0.32], needle: [0.22, 0.26, 0.30],
+  shed: [0.30, 0.31, 0.32], needle: [0.12, 0.24, 0.29],
   // Checkerboard Hill: grass and rock, and the board's orange and white (the white under sunlit white)
   hill: [0.07, 0.10, 0.045], rock: [0.20, 0.19, 0.17], checker: [0.66, 0.13, 0.025], checkerWhite: [0.58, 0.58, 0.56],
   // weathered shipping-line paint: navy, grey, rust red, brown, orange, off-white, green, ochre (in the order of
@@ -167,7 +171,7 @@ const litOf = (p) => (p.hint && p.hint.lit != null ? p.hint.lit : 0.4);
 // The one material every solid of the course is drawn with. Its uniforms belong to it (never shared between
 // scenes): ctNight 0/1, ctWire the thin members' minimum half-width per metre of distance, ctPal the container
 // colours. Styles are chosen per instance (ctBox.w).
-function solidsMaterial(night) {
+function solidsMaterial(night, detail) {
   const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.78, metalness: 0.04 });
   m.name = 'course/solids';
   const uniforms = {
@@ -214,6 +218,7 @@ if (ctBox.w > 7.5 && ctBox.w < 9.5) {
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
 uniform float ctNight;
+const float ctDetail = ${detail === 'high' ? '2.0' : detail === 'medium' ? '1.0' : '0.0'};
 uniform vec3 ctPal[8];
 uniform vec3 ctPalMean;
 uniform vec3 ctGate[2];
@@ -239,28 +244,7 @@ vec3 ctEmit = vec3(0.0);
   vec3 n = ctNrm, p = ctLocal;
   bool side = abs(n.y) < 0.5;
   if (style == 1.0 || style == 6.0 || style == 10.0) {
-    // facade: storeys and window bays; roofs darker with a lighter parapet. Flats (6): lower storeys, small windows.
-    // Round (10): the bays run round the circumference.
-    float fh = style == 6.0 ? 2.8 : 3.6, bw = style == 6.0 ? 2.4 : 3.2;
-    float s = style == 10.0 ? atan(n.z, n.x) * ctSize.x : abs(n.x) > 0.5 ? p.z : p.x;
-    vec2 cell = vec2(s / bw, p.y / fh);
-    vec2 f = fract(cell);
-    float win = step(0.14, f.x) * step(f.x, 0.86) * step(0.30, f.y) * step(f.y, 0.86);
-    if (style == 6.0) win *= step(0.62, f.y + 0.2);
-    float aa = clamp(1.6 - 2.2 * max(fwidth(cell.x), fwidth(cell.y)), 0.0, 1.0);
-    vec3 glass = vec3(0.045, 0.055, 0.065) * (0.8 + 0.4 * ctCellHash(floor(cell), seedI, 0.0));
-    if (side) {
-      diffuseColor.rgb = mix(diffuseColor.rgb, mix(diffuseColor.rgb, glass, 0.55), 1.0 - aa);
-      diffuseColor.rgb = mix(diffuseColor.rgb, glass, win * aa);
-      ctGloss = mix(0.45, win, aa) * (style == 6.0 ? 0.6 : 1.0);   // (far away, where the windows are finer than a pixel, the facade keeps half the sheen)
-      float lit = step(1.0 - litFrac, ctCellHash(floor(cell), seedI, 1.0));
-      vec3 lamp = mix(vec3(1.0, 0.72, 0.42), vec3(0.75, 0.82, 0.9), step(0.8, ctCellHash(floor(cell), seedI, 2.0)));
-      // at night a lit window glows; where the windows get finer than a pixel the facade fades to their average
-      // glow instead of sparkling
-      ctEmit = lamp * ctNight * mix(0.2 * litFrac, 0.45 * win * lit, aa);
-    } else if (n.y > 0.5) {
-      diffuseColor.rgb *= 0.62;
-    }
+${CITY_FACADES}
   } else if (style == 2.0) {
     // container stacks (a 2.6 m tier by a 2.44 m row): a run of three rows shares one line's colour, with one box in
     // four an odd one out, from a muted palette weighted to navy, grey and rust (CONTAINER_SHARE); ribbed along the
@@ -306,9 +290,11 @@ vec3 ctEmit = vec3(0.0);
   } else if (style == 11.0) {
     // the hill: grass, with rock where the noise says so and on the crown (a frustum: its side is all slope)
     float ang = atan(n.z, n.x) * ctSize.x;
-    float rk = ctNoise(vec2(ang, p.y) / 18.0) * 0.65 + ctNoise(vec2(ang, p.y) / 5.0) * 0.35;
-    float rockiness = smoothstep(0.52, 0.68, rk + 0.25 * smoothstep(0.55, 1.0, p.y / max(ctSize.y, 1.0)));
-    diffuseColor.rgb = mix(ctHill[0] * (0.85 + 0.3 * ctNoise(vec2(ang, p.y) / 9.0)), ctHill[1], rockiness);
+    vec2 slope = vec2(ang + p.y * 0.7, p.y);
+    float rk = ctNoise(slope / vec2(23.0, 12.0));
+    if (ctDetail > 0.5) rk = rk * 0.65 + ctNoise(slope / vec2(6.0, 3.0)) * 0.35;
+    float rockiness = smoothstep(0.43, 0.65, rk + 0.18 * smoothstep(0.55, 1.0, p.y / max(ctSize.y, 1.0)));
+    diffuseColor.rgb = mix(ctHill[0] * (0.62 + 0.42 * rk), ctHill[1] * (0.55 + 0.35 * rk), rockiness);
     ctMatte = 1.0;
   } else if (style == 12.0) {
     // the checkerboard: 10 m squares on the board's broad faces (its local Y faces), a grey frame round the edges
@@ -317,7 +303,11 @@ vec3 ctEmit = vec3(0.0);
       diffuseColor.rgb = mix(ctCheck[0], ctCheck[1], par);
       float edge = min(min(p.x, ctSize.x - p.x), min(p.z, ctSize.z - p.z));
       diffuseColor.rgb = mix(vec3(0.25), diffuseColor.rgb, step(1.2, edge));
-      ctEmit = diffuseColor.rgb * 0.35 * ctNight;   // floodlit at night
+      // Fine panel joints disappear at range so the navigation pattern stays bold.
+      vec2 panel = p.xz / 10.0;
+      float joint = max(step(0.987, fract(panel.x)), step(0.987, fract(panel.y)));
+      diffuseColor.rgb *= 1.0 - 0.15 * joint * (1.0 - smoothstep(0.02, 0.12, max(fwidth(panel.x), fwidth(panel.y))));
+      ctEmit = diffuseColor.rgb * 0.48 * ctNight;   // floodlit at night
     } else diffuseColor.rgb = vec3(0.22, 0.22, 0.21);
     ctMatte = 1.0;
   } else if (style == 13.0) {
@@ -329,6 +319,25 @@ vec3 ctEmit = vec3(0.0);
       diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.05, 0.06, 0.07), band);
       ctEmit = vec3(1.0, 0.8, 0.5) * 0.25 * band * ctNight * litFrac * 4.0;
     } else if (n.y > 0.5) diffuseColor.rgb *= 1.15;
+  } else if (style == 14.0 || style == 15.0) {
+    // Painted steel relief stays on the collision faces, including the underside.
+    float along = ctSize.x > ctSize.z ? p.x : p.z;
+    float across = ctSize.x > ctSize.z ? p.z : p.x;
+    float width = min(ctSize.x, ctSize.z);
+    float aa = 1.0 - smoothstep(0.3, 2.0, fwidth(along));
+    if (style == 14.0) {
+      float crossbeam = step(0.83, fract(along / 12.0));
+      float girder = step(0.77, fract(across / 4.0));
+      if (n.y < -0.5) diffuseColor.rgb *= mix(0.62, mix(0.42, 0.94, max(crossbeam, girder)), aa);
+      else if (side) {
+        float rail = step(ctSize.y - 1.1, p.y);
+        diffuseColor.rgb *= mix(0.65, 0.95, rail * step(0.76, fract(along / 2.0)));
+      } else diffuseColor.rgb *= mix(0.4, 0.8, step(width - 1.5, across) + step(across, 1.5));
+    } else {
+      float panel = step(0.91, fract(p.y / 9.0));
+      float flange = step(0.87, fract((abs(n.x) > 0.5 ? p.z : p.x) / 3.0));
+      diffuseColor.rgb *= mix(0.72, mix(0.58, 1.05, max(panel, flange)), aa);
+    }
   } else if (style < 0.5) {
     // plain concrete and paint: weathered darker near the ground, lighter on top
     diffuseColor.rgb *= n.y > 0.5 ? 1.08 : 0.9 + 0.1 * smoothstep(0.0, 12.0, p.y);
@@ -342,10 +351,10 @@ totalEmissiveRadiance += ctEmit;
 // the facade reads as glass, not as holes); the fog is applied after this, like to everything else
 if (ctGloss > 0.0) {
   float ctF = pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 3.0);
-  totalEmissiveRadiance += ctGloss * (1.0 - ctNight) * mix(0.06, 0.55, ctF) * vec3(0.30, 0.36, 0.44);
+  totalEmissiveRadiance += ctGloss * (1.0 - ctNight) * mix(0.12, 0.62, ctF) * vec3(0.30, 0.40, 0.52);
 }`);
   };
-  m.customProgramCacheKey = () => 'ctl-course-solids-v8';
+  m.customProgramCacheKey = () => 'ctl-course-solids-v9';
   return m;
 }
 
@@ -392,14 +401,14 @@ vec3 ctGEmit = vec3(0.0);
     float d = min(f.x, f.y);
     diffuseColor.rgb = d < street * 0.5 ? asphalt : d < street * 0.5 + 3.0 ? walk : plot;
     diffuseColor.rgb *= 0.9 + 0.2 * ctGHash(floor(lp / pitch + 0.5));
-    ctGEmit = vec3(1.0, 0.62, 0.26) * 0.035 * ctNight * (1.0 - smoothstep(street * 0.5, street * 0.5 + 4.0, d));
+    ctGEmit = vec3(1.0, 0.62, 0.26) * 0.055 * ctNight * (1.0 - smoothstep(street * 0.5, street * 0.5 + 4.0, d));
   } else if (kind < 1.5) {
     // the avenue: a boulevard down lp.y = 0 (six lanes, a median), pavements, then paving
     float v = abs(lp.y);
     diffuseColor.rgb = v < 2.5 ? vec3(0.07, 0.09, 0.05) : v < 57.0 ? asphalt : v < 64.0 ? walk : plot;
     float lane = abs(fract((v - 2.5) / 9.0) - 0.5) * 9.0;
     if (v > 2.5 && v < 57.0 && lane < 0.08 && fract(lp.x / 12.0) < 0.5) diffuseColor.rgb = vec3(0.55);
-    ctGEmit = vec3(1.0, 0.62, 0.26) * 0.05 * ctNight * step(2.5, v) * (1.0 - smoothstep(57.0, 66.0, v));
+    ctGEmit = vec3(1.0, 0.62, 0.26) * 0.065 * ctNight * step(2.5, v) * (1.0 - smoothstep(57.0, 66.0, v));
   } else if (kind < 2.5) {
     // a plaza: pale paving on an 8 m grid
     vec2 f = abs(fract(lp / 8.0) - 0.5);
@@ -415,7 +424,7 @@ vec3 ctGEmit = vec3(0.0);
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
 totalEmissiveRadiance += ctGEmit;`);
   };
-  m.customProgramCacheKey = () => 'ctl-course-ground-v1';
+  m.customProgramCacheKey = () => 'ctl-course-ground-v2';
   return m;
 }
 
@@ -472,7 +481,7 @@ function buildGroundMesh(areas, terrain, detail, night) {
 export function buildCourse(prims, gates, opts = {}) {
   const night = !!opts.night, detail = WORLD_QUALITY.detail || opts.quality || 'high';
   const rng = makeRng(((opts.seed || 1) * 977 + 4513) >>> 0);
-  const mat = solidsMaterial(night);
+  const mat = solidsMaterial(night, detail);
   const lists = { box: [], cyl: [], tube: [], ball: [], tree: [] };
   prims.forEach((p, i) => {
     if (p.look === 'tree') lists.tree.push(i);
@@ -536,7 +545,8 @@ export function buildCourse(prims, gates, opts = {}) {
     Xv.fromArray(p.X); Yv.fromArray(p.Y); Zv.fromArray(p.Z);
     M.makeBasis(Xv, Yv, Zv).scale(sc.set(2 * p.hx, 2 * p.hy, 2 * p.hz)).setPosition(p.cx, p.cy, p.cz);
     c.setRGB(...colorOf(p, i));
-    const style = p.look === 'building' ? facadeOf(p) : STYLE[p.look] != null ? STYLE[p.look] : 0;
+    const style = p.kind === 'bridge-deck' ? 14 : p.kind === 'bridge-tower' ? 15
+      : p.look === 'building' ? facadeOf(p) : STYLE[p.look] != null ? STYLE[p.look] : 0;
     // a hull's seed is its waterline above the keel (the shader paints below it)
     return { size: [2 * p.hx, 2 * p.hy, 2 * p.hz], style, seed: style === 4 ? (p.water || 0) - (p.cy - p.hy) : Math.floor(rng() * 1000), lit: litOf(p), prim: i };
   }, true);
