@@ -31,7 +31,7 @@ import { NEW_MISSIONS, MISSION_GROUPS } from '../src/missions/index.js';
 import { scoreLanding, vrefFor } from '../src/systems/scoring.js';
 import { FlightControl } from '../src/systems/flightControl.js';
 import { touchify } from '../src/touch.js';
-import { KEY_HELP } from '../src/input.js';
+import { KEY_HELP, Input } from '../src/input.js';
 import { KT, FT, FPM, DEG, RAD, clamp, wrapPi, makeRng, headingToVec } from '../src/config.js';
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -686,6 +686,43 @@ function runChecks() {
     rt.action('failDrill');   // (the one-button drill a gamepad would send)
     const o3 = rt.offers.length;
     check(o1 === 'FIRE' && o2 === 'ENG OFF' && o3 === 0 && rt.get('engineFire').out && rt.get('engineSurge').shut, `the fire handle on offer while anything needs it: ${o1} -> ${o2} -> nothing`);
+  }
+  {
+    // the gamepad reaches the drills: a right stick click (button 11) queues 'failDrill', the one-button drill above
+    const nav = globalThis.navigator, had = nav && Object.getOwnPropertyDescriptor(nav, 'getGamepads');
+    const w0 = globalThis.window;
+    if (!w0) globalThis.window = { addEventListener() {} };
+    const inp = new Input();
+    if (!w0) delete globalThis.window;
+    const pad = (on) => ({ connected: true, axes: [0, 0, 0, 0], buttons: Array.from({ length: 17 }, (_, i) => ({ pressed: on && i === 11, value: on && i === 11 ? 1 : 0 })) });
+    let state = false;
+    Object.defineProperty(nav, 'getGamepads', { value: () => [pad(state)], configurable: true, writable: true });
+    inp._pollPad(); state = true; inp._pollPad(); const a1 = inp.drain(); inp._pollPad(); const a2 = inp.drain();
+    if (had) Object.defineProperty(nav, 'getGamepads', had); else delete nav.getGamepads;
+    check(a1.join() === 'failDrill' && a2.length === 0, `a gamepad's right stick click sends the failure drill, once per press (${a1.join() || 'nothing'})`);
+  }
+  {
+    // callouts on SIM time: a failure's hint 0.8 s of flight after the frame it happened in, Paddles' first call 0.3 s
+    // after the lens goes dark. They come from postStep (a paused flight calls none, so they wait), synchronously: a
+    // stepped harness sees them on the frame they are due (a wall-clock timer showed them late there, and in a pause)
+    const calls = [];
+    const hud = { callout: (text) => calls.push(text), message() {}, setFailures() {}, setExtraKeys() {}, clearFailureDisplay() {} };
+    const audio = { said: [], say(t) { this.said.push(t); }, beep() {} };
+    const ac = airborne('condor'), rt = new FailureRuntime(ac, { failures: [] }, { seed: 1, hud, audio });
+    rt.trigger({ name: 'engineLeft' });                     // (in the frame that ends at 0.04 s)
+    for (let i = 0; i < 20; i++) rt.postStep(1 / 25, ac);   // 0.80 s: 0.76 s after that frame
+    const before = calls.length;
+    rt.postStep(1 / 25, ac);                               // 0.84 s
+    const hint = calls.slice();
+    const h = airborne('hornet'), rh = new FailureRuntime(h, { failures: [] }, { seed: 1, hud, audio });
+    calls.length = 0;
+    rh.trigger({ name: 'lensFail' });
+    for (let i = 0; i < 8; i++) rh.postStep(1 / 25, h);     // 0.32 s
+    const early = calls.length;
+    rh.postStep(1 / 25, h);                                // 0.36 s
+    rt.dispose(); rh.dispose();
+    check(before === 0 && hint.length === 1 && hint[0] === FAILURES.engineLeft.hint, `a failure's hint shows 0.8 s of flight after it, on that frame (${hint.length} callout)`);
+    check(early === 0 && calls.length === 1 && /^PADDLES CONTACT/.test(calls[0]) && audio.said.some((t) => /^Paddles contact/.test(t)), `Paddles' first call comes 0.3 s of flight after the lens goes dark ("${calls[0] || ''}")`);
   }
   {
     // One Wheel: a flight that ends with that wing still up does not say "0 kt"

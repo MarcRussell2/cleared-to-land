@@ -618,7 +618,8 @@ export class FailureRuntime {
     this.fuelCutT = 0;
     this.runAtContact = null;  // were the engines running at the first touch of the ground? (scoring.belly)
     this._offRpm = [0, 0, 0, 0];   // what the gauges of an engine shut off by the fuel cutoff read as it runs down
-    this._hintTimer = null; this._laterTimers = [];
+    this._due = [];            // callouts due on SIM time ({ delay, at, text, voice, hint }): postStep says them, so they
+                               // wait out a pause and land on time in a stepped harness (a wall-clock timer did neither)
     this._shadow = {}; for (const k of CHANNELS) this._shadow[k] = { base: 0, out: NaN };
     this._w = { pitch: 0, roll: 0, yaw: 0, trim: 0, throttle: 0 };
     this._sensed = { ias: 0 };
@@ -706,9 +707,9 @@ export class FailureRuntime {
     if (info.effect) this.caution(info.warning ? 'warning' : 'caution', info.msg);
     else if (audio) audio.beep(520, 0.4);
     if (info.hint && hud) {
-      const hintText = this.touchify(info.hint);
-      clearTimeout(this._hintTimer);
-      this._hintTimer = setTimeout(() => hud.callout(hintText, 6, true), 800);   // (true: advice, shown on a dark HUD too)
+      // 0.8 s after the warning; a newer failure's hint replaces one still waiting
+      for (let i = this._due.length - 1; i >= 0; i--) if (this._due[i].hint) this._due.splice(i, 1);
+      this._due.push({ delay: 0.8, at: null, text: this.touchify(info.hint), voice: false, hint: true });
     }
     if (audio && this.power) audio.say('Warning. ' + info.name.toLowerCase(), true);
   }
@@ -732,10 +733,21 @@ export class FailureRuntime {
     if (msg && this.hud) this.hud.message(msg, cls, 3);
     if (voice && this.audio && this.power) this.audio.say(voice, priority);
   }
-  // A callout a moment from now (advice, so it shows on a dark HUD too); `voice`: said as well (Paddles on the radio).
-  later(text, s, voice = false) {
-    const id = setTimeout(() => { if (voice) { if (this.audio) this.audio.say(text, true); if (this.hud) this.hud.callout(text.split('.')[0].toUpperCase(), 3, true); } else if (this.hud) this.hud.callout(text, 5, true); }, s * 1000);
-    this._laterTimers.push(id);
+  // A callout `s` seconds of flight from now (advice, so it shows on a dark HUD too); `voice`: said as well (Paddles
+  // on the radio). Sim time: postStep() says it when it is due.
+  later(text, s, voice = false) { this._due.push({ delay: s, at: null, text, voice, hint: false }); }
+  _sayDue() {
+    const q = this._due;
+    for (let i = 0; i < q.length;) {
+      const c = q[i];
+      // counted from the end of the frame it was queued in: the frame whose picture first shows the failure
+      if (c.at == null) c.at = this.t + c.delay;
+      if (this.t + 1e-9 < c.at) { i++; continue; }
+      q.splice(i, 1);
+      if (c.hint) { if (this.hud) this.hud.callout(c.text, 6, true); }   // (true: advice, shown on a dark HUD too)
+      else if (c.voice) { if (this.audio) this.audio.say(c.text, true); if (this.hud) this.hud.callout(c.text.split('.')[0].toUpperCase(), 3, true); }
+      else if (this.hud) this.hud.callout(c.text, 5, true);
+    }
   }
 
   // The keys that deal with a failure, offered on the touch bar and the key strip while they are still to be used.
@@ -820,6 +832,7 @@ export class FailureRuntime {
   }
   postStep(dt, ac) {
     this.t += dt;
+    if (this._due.length) this._sayDue();
     if (this.runAtContact == null && ac.stats.touchdown) this.runAtContact = !(this.fuelCut && this.fuelCutT > 2.5) && ac.engines.some((e) => !e.failed);
     if (!this.fx.length && !this.display) return;
     if (this._fuelArmT > 0) this._fuelArmT -= dt;
@@ -847,8 +860,8 @@ export class FailureRuntime {
     if (this.audio && this.audio.alarms) { this.audio.alarms.update(dt, ac.crashed ? null : snd); }
     snd.bang = 0; snd.thud = 0;
   }
-  // A key action. 'failDrill' is whichever drill is on offer first (one button for them all, for a gamepad: see the
-  // report's hooks_needed; nothing sends it yet).
+  // A key action. 'failDrill' is whichever drill is on offer first: one button for them all, a gamepad's right stick
+  // click (src/input.js).
   action(name) {
     if (name === 'failDrill') { const o = this.offers[0]; return !!o && this.action(o.a); }
     for (const f of this.fx) if (f.action && f.action(name)) return true;
@@ -887,9 +900,7 @@ export class FailureRuntime {
     return o;
   }
   dispose() {
-    clearTimeout(this._hintTimer);
-    for (const id of this._laterTimers) clearTimeout(id);
-    this._laterTimers.length = 0;
+    this._due.length = 0;
     for (const f of this.fx) if (f.dispose) f.dispose();
     const mh = this._mission;
     if (mh) {

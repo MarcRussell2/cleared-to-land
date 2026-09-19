@@ -146,6 +146,7 @@ export class Input {
     if (edge(5)) this.actions.push('spoiler');   // RB
     if (edge(9)) this.actions.push('pause');     // Start
     if (edge(8)) this.actions.push('camNext');   // Back
+    if (edge(11)) this.actions.push('failDrill'); // right stick click: whichever failure drill is on offer (fire handle, trim cutout, fuel cutoff)
     if (edge(12)) this.trim = clamp(this.trim - 0.03, -1, 1); // dpad up = trim nose down
     if (edge(13)) this.trim = clamp(this.trim + 0.03, -1, 1); // dpad down = trim nose up
     if (bt(14)) this.padYaw = -1; if (bt(15)) this.padYaw = 1; // dpad left/right rudder
@@ -245,5 +246,5 @@ export const KEY_HELP = [
   ['Right-drag', 'Swing the chase camera anywhere around the airplane, above or below it; it stays where you leave it (get down low and watch the wheels touch). In the cockpit and wing views it turns your head. Wheel = zoom when the mouse is not captured'],
   [', / .  and 0', 'Orbit the camera left / right with keys; 0 puts it back behind the tail (or your head straight ahead)'],
   ['Shift', 'Full control authority in Direct mode'],
-  ['Gamepad', 'Sticks fly, triggers throttle, A gear, X/Y flaps, B brakes, LB hook, RB spoilers, D-pad trim'],
+  ['Gamepad', 'Sticks fly, triggers throttle, A gear, X/Y flaps, B brakes, LB hook, RB spoilers, D-pad trim, right stick click = the failure drill on offer'],
 ];
