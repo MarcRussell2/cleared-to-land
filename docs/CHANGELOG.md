@@ -3,6 +3,79 @@
 Newest first. Player-facing lines first in each entry, then the developer notes. The flight-model
 details behind each entry live in `docs/PHYSICS.md`.
 
+## 2026-09-19/20 - twenty-nine new challenges: storms, harder failures, things in the way, a city, four new places
+
+Build **2026-09-20T02:25:02Z**. The challenge list goes from 20 to **49**, in five new groups, and
+the home screen is rebuilt around them. The original twenty are untouched - same flights, same
+numbers, same scores.
+
+- **Storms** (5). Weather is a model now, not a backdrop: rain, snow and dust, an overcast that
+  dims the world, a cloud base you come down through on the needles, lightning that costs you your
+  night vision, a sea state for the ship - and things that happen to you on the way down. A squall
+  line's gust front swings the wind 60 degrees half a mile out. A microburst gives you a few free
+  knots and then takes three thousand feet a minute for them; it rains itself out in about two
+  minutes, so going around and coming back is a real choice. Rain wets the runway and about 40% of
+  the grip goes with it.
+- **Things break** (10). Ten failures you have to *do* something about: an engine fire, a throttle
+  jammed at climb power, a stabilizer trim running away nose down, a pitot tube icing over so the
+  airspeed lies to you slowly, a bird through the windshield and another down an engine, a jammed
+  aileron, the whole electrical system dying at night, a main wheel that is simply gone, a gear
+  that will not come out, and a carrier lens gone dark. Three new keys go with them - **A** the
+  fire handle, **D** the trim cutout, **U** the fuel cutoff - live only while the failure that
+  wants them is, and named on the controls strip, on a phone button, and on a gamepad's right-stick
+  click. The cutoff asks twice above 300 ft and once in the flare, where the drill actually uses it.
+- **In the way** (3). Power lines across short final, a 30 m notch in a wall of spruce, and a
+  lowered crane boom over the harbour lane. Things in the way are solid now: every probe point on
+  the airframe is swept from last frame to this one, so a 12 cm cable is caught at 250 kt. Pass
+  within five metres of something and you are told how close; the debrief quotes the closest shave.
+- **The city** (6). Metro City, and a ladder of six rungs: aim at a checkerboard on a hill and turn
+  right onto a runway that was hiding behind the apartment blocks; fly three kilometres down Grand
+  Avenue below the rooftops and under two skybridges; weave through three pairs of skyscrapers;
+  go under the Harbor Bridge at a hundred feet with nine metres of fin above you; turn onto final
+  through a 34 m gap between two glass towers in a 35-degree bank, in an airliner 35 m across; then
+  do four of those in one approach, at night, in a thunderstorm. The ordinary approach to Metro
+  City is still an ordinary approach - nothing the city builds stands on the straight-in path.
+- **Far places** (5). Kestrel Island: 650 m behind a ridge, over a road you cross a few metres
+  above the cars. Paradise Bay: an airliner across a public beach at fifteen metres. Frostbite
+  Lake: a ploughed ice runway where whichever way the wheels point is the way you go. Red Mesa:
+  500 m of dirt on top of a 150 m cliff, with a haboob coming over the rim in the last of them.
+- **A new home screen.** Three doors over the live airfield - AIRCRAFT, MISSIONS, FREE FLIGHT - and
+  a quieter fourth for settings, controls and the logbook. Missions are grouped, tagged NEW until
+  you fly them and rated one to five pips; the city is drawn as a ladder. Free flight is a
+  four-step builder (aircraft, place, weather, trouble) that tells you what each choice rules out:
+  a field too short for the airplane is greyed out with the reason, weather is a preset with an
+  advanced drawer behind it, a failure can be set to fire when you choose or dealt at random, and
+  obstacles can be switched off where there are any. Keyboard and gamepad work all of it.
+- **Scoring.** A mission with gates says so: a required gate missed or never reached caps the
+  landing at 30 with the grade MISSED GATE, a bonus gate adds, and a go-around mends a miss. A
+  failure you were asked to land with - a belly landing - is not counted against you.
+
+### Developer notes
+
+- **Nothing in `src/physics/`, `src/aircraft/defs.js`, `flightControl.js`, `autopilot.js` or
+  `scoring.js` was edited.** Every new system wraps them from outside: `src/systems/weather.js`
+  (the model; the look is `src/art/weather-look.js`, the sound `src/audio-weather.js`),
+  `src/world/obstacles.js` (courses, swept collision against the hulls in
+  `src/aircraft/hulls.js`, gates), `src/systems/failureEffects.js` (failures needing no physics
+  edit, and their drills), `src/systems/mission.js` (gates, hints, HUD status, extra debrief lines)
+  and `src/systems/routepilot.js` (waypoints and arcs in the runway frame, handing over to the
+  stock Autoland on the final, because Autoland is obstacle-blind). The missions themselves are
+  `src/missions/`, one file per group; `src/missions/README.md` is the contract and `docs/PLAN.md`
+  §11 the summary.
+- Everything random draws from the flight seed, never `Math.random()` and never an extra draw from
+  the rng `resolveScenario()` uses, so pinned-seed replays of the old challenges are unchanged.
+- Metro City's look is three Codex art passes on `src/art/city-look.js` and `city-facades.js`,
+  fenced as the rest of the art bench is, against the drawing contract in that file's header and a
+  budget the suite enforces (at most 60 draws, 450k/250k/120k triangles a pass, 6 programs counted
+  by variant). Neither the flying nor the budget moved across the passes.
+- Checks: `npm test` runs 822 art, 77 weather, 254 maps, 467 obstacle and 266 city checks alongside
+  the physics, flight-control, yaw, scoring, stall, flare, carrier-trap, camera, free-flight and
+  failure suites. All 49 challenges were then flown headless in the real page with no console
+  errors, and the twenty originals came out frame for frame identical to the previous live build at
+  seed 307.
+- The leaderboard cap moved with the list: a career is now at most 4,900 (49 x 100). The site owns
+  that registry and its Worker; both were raised and redeployed the same day.
+
 ## 2026-09-15 - taller seats, a stall you can feel, full-stall landings
 
 - **Seats.** In the cockpit view the pilot sits higher in all four aircraft: 10 cm in the trainer and the bush
