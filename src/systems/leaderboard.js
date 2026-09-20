@@ -6,7 +6,8 @@
  * is not a leaderboard. So there are two boards now, both public and both shared with
  * the rest of goodmarc.com:
  *
- *   the career board   every pilot's total across all twenty challenges
+ *   the career board   every pilot's total across every challenge (49 of them since the
+ *                      missions expansion, so a career tops out at 4,900)
  *   per challenge      a top ten for each one, on its own sub-board
  *
  * It talks to `/api/scores` — a small score service on the same origin as the site (the

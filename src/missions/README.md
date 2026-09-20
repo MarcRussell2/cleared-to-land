@@ -312,7 +312,8 @@ degrees at 155 kt), the Skylark and the Trailblazer.
 - **Programs**: the limit is 70 with the cockpit showing, not just the chase view: harbor-cranes compiles 62 in the
   chase view and 67 once the Condor's cockpit has been shown. Count a new course with `perf-probe --camera cockpit`.
 - **Leaderboard**: every new mission raises the most a career can score; the site's `src/games/lib/games.js`
-  (`max: 2000`) and its Worker must follow, or careers above the cap are silently rejected. A site-session job.
+  (`max`) and its Worker must follow, or careers above the cap are silently rejected. A site-session job: it was
+  2,000 for the original twenty and went to **4,900** (49 x 100) with this expansion, Worker redeployed.
 
 ## The city ladder (Metro City and "The city", n 44-49)
 
@@ -333,9 +334,9 @@ review (the Needle's line and cue, the arc law, the under-gates, the budget test
   `plaza`). A district adds coarse keep-out circles (230 m) for the forest instead of one per building (the terrain
   scans them linearly per tree), and no circle is kept out on the water.
 - **The look** (`src/art/city-look.js`, its facade shader in `src/art/city-facades.js`) is the art department's:
-  Codex's two passes of 2026-09-19 (briefs `docs/briefs/city/city-look.txt` and `city-look-2.txt`; a third,
-  `city-look-3.txt`, is written for the day facades and not yet run). The header of city-look.js is the drawing
-  contract, unchanged by those passes, which changed neither the flying nor the budget. `tools/test-obstacles.mjs` section 4 checks the
+  Codex's three passes of 2026-09-19 (briefs `docs/briefs/city/city-look.txt`, `city-look-2.txt` and
+  `city-look-3.txt` for the day facades, with the correction `city-look-3b.txt`; all run). The header of
+  city-look.js is the drawing contract, unchanged by those passes, which changed neither the flying nor the budget. `tools/test-obstacles.mjs` section 4 checks the
   contract (every drawn vertex inside its prim's volume, every prim's drawing filling it, over 17 kinds) and section 10
   the city's budget on every course a flight at Metro City builds (free flight and the six missions, at three tiers):
   at most 60 draws, 450k / 250k / 120k triangles a pass, and at most 6 programs of its own **counted by variant** (a
