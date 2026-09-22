@@ -31,7 +31,7 @@
 import { installDomStub } from './dom-stub.mjs';
 installDomStub();
 const THREE = await import('three');
-const { DEG, KT, makeRng } = await import('../src/config.js');
+const { DEG, KT, makeRng, clamp } = await import('../src/config.js');
 const { AIRCRAFT } = await import('../src/aircraft/defs.js');
 const { HULLS, hullProbes } = await import('../src/aircraft/hulls.js');
 const { ObstacleField, resolveCourse, sweptHit, primDistance } = await import('../src/world/obstacles.js');
@@ -261,16 +261,18 @@ for (const sc of OBSTACLES_MISSIONS) {
 }
 {
   const sc = missionOf('harbor-cranes'), { course } = planned(sc);
-  const boom = course.prims.find((p) => p.kind === 'boom' && p.name === 'the lowered crane boom');
-  ok(!!boom, 'harbor-cranes: the lowered boom exists');
-  if (boom) {
-    const under = boom.min[1];   // world y; the water is at 0
-    const tipV = boom.max[0];
-    ok(under > 48 && under < 52, `harbor-cranes: the boom's underside is 50 m over the water (${under.toFixed(1)})`);
-    ok(tipV > 1173 && tipV < 1182, `harbor-cranes: the boom's tip reaches just past the middle of the lane (v ${tipV.toFixed(0)})`);
-    ok(near(boom.sz, 2800, 60), `harbor-cranes: the lowered boom stands 2.8 km out (${(boom.sz / 1000).toFixed(2)} km)`);
-    say(`harbor-cranes: lowered boom underside ${under.toFixed(1)} m over the water, tip at v ${tipV.toFixed(0)} (lane 1170), ${(boom.sz / 1000).toFixed(1)} km out`);
-  }
+  // the basin: ten lowered booms, every one across the lane (v 1185), one every 125 m from alternate sides, 50 m over
+  // the water; no gates; the start 100 m before the first boom, inside the basin
+  const booms = course.prims.filter((p) => p.kind === 'boom' && p.name === 'a lowered crane boom').sort((a, b) => b.sz - a.sz);
+  ok(course.gates.length === 0, 'harbor-cranes: no gates (the basin is the rule)');
+  ok(booms.length === 10, `harbor-cranes: ten lowered booms (${booms.length})`);
+  const LANE_X = 1185;
+  ok(booms.every((b) => b.min[0] <= LANE_X && b.max[0] >= LANE_X), 'harbor-cranes: every boom crosses the middle of the lane');
+  ok(booms.every((b) => b.min[1] > 48 && b.min[1] < 52), `harbor-cranes: every boom's underside is 50 m over the water (${booms.map((b) => b.min[1].toFixed(0)).join(' ')})`);
+  const gaps = booms.slice(1).map((b, i) => booms[i].sz - b.sz);
+  ok(gaps.every((g) => g > 100 && g <= 130), `harbor-cranes: a boom every 125 m (gaps ${gaps.map((g) => g.toFixed(0)).join(' ')})`);
+  ok(Math.abs(-booms[0].sz - sc.spawn.u - 100) < 5, `harbor-cranes: the start is 100 m before the first boom (spawn u ${sc.spawn.u}, first boom ${(-booms[0].sz).toFixed(0)})`);
+  say(`harbor-cranes: ${booms.length} lowered booms from u ${(-booms[0].sz).toFixed(0)} to ${(-booms[booms.length - 1].sz).toFixed(0)}, undersides ${booms[0].min[1].toFixed(1)} m over the water, all across v ${LANE_X}; no gates`);
 }
 
 // ============================================================ 4. drawn = collides (the drawing contract)
@@ -798,14 +800,22 @@ function budgetOf(built) {
     ['power-lines', { seed: 307, pilot: 'autoland' }, 'Hit the power lines'],
     ['power-lines', { seed: 307, route: [{ u: -500, v: 0, alt: 21, kt: 72 }, { u: 200, v: 0, alt: 21, kt: 72 }] }, 'Hit the power lines'],
     ['the-notch', { seed: 307, pilot: 'autoland' }, 'Hit a tree'],
-    ['harbor-cranes', { seed: 307, route: [{ u: -4500, v: 1290, alt: 55 }, { u: -3850, v: 1170, alt: 48 }, { u: -2300, v: 1170, alt: 44 }] }, /^Hit (the lowered crane boom|a container crane)$/],
+    // the basin: a climb-out ends in a boom or a stay; the stock Autoland heading for the centreline ends in a crane
+    ['harbor-cranes', { seed: 307, route: [{ u: -3200, v: 1185, alt: 70, kt: 150 }, { u: -2000, v: 1185, alt: 120, kt: 150 }] }, /^Hit (a lowered crane boom|a container crane)$/],
+    ['harbor-cranes', { seed: 307, pilot: 'autoland' }, /^Hit /],
+    // and a drift out over the mole's containers
+    ['harbor-cranes', { seed: 307, route: [{ u: -3000, v: 1305, alt: 30, kt: 150 }, { u: -2400, v: 1535, alt: 60, kt: 150 }, { u: -1500, v: 600, alt: 120, kt: 150 }] }, /^Hit /],
     // the Gravel Bar's wall at the threshold: the stock straight-in (obstacle-blind) flies into it
     ['gravel', { seed: 307, pilot: 'autoland' }, 'Hit a tree'],
     // over the top of the notch's giants: no bar left to land on (the wall is the rule; there is no gate)
     ['the-notch', { seed: 307, route: [{ u: -700, v: -3, alt: 103, kt: 52 }, { u: -46, v: 0, alt: 93, kt: 50, over: true }, { u: 4, v: 0, alt: 93, kt: 50, over: true }, { u: 200, v: 0, alt: 6, kt: 48 }] }, 'overrun'],
-    // over the boom instead of under it: the mission without the bonus
-    ['harbor-cranes', { seed: 307, route: [{ u: -4500, v: 1290, alt: 55 }, { u: -3850, v: 1170, alt: 70 }, { u: -2400, v: 1170, alt: 72 }, ...sCurve(-2400, 1170, -400, 0, 60, 46, 146, 40)] }, 'land-nobonus'],
   ];
+  // the basin's roof: a full pull-up (full aft stick, full throttle, wings held level) from eight moments after the
+  // start must end in a boom or a crane's stays - there is no gap between the cranes to zoom through
+  for (const t0 of [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4]) {
+    const makePilot = (ac) => { let t = 0; const p0 = ac.euler.pitch; return { update(dt) { t += dt; const i = ac.input; i.roll = clamp(-2.0 * ac.euler.roll + 0.5 * ac.omega.z, -1, 1); i.yaw = clamp(1.5 * ac.aero.beta, -1, 1); if (t < t0) i.pitch = clamp(3 * (p0 - ac.euler.pitch) - 1.5 * ac.omega.x, -1, 1); else { i.throttle = 1; i.pitch = 1; } } }; };
+    flights.push(['harbor-cranes', { seed: 307, makePilot, pilot: 'zoom at ' + t0 + ' s' }, /^Hit /]);
+  }
   for (const [id, opts, expect] of flights) {
     const r = await simulate(id, opts);
     results.push(r);
@@ -814,7 +824,6 @@ function budgetOf(built) {
     if (expect === 'land' || expect === 'land-nobonus') {
       const allRequired = r.gates.every((g) => /: passed$/.test(g) || /under the boom/.test(g));
       ok(!r.crashed && r.touchdown && allRequired && r.points >= 50, `${tag}: must land with every required gate (${r.points} ${r.grade}; ${r.reason}; gates ${gates})`);
-      if (expect === 'land-nobonus') ok(r.gates.some((g) => /under the boom: missed/.test(g)) && !r.lines.some((l) => /\(\+10\)/.test(l)), `${tag}: over the boom is the mission without the bonus`);
       console.log(`PASS ${tag}: ${r.points} ${r.grade}, touchdown ${r.touchdown ? `${r.touchdown.u} m in, ${r.touchdown.fpm} fpm, ${r.touchdown.kt} kt` : '-'}; ${gates || 'no gates'}; closest ${r.closest}`);
     } else if (expect === 'overrun') {
       const bad = r.crashed || r.lines.some((l) => /OVERRAN THE END|LEFT THE RUNWAY/.test(l));
@@ -829,8 +838,7 @@ function budgetOf(built) {
   const again = await simulate('harbor-cranes', { seed: 307 });
   const first = results[4];
   ok(JSON.stringify({ ...again, frames: 0 }) === JSON.stringify({ ...first, frames: 0 }) && again.frames === first.frames, 'the same seed flies the same flight');
-  // the gate order: the harbor route passes the entrance, the boom and the exit
-  ok(/entrance: passed.*under the boom: passed.*exit: passed/.test(first.gates.join(' | ')), `harbor-cranes: RoutePilot takes the bonus under the boom (${first.gates.join(', ')})`);
+  ok(first.gates.length === 0 && first.points >= 50, `harbor-cranes: no gates, and the basin is landed (${first.points} ${first.grade})`);
 }
 
 // ============================================================ 8. RoutePilot: over an obstacle, then steeply down

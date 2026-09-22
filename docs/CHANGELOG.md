@@ -3,6 +3,30 @@
 Newest first. Player-facing lines first in each entry, then the developer notes. The flight-model
 details behind each entry live in `docs/PHYSICS.md`.
 
+## 2026-09-22 (evening) - Harbor Cranes: the basin
+
+Build **2026-09-22T21:29:42Z** (not deployed yet). Marc: "do the harbor next, no gates".
+
+- **Harbor Cranes** has no gates and no choice of line. It is a container basin now: two quays 170 m
+  apart, five ship-to-shore cranes on each, every boom lowered to 50 m over the water and reaching
+  past the middle of the basin from both sides, a ship alongside each quay. You start inside it,
+  100 m before the first boom, at 100 ft and 150 kt. There is no climbing out: the fin has to stay
+  under the booms, and above them each crane's stays block the way up to about 180 ft, so getting
+  out means gaining 80 ft between two cranes a second and a half apart, which an airliner cannot
+  (eight timed full pull-ups all end in a boom or a stay). There is no room to turn either: the quays
+  are 85 m out and a 40-degree bank moves the airliner 150 m sideways only after 500 m. So it is the
+  lane to the end of the basin, then the S-turn onto the 400 m final as before.
+
+### Developer notes
+
+- `src/missions/obstacles.js` (the basin: two quays, ten cranes with `boom: 0` and 105 m of outreach,
+  the mole's cranes at `rot: 180`, four container yards, two ships; the route up the basin at 24 m)
+  and `tools/test-obstacles.mjs` (ten booms every 100-125 m all across v 1185, undersides 50 m over
+  the water, no gates, the start 100 m before the first; the ways out flown: a climb-out route, the
+  obstacle-blind Autoland, a drift out over the mole, and eight pull-ups timed 0.5 to 4 s after the
+  start - every one a "Hit"). RoutePilot 79 / 69, passing the booms with 4.5-4.9 m to spare.
+- Of the three "In the way" missions none has a gate now; the gate engine stays for the city ladder.
+
 ## 2026-09-22 (later) - no boxes: the obstacle is the rule
 
 Build **2026-09-22T20:11:46Z**, live the same afternoon. Marc, playing the morning's build: Power Lines

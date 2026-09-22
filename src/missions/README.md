@@ -215,7 +215,11 @@ course: {
   `keep`); the look draws whatever volumes it makes, by their `look` (`building`, `plain`, `hull`, `container`,
   `steel`, `wire`, `marker`, `tree`, `trunk`, `truss`, `concrete`, `white`, `wood`, `insulator`), and the suite's
   "drawn = collides" check covers it with no new test code.
-- **Gates** are markers (drawn, never solid), **flown in array order** (`ObstacleField.gatesStep`):
+- **Gates** are markers (drawn, never solid), **flown in array order** (`ObstacleField.gatesStep`). *Since
+  2026-09-22 none of the "In the way" missions uses one - Marc's rule is that the obstacle itself must force the
+  line, with no easier option (The Notch's wall cannot be flown over onto the bar; the harbor is a basin of lowered
+  booms the airliner starts inside) - and the harbor examples below are historical; the city ladder still scores
+  its skybridges, gaps and the Needle's eye with gates.*
   - **passed** when the CG crosses the plane in the gate's direction inside the frame - also a gate already missed
     (a go-around mends a miss). One gate per crossing, the first in order not yet passed, so two gates on the same
     spot (an arch flown twice) take two passes. Gates before it that are still pending were skipped: missed now.
