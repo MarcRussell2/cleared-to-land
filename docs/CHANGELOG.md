@@ -3,6 +3,47 @@
 Newest first. Player-facing lines first in each entry, then the developer notes. The flight-model
 details behind each entry live in `docs/PHYSICS.md`.
 
+## 2026-09-22 - the obstacle, then the runway
+
+Build **2026-09-22T18:16:13Z** (not deployed yet). Four missions and five failures rearranged so the
+thing in the way is where the runway begins, on Marc's word after playing them: "it should be the
+obstacle and then immediately the runway".
+
+- **Bush: Gravel Bar.** The wall of spruce stands at the end of the gravel now - 35 m tall, no gap,
+  the strip starting at the foot of the trees - instead of 150 m before it. Idle and full flap bring
+  the Trailblazer down at 13 degrees from the crossing, which is 180 m of the 340 gone before the
+  wheels touch; a forward slip (rudder one way, aileron the other) makes it 130. The aiming mark is
+  130 m in. Free flight at the bar has the same wall (the Obstacles switch removes it). Four pips.
+- **The Notch.** The forest edge stands right at the threshold, 40 m tall. Out of the notch the bar
+  is already under you, 16 m to your right: a jink, idle, and down. Five pips.
+- **Harbor Cranes.** The container port is 2.4 to 3.9 km out instead of 5 to 7, and there is no
+  straight final after it: out of the exit gate it is an S-turn at 150 ft, 27 degrees of bank each
+  way, that rolls out on the centerline 400 m from the threshold with the glideslope meeting you.
+- **Power Lines.** The pylons cross 120 m before the threshold instead of 600. Over the top means
+  130 ft over the numbers and getting down from there; under means 35 ft between the pylons; the
+  glideslope itself runs through the wires. Three pips.
+- **Things break.** No long run-in before the trouble: the engine fire bell goes at 600 ft two miles
+  out (was 1,100 ft and four), and the belly landing, runaway trim, bird strike and unreliable
+  airspeed start 2.6 to 5.2 km out instead of 5 to 7.2.
+
+### Developer notes
+
+- Mission data and tests only: `src/missions/{obstacles,failures,util}.js`, `SITES.gravelbar` and the
+  Gravel Bar's text in `src/systems/scenarios.js`, `CLASSIC_DIFFICULTY`, `tools/test-obstacles.mjs`.
+  Nothing in `src/physics/`, `defs.js`, `flightControl.js`, `autopilot.js` or `scoring.js`.
+- The Gravel Bar's wall is a course on the site (the obstacle engine: solid, swept, and not in the
+  ground query, so the radio altimeter reads the bar under it), no longer `obstacleTrees` in the
+  terrain; it is the one original site with a `course`, and Bush: Gravel Bar the one original
+  challenge that builds an `ObstacleField`. Its aim point is 130 m (Moose Creek Notch's 120).
+- Sizing was measured, not guessed: a scripted pilot flew the Trailblazer over walls of 27, 32, 37
+  and 42 m at the threshold, at idle holding Vref, with and without a full forward slip (the model's
+  slip is `CDbeta` drag plus the cos^2 lift loss in `aero.js`; full pedal steepens the idle descent
+  from 13 to 16-18 degrees). Harbor City's coast was probed (v 945-1085 along the approach) before
+  the harbor moved, so the ships still float.
+- `sCurve()` (two tangent arcs for RoutePilot) lives in `src/missions/util.js` now; the harbor's exit
+  is one. `npm test` green, all suites; the three obstacle missions, the Gravel Bar and the five
+  failures were then flown in the real page.
+
 ## 2026-09-19/20 - twenty-nine new challenges: storms, harder failures, things in the way, a city, four new places
 
 Build **2026-09-20T02:25:02Z**. The challenge list goes from 20 to **49**, in five new groups, and

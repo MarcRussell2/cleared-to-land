@@ -21,3 +21,15 @@ export function rwToWorld(site, u, v, y = 0, out = { x: 0, y: 0, z: 0 }) {
   out.y = rw.elevation + y;
   return out;
 }
+
+// An S-curve for RoutePilot from (u0, v0) to (u1, v1), heading down the runway at both ends: two arcs of the same
+// radius meeting halfway, the first turning toward the new side, at `bank` degrees at most (the arc law's own
+// feed-forward decides the bank the radius needs; the limit only caps it). Radius (a^2 + b^2) / 2b for half-lengths
+// a, b. (The city ladder keeps a copy of its own in city.js.)
+export function sCurve(u0, v0, u1, v1, alt0, alt1, kt, bank) {
+  const a = (u1 - u0) / 2, b = (v1 - v0) / 2, r = (a * a + b * b) / (2 * Math.abs(b));
+  return [
+    { u: u0 + a, v: v0 + b, alt: (alt0 + alt1) / 2, arc: b > 0 ? 'R' : 'L', r, kt, bank },
+    { u: u1, v: v1, alt: alt1, arc: b > 0 ? 'L' : 'R', r, kt, bank },
+  ];
+}

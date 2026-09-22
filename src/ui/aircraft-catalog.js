@@ -113,7 +113,7 @@ export function runwayNeedAshore(def) {
 // the twenty live, is left untouched). Its keys double as the list of the original twenty: anything else is new.
 export const CLASSIC_DIFFICULTY = {
   solo: 1, xwind15: 2, gusty: 3, heavy: 2, short: 3, noflaps: 3, fog: 4, deadstick: 3, nosegear: 3, oneengine: 3,
-  jammed: 4, ice: 4, brakes: 3, slow: 2, stallrec: 3, cq: 4, night: 5, gravel: 3, oneway: 4, roulette: 4,
+  jammed: 4, ice: 4, brakes: 3, slow: 2, stallrec: 3, cq: 4, night: 5, gravel: 4, oneway: 4, roulette: 4,
 };
 export const isClassicMission = (id) => Object.prototype.hasOwnProperty.call(CLASSIC_DIFFICULTY, id);
 

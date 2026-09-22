@@ -224,7 +224,8 @@ challenge, `src/systems/leaderboard.js`, live 2026-09-17).
 - Persistent orbit camera (right-drag / `,` `.` / wheel zoom / `0` reset), the whole sphere around the
   airplane down to knee height above the ground; the same drag turns your head in the cockpit and wing
   views and the wheel zooms the tower and fly-by views.
-- Gravel Bar: a wall of spruce across short final; you clear it and drop in.
+- Gravel Bar: a wall of spruce at the end of the gravel (35 m, no gap, since 2026-09-22; 24 m and 150 m out
+  before that); you clear it and get down in what is left, with a slip.
 - Build stamp in the menu header; the site serves the game with no-cache.
 - Deploy: `npm run web` writes the hosted copy (`web/`); how to host it is in `web/README-HOSTING.md`.
 - Yaw pass (2026-09-14, branch `yaw`): the rudder can no longer put the airplane sideways or stall it, the

@@ -42,15 +42,15 @@ export const FAILURES_MISSIONS = [
   {
     id: 'runaway-trim', n: 27, group: 'breaks', difficulty: 3, title: 'Runaway Trim', tags: T('failure', 'heavy'),
     aircraft: 'condor', site: 'bayfield', time: 11, vis: 25000,
-    desc: 'At about 1,000 ft on the ILS the stabilizer trim starts running nose down by itself, with a clatter you will learn to hate. The elevator can hold it for about five seconds. Cut it out, hold the nose up, and wind it back by hand.',
+    desc: 'At about 700 ft on the ILS the stabilizer trim starts running nose down by itself, with a clatter you will learn to hate. The elevator can hold it for about five seconds. Cut it out, hold the nose up, and wind it back by hand.',
     tips: [
       'Trim cutout the moment you hear the clacker: press D. Every second you wait is more nose-down trim to fight.',
       'Then hold the nose up with the stick and wind the trim back with T. It is a manual wheel now, and slow.',
       'The ILS still works. Once the nose sits right again it is an ordinary landing: flaps 30, Vref 142, spoilers armed (K).',
     ],
     wind: { rel: -15, speed: 8 }, weight: 'normal',
-    spawn: { dist: 6200, flap: 0.75, fixed: true },
-    failures: [{ name: 'runawayTrim', at: { type: 'time', value: 6 }, arg: -0.12 }],
+    spawn: { dist: 4000, flap: 0.75, fixed: true },
+    failures: [{ name: 'runawayTrim', at: { type: 'time', value: 5 }, arg: -0.12 }],
     scoring: { type: 'runway' },
     hint: H((ctx) => {
       const f = fx(ctx, 'runawayTrim');
@@ -63,15 +63,15 @@ export const FAILURES_MISSIONS = [
   {
     id: 'bird-strike', n: 28, group: 'breaks', difficulty: 3, title: 'Bird Strike', tags: T('failure', 'heavy'),
     aircraft: 'condor', site: 'harbor', time: 17.5, vis: 30000,
-    desc: 'Geese over the harbor at 800 ft. One hits the windshield, which cracks and holds, and one goes down the right engine, which keeps running, badly: it surges and bangs every few seconds and gives you about 60% when it feels like it.',
+    desc: 'Geese over the harbor at 600 ft, two miles out. One hits the windshield, which cracks and holds, and one goes down the right engine, which keeps running, badly: it surges and bangs every few seconds and gives you about 60% when it feels like it.',
     tips: [
       'Fly the airplane first: wings level, nose on the glideslope. The windshield is cracked, not gone, and the HUD still works.',
       'Each surge yaws you toward the right engine: left rudder (Q). Or shut it down with the fire handle (press A) and fly one engine.',
       'On one engine: rudder toward the good engine whenever you add power. Flaps 30, Vref 142, and 3,200 m of runway.',
     ],
     wind: { rel: 20, speed: 9, turb: 0.15 }, weight: 'normal',
-    spawn: { dist: 5200, flap: 0.75, fixed: true },
-    failures: [{ name: 'birdStrike', at: { type: 'alt', value: 800 }, engine: 'right', arg: 0.6, surge: 0.6 }],
+    spawn: { dist: 3900, flap: 0.75, fixed: true },
+    failures: [{ name: 'birdStrike', at: { type: 'alt', value: 600 }, engine: 'right', arg: 0.6, surge: 0.6 }],
     scoring: { type: 'runway' },
     hint: H((ctx) => {
       const f = fx(ctx, 'birdStrike');
@@ -90,7 +90,7 @@ export const FAILURES_MISSIONS = [
       'When the airspeed and the ground speed stop agreeing, the airspeed is the one lying.',
     ],
     wind: { rel: 0, speed: 12, turb: 0.15 }, weight: 'normal',
-    spawn: { dist: 7200, flap: 0.75, fixed: true },
+    spawn: { dist: 5200, flap: 0.75, fixed: true },
     failures: [{ name: 'pitotIce', at: { type: 'window', from: 6, to: 16 }, arg: 0.6, tau: 22 }],
     scoring: { type: 'runway' },
     hint: H((ctx) => {
@@ -111,7 +111,7 @@ export const FAILURES_MISSIONS = [
       'Flare to a gentle touchdown, wings level: the engine pods touch first. Keep it straight with rudder (Q/E) until it stops.',
     ],
     wind: { rel: 0, speed: 7 }, weight: 'normal',
-    spawn: { dist: 5000, flap: 0.75, gear: false, fixed: true },
+    spawn: { dist: 2600, flap: 0.75, gear: false, fixed: true },
     failures: [{ name: 'gearUp', at: { type: 'start' } }],
     scoring: { type: 'runway', belly: true },
     hint: H((ctx) => {
@@ -127,15 +127,15 @@ export const FAILURES_MISSIONS = [
   {
     id: 'engine-fire', n: 31, group: 'breaks', difficulty: 3, title: 'Engine Fire', tags: T('failure', 'heavy'),
     aircraft: 'condor', site: 'bayfield', time: 19, vis: 30000,
-    desc: 'The fire bell goes at 1,100 ft: left engine fire. You have about thirty seconds before the wing stops being a wing. Pull the handle, then fly the rest of it on one engine.',
+    desc: 'The fire bell goes at 600 ft, two miles out: left engine fire. You have about thirty seconds before the wing stops being a wing. Pull the handle, then fly the last of it on one engine.',
     tips: [
       'Pull the fire handle: press A. The engine stops, the bell stops, and the fire goes out.',
       'Then it is the One Engine landing: right rudder (E) whenever you add power, and keep the ball centered.',
       'Vref 142 with flaps 30, and do not get slow. 2,600 m of runway and one reverser (hold R) is plenty.',
     ],
     wind: { rel: 10, speed: 8 }, weight: 'normal',
-    spawn: { dist: 6600, flap: 0.75, fixed: true },
-    failures: [{ name: 'engineFire', at: { type: 'time', value: 5 }, engine: 'left', burn: 32 }],
+    spawn: { dist: 3200, flap: 0.75, fixed: true },
+    failures: [{ name: 'engineFire', at: { type: 'time', value: 3 }, engine: 'left', burn: 32 }],
     scoring: { type: 'runway' },
     hint: H((ctx) => {
       const f = fx(ctx, 'engineFire');

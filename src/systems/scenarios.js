@@ -28,11 +28,18 @@ export const SITES = {
   gravelbar: {
     id: 'gravelbar', name: 'Moose Creek Bar', kind: 'bush',
     terrain: { style: 'mountain', seed: 61, size: 14000, res: 400, elevation: 520, waterLevel: 516, valleyWidth: 1400, trees: 0.9, treeArea: 4500, snowLine: 1900 },
-    runways: [{ x: 0, z: 0, heading: 0, length: 340, width: 14, surface: 'gravel', elevation: 520, name: '36', nameRecip: '18', papi: false, ils: false, lights: false, windsock: true, markers: true, aimDistance: 50, flatWidth: 60, flatMargin: 120 }],
-    // The wall: two staggered rows of ~24 m spruce right across short final, 150-170 m before the bar. There is
-    // no way around it at this wingspan; you clear it and drop in. Scattered trees further out keep the valley honest.
+    runways: [{ x: 0, z: 0, heading: 0, length: 340, width: 14, surface: 'gravel', elevation: 520, name: '36', nameRecip: '18', papi: false, ils: false, lights: false, windsock: true, markers: true, aimDistance: 130, flatWidth: 60, flatMargin: 120 }],
+    // The wall: two staggered rows of spruce about 35 m tall standing right at the end of the bar (the last row's
+    // trunks 10 m before the threshold, its crowns to 4 m), 120 m wide, no gap. Since 2026-09-22, on Marc's "the
+    // runway starts at the base of the tree"; until then two rows of 24 m spruce stood 150-170 m out and the pilot
+    // dropped in after them. It is a course (src/world/obstacles.js: solid, swept collision, and not in the ground
+    // query, so the radio altimeter keeps reading the bar under it) and so stands in every flight here: the
+    // challenge, free flight (its Obstacles switch takes it away) and Roulette. The aim point is 130 m in: at idle
+    // and full flap the Trailblazer comes down at 13 degrees from the crossing, which puts the wheels on about
+    // 180 m in, and a forward slip brings that to about 130 (measured, tools/test-obstacles.mjs). Scattered spruce
+    // further out keep the valley honest; those stay terrain trees.
+    course: { obstacles: [{ kind: 'treeWall', u: -10, from: -60, to: 60, step: 6.5, scale: 1.4, rows: 2, rowGap: 12, jitter: 2, seed: 4 }] },
     obstacleTrees: [
-      ...treeWall(150, -52, 52, 6.5, 0.95, 4), ...treeWall(170, -66, 66, 8, 0.85, 5),
       { x: -34, z: 260, scale: 1.1 }, { x: 45, z: 320, scale: 1.2 }, { x: 22, z: 420, scale: 1.0 }, { x: -48, z: 470, scale: 1.1 }, { x: -25, z: -420, scale: 1.2 }, { x: 40, z: -380, scale: 1.1 },
     ],
   },
@@ -57,14 +64,6 @@ export function siteFlats(site) {
 }
 
 const T = (...tags) => tags;
-
-// A row of obstacle trees across the approach path (x = across, z = along; the threshold is at z = 0
-// and the approach comes from +z). Small alternating offsets so it reads as a treeline, not a fence.
-function treeWall(z, from, to, step, scale, zJitter = 0) {
-  const out = [];
-  for (let x = from, k = 0; x <= to; x += step, k++) out.push({ x: x + (k % 2 ? 1.5 : -1.5), z: z + ((k % 3) - 1) * zJitter, scale: scale + 0.08 * Math.sin(k * 1.9) });
-  return out;
-}
 
 
 export const SCENARIOS = [
@@ -172,8 +171,8 @@ export const SCENARIOS = [
   },
   {
     id: 'gravel', n: 18, title: 'Bush: Gravel Bar', tags: T('bush'), aircraft: 'trailblazer', site: 'gravelbar', time: 9.5, vis: 30000,
-    desc: 'A 340 m gravel bar in a river valley, and a wall of spruce right across short final, 150 m before the bar. Come in high, clear the trees, then get it down and stopped in what is left.',
-    tips: ['Full flap (F twice), 48 kt, and stay HIGH: the tree line is 24 m tall and there is no gap. Cross it with a few metres to spare.', 'Over the trees, power to idle and push the nose down. You want the wheels on the gravel in the first third of the bar.', 'Brake gently: heavy braking on a taildragger flips it onto its nose. Keep it straight with rudder.'],
+    desc: 'A 340 m gravel bar in a river valley, and a wall of spruce 35 metres tall standing right at the end of it: the gravel starts at the foot of the trees. Come in high, clear them with a few metres to spare, then get down fast enough to touch down in the first 130 m and stop in what is left.',
+    tips: ['Full flap (F twice), 48 kt, and stay HIGH: the wall is 35 m tall and there is no gap. Cross it with a few metres to spare, then throttle to idle and push.', 'Idle and full flap come down at 13 degrees, which puts the wheels on about 180 m in. Slip it (rudder one way, aileron the other) and it is 130. Take the slip out before the flare.', 'Brake gently: heavy braking on a taildragger flips it onto its nose. Keep it straight with rudder.'],
     wind: { rel: 40, speed: 7, turb: 0.3 }, weight: 'normal', spawn: { dist: 900, flap: 1.0, alt: 115, fixed: true }, failures: [], scoring: { type: 'bush' },
   },
   {

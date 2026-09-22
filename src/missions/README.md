@@ -150,7 +150,8 @@ so a stale site, aircraft or failure id falls back instead of throwing. The scen
   where the flight starts: "on approach" is 60% of the start height, 72% on a bush strip, "short final" 300 ft or half
   of it). "Surprise me" deals one of them from the flight seed, with `silent: true`, and sets `surprise: true`.
 - **`course: false`** when the pilot switched obstacles off. It means *no obstacles at all* for this flight: neither a
-  mission course, nor the site's own `course`, nor the site's `obstacleTrees` (the Gravel Bar's tree wall). `loadSite`
+  mission course, nor the site's own `course` (the Gravel Bar's tree wall, since 2026-09-22), nor the site's
+  `obstacleTrees` (the Gravel Bar's scattered spruce). `loadSite`
   in `main.js` honours it before anything is planned: it skips `ObstacleField.plan()` (so no course is built and the
   terrain keeps no clearings for one) and `terrain.addObstacleTrees()`. **Merge note:** keep both guards
   (`sc.course === false ? null : ObstacleField.plan(site, sc)` and `site.obstacleTrees && sc.course !== false`) when
@@ -166,7 +167,11 @@ is its 200 m on the wires, so 1,500 m ashore), or the carrier without a hook. A 
 
 *Written 2026-09-18 with the three "In the way" missions (`src/missions/obstacles.js`: power-lines, the-notch,
 harbor-cranes), which are its worked examples. The full reference for every kind is the header of
-`src/world/obstacles.js`; this is the map.*
+`src/world/obstacles.js`; this is the map. On 2026-09-22 all three, and the Gravel Bar's wall, moved to where the
+runway begins (Marc: "the obstacle and then immediately the runway"); the design rule since is that an obstacle
+mission's last obstacle stands at the threshold or the route from it IS the final, and the numbers a mission
+needs (a wall's height against what the airplane can descend at idle, with and without a slip) are measured with a
+scripted pilot before they are written - see the 2026-09-22 section of `docs/HANDOFF.md`.*
 
 ### The pieces
 
@@ -202,8 +207,9 @@ course: {
   are above the threshold elevation, **except a quay's `top`, which is above the water**, and `deck`, which sets
   any compound's base that far above the water (the harbor's `quay top: 4` and its cranes' `base: -4` are the same
   height only because Harbor City's water is 8 m below its threshold). A route's `alt` is the **CG's** height above
-  the threshold elevation. The ground under an approach is rarely at the threshold's height (Moose Creek's notch
-  stands 6 m above the bar): quote heights in a description only after the suite prints them.
+  the threshold elevation. The ground under an approach is rarely at the threshold's height (Harbor City's water is
+  8 m below its threshold; Moose Creek's notch stood on ground 6 m above the bar until it moved onto the bar's own
+  flat on 2026-09-22): quote heights in a description only after the suite prints them.
 - **Names** read "Hit " + name in the debrief: give them their article (`'the lowered crane boom'`, `'a pylon'`).
 - **A new kind** is one function in `BUILD` using the `Placer` (`box`, `beam`, `cyl`, `cap`, `wire`, `light`,
   `keep`); the look draws whatever volumes it makes, by their `look` (`building`, `plain`, `hull`, `container`,
@@ -268,7 +274,10 @@ join: Harbor Cranes over ten seeds landed at 383-768 fpm (median 535) with the r
 (median 374) with the approach trim, against 283-529 (median 424) for a stock straight-in Autoland in the same
 wind. The Skylark and the Trailblazer keep the spawn's trim (the approach trim made the Skylark land harder and the
 Trailblazer float 150-200 m into Moose Creek's 340 m bar). The Condor still wants a straight final of 2 km or more
-after the last obstacle for its best landings.
+after the last obstacle for its best landings - and since 2026-09-22 Harbor Cranes does not give it one: its route
+ends in an S-turn (`sCurve()` in util.js, two 1,147 m arcs, 27 degrees at 146 kt) that rolls out 400 m from the
+threshold on the glide path, and the stock Autoland lands that crabbed in the mission's 70-degree wind (81 / 84 on
+seeds 307 / 4271, the side-load and sink lines). That is the autopilot's landing, not the mission's ceiling.
 
 What the suite proves it flies: the three missions on two seeds each; and, over a tower, a mast or a tree line
 standing on the straight-in path, a descent of 7-10 degrees onto the final in the Condor (a 150 m tower, 7.5
