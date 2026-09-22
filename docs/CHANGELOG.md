@@ -5,7 +5,7 @@ details behind each entry live in `docs/PHYSICS.md`.
 
 ## 2026-09-22 (later) - no boxes: the obstacle is the rule
 
-Build **2026-09-22T20:11:46Z** (not deployed yet). Marc, playing the morning's build: Power Lines
+Build **2026-09-22T20:11:46Z**, live the same afternoon. Marc, playing the morning's build: Power Lines
 "you spawn really far and low", and The Notch "shouldn't have a box that you're supposed to fly
 through ... force the user to fly through the obstacle because there's no other easier way to do it".
 
