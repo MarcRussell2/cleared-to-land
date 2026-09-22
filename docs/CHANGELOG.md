@@ -5,7 +5,7 @@ details behind each entry live in `docs/PHYSICS.md`.
 
 ## 2026-09-22 - the obstacle, then the runway
 
-Build **2026-09-22T18:16:13Z** (not deployed yet). Four missions and five failures rearranged so the
+Build **2026-09-22T18:16:13Z**, live the same day. Four missions and five failures rearranged so the
 thing in the way is where the runway begins, on Marc's word after playing them: "it should be the
 obstacle and then immediately the runway".
 

@@ -171,7 +171,7 @@ harbor-cranes), which are its worked examples. The full reference for every kind
 runway begins (Marc: "the obstacle and then immediately the runway"); the design rule since is that an obstacle
 mission's last obstacle stands at the threshold or the route from it IS the final, and the numbers a mission
 needs (a wall's height against what the airplane can descend at idle, with and without a slip) are measured with a
-scripted pilot before they are written - see the 2026-09-22 section of `docs/HANDOFF.md`.*
+scripted pilot before they are written - see the 2026-09-22 entry of `docs/CHANGELOG.md`.*
 
 ### The pieces
 
