@@ -15,17 +15,19 @@ import { sCurve } from './util.js';
 // ------------------------------------------------------------------ the Moose Creek Notch site
 // The gravel bar of Moose Creek (SITES.gravelbar: the same valley, bar and scattered spruce) without its tree wall at
 // the end of the gravel. The Notch mission grows that wall into a forest edge in its own course (below), so the
-// site on its own is just the bar (its aim point is 120 m in, where a landing out of the notch can first touch): nothing else that flies here (free flight, Autoland, the look and perf tools)
+// site on its own is just the bar (its aim point is 170 m in, where a landing out of the notch and the jink onto the
+// strip can first touch): nothing else that flies here (free flight, Autoland, the look and perf tools)
 // meets a wall it cannot see a way through. `missionOnly`: a site that exists for a mission; the free-flight picker
 // should leave it out (the new home menu honours it; the old menu lists every site).
-const NOTCH_V = -16, NOTCH_W = 30, NOTCH_U = -6;
+const NOTCH_V = -28, NOTCH_W = 30, NOTCH_U = -6;
 const notchbar = {
   id: 'notchbar', name: 'Moose Creek Notch', kind: 'bush', missionOnly: true,
   terrain: { style: 'mountain', seed: 61, size: 14000, res: 400, elevation: 520, waterLevel: 516, valleyWidth: 1400, trees: 0.9, treeArea: 4500, snowLine: 1900 },
-  runways: [{ x: 0, z: 0, heading: 0, length: 340, width: 14, surface: 'gravel', elevation: 520, name: '36', nameRecip: '18', papi: false, ils: false, lights: false, windsock: true, markers: true, aimDistance: 120, flatWidth: 60, flatMargin: 120 }],
+  runways: [{ x: 0, z: 0, heading: 0, length: 340, width: 14, surface: 'gravel', elevation: 520, name: '36', nameRecip: '18', papi: false, ils: false, lights: false, windsock: true, markers: true, aimDistance: 170, flatWidth: 60, flatMargin: 120 }],
   course: {
     // the valley's scattered spruce, where Moose Creek Bar has them (its x -> v, z -> -u)
-    obstacles: [[-34, 260, 1.1], [45, 320, 1.2], [22, 420, 1.0], [-48, 470, 1.1], [-25, -420, 1.2], [40, -380, 1.1]].map(([x, z, s]) => ({ kind: 'tree', u: -z, v: x, scale: s })),
+    // (the one that stood at x -34, z 260 moved to -70, 240 on 2026-09-22: it was on the run-in to the notch)
+    obstacles: [[-70, 240, 1.1], [45, 320, 1.2], [22, 420, 1.0], [-48, 470, 1.1], [-25, -420, 1.2], [40, -380, 1.1]].map(([x, z, s]) => ({ kind: 'tree', u: -z, v: x, scale: s })),
   },
 };
 
@@ -36,22 +38,25 @@ export const OBSTACLES_SITES = { notchbar };
 // hundred metres of the approach). A line of 34 m lattice pylons crosses the approach diagonally right before the
 // threshold, 120 m out over the centreline; mid-span its lowest conductors hang 14.5 m above the ground, its middle
 // pair 21 m and its earth wire 28.7 m. A 10 m pole line runs along the road 230 m out, before the pylons. The start
-// is level at 14.5 m, the height of the lowest wires: stay there and you meet them. Over the top means about 40 m up
-// over the threshold and a landing from there (idle, full flap, a slip; RoutePilot touches down 280-310 m in); under
-// means below about 11 m (the fin stands 2.4 m over the CG) between the pylons, wings level. The stock 3-degree path is
-// 20.6 m up there, so a straight-in on the glideslope hits the wires. (Until 2026-09-22 the pylons stood 600 m out and
-// the pilot flew a normal final after them; Marc: "the obstacle and then immediately the runway".)
+// is an ordinary one, 900 m out on the 3-degree glideslope - which runs 20.6 m up at the pylons, among the wires: the
+// path you are on hits them (the stock Autoland does, proven), so the mission is the decision. Over the top means
+// levelling off at 40 m and a landing from 40 m over the threshold (idle, full flap, a slip; RoutePilot touches down
+// 270-290 m in); under means below about 11 m (the fin stands 2.4 m over the CG) between the pylons, wings level -
+// and the pole line's wires at 10 m, 110 m before that, leave a slot of about four metres to thread. (Until
+// 2026-09-22 the pylons stood 600 m out and the pilot flew a normal final after them; on the first cut of the move
+// the start was still 2.6 km out, level at wire height, 50 ft up for two kilometres - Marc: "you spawn really far and
+// low"; now 900 m on the glideslope.)
 const powerLines = {
   id: 'power-lines', n: 36, title: 'Power Lines', group: 'obstacles', difficulty: 3, tags: ['obstacles', 'low'],
   aircraft: 'skylark', site: 'ridgefield', time: 7.8, vis: 4500,
-  desc: 'Scud-running at 50 ft under the morning murk, and the county\'s high-voltage line crosses the approach right in front of the threshold, 34-metre pylons and all. Its wires sag to between 15 and 29 m over the centerline, so the lowest one is exactly where you are. Over the top means 130 ft over the numbers and a dive at 1,600 m of runway; under means 35 ft with a pylon either side.',
+  desc: 'Half a mile out on a normal approach, and the county\'s high-voltage line crosses the approach right in front of the threshold, 34-metre pylons and all. The glideslope you are on runs straight through its wires, which hang between 15 and 29 m over the centerline. Over the top means 130 ft over the numbers and a dive at 1,600 m of runway; under means 35 ft between the pylons, after a four-metre slot over the pole line by the road.',
   tips: [
-    'Climb as soon as you see the pylons: full power and a gentle pull, up to about 130 ft. A Skylark climbs 500 feet a minute, so start early. The pole line by the road comes first, 10 m tall; you clear it as you are.',
-    'Cross the wires where the orange marker balls are, with room to spare, then throttle to idle, full flap and push: you are 40 m up over the threshold with the aiming bars 250 m ahead. A slip (rudder one way, aileron the other) gets you down without the speed.',
-    'Under is the other way: duck to 35 ft over the ground between the pylons, wings level, with the runway straight ahead. Either way there is 1,600 m to stop in, so a long landing is fine; a crooked one is not.',
+    'Decide now. Over: full power and level off at 130 ft, well before the pylons, and hold it until the orange marker balls are behind you. A Skylark climbs 500 feet a minute, so there is no time to think about it twice.',
+    'Over the wires, throttle to idle, full flap and push: you are 40 m up over the threshold with the aiming bars 250 m ahead. A slip (rudder one way, aileron the other) gets you down without the speed.',
+    'Under: come down early to about 40 ft, thread the slot over the 10 m pole line by the road, then hold 35 ft and wings level between the pylons. There is 1,600 m to stop in, so a long landing is fine; a crooked one is not.',
   ],
   wind: { rel: 25, speed: 8, turb: 0.2 }, weight: 'normal',
-  spawn: { u: -2600, v: 0, alt: 14.5, gamma: 0, flap: 0.333, speedKt: 72, fixed: true },
+  spawn: { u: -900, v: 0, flap: 0.333, speedKt: 72, fixed: true },
   failures: [], scoring: { type: 'runway' },
   course: {
     obstacles: [
@@ -59,10 +64,10 @@ const powerLines = {
       { kind: 'powerline', type: 'pole', from: { u: -230, v: -550 }, to: { u: -230, v: 550 }, spans: 11, h: 10, name: 'the power lines along the road' },
     ],
   },
-  // RoutePilot: over the wires at 40 m, then steeply down onto the runway (tools/fly-mission.mjs power-lines --node:
-  // 98 and 93 on seeds 307 and 4271, touching down 280-310 m in)
+  // RoutePilot: level off at 40 m, over the wires, then steeply down onto the runway (tools/fly-mission.mjs
+  // power-lines --node: 100 and 75 on seeds 307 and 4271, touching down 270-290 m in)
   route: [
-    { u: -1800, v: 0, alt: 48, kt: 70 },
+    { u: -480, v: 0, alt: 40, kt: 70 },
     { u: -180, v: 0, alt: 40, kt: 68, over: true },
     { u: -70, v: 0, alt: 40, kt: 66, over: true },
     { u: 120, v: 0, alt: 8, kt: 63 },
@@ -70,11 +75,11 @@ const powerLines = {
   hint: (c) => {
     if (c.ac.onGround) return null;
     const agl = c.ra * 0.3048;
-    if (c.u < -320) return 'Power lines at the threshold, 15 to 29 m up: over the top at 130 ft, or under at 35. Decide early; the pole line by the road comes first.';
+    if (c.u < -480) return 'The glideslope runs through the wires at the threshold. Over the top at 130 ft, or under at 35: decide now.';
     if (c.u < -130) {
       if (agl > 31) return 'Over the top: hold this height until the marker balls are behind you.';
-      if (agl < 11) return 'Under the wires: below 35 ft, wings level, between the pylons.';
-      return `Power lines in ${Math.max(0, Math.round((-120 - c.u) / 10) * 10)} m at wire height: climb to 130 ft, above the pylon tops, or get down under 35 ft, now.`;
+      if (agl < 12) return c.u < -240 ? 'Under: the pole line by the road first, 10 m tall, then stay below 35 ft.' : 'Under the wires: below 35 ft, wings level, between the pylons.';
+      return `Power lines in ${Math.max(0, Math.round((-120 - c.u) / 10) * 10)} m, at your height: climb to 130 ft, above the pylon tops, or get down under 35 ft, now.`;
     }
     if (c.u < 40) return agl > 20 ? 'Over the wires. Idle, full flap, push: the runway is right under you.' : 'Under. Wings level, hold it, and land straight ahead.';
     return null;
@@ -82,57 +87,61 @@ const powerLines = {
 };
 
 // ------------------------------------------------------------------ 37: The Notch
-// Moose Creek Notch (above) with the forest edge standing right at the end of the gravel: three rows of spruce 40 m
-// tall (scale 1.6), 220 m wide, the last row's trunks at NOTCH_U on the bar's own flat, and one notch cut through it
-// 16 m left of the centreline. All of it is course trees: one instanced draw, swept collision against the trunk and
-// the crown as drawn. Out of the notch the airplane is over the bar, 16 m left of the strip and about 15 m up, with
-// 340 m left: a jink right, idle, and down; the site's aim point is 120 m in, the earliest a landing out of the notch
-// can touch. (Until 2026-09-22 the wall stood 150 m before the bar, on ground 5-7 m above it, and the pilot lined up
-// on the strip after it like any approach; Marc: "you fly through the trees and the runway's already passing you".)
+// Moose Creek Notch (above) with a forest edge of giants standing right at the end of the gravel: three rows of
+// spruce about 85 m tall (scale 3.4; Sitka spruce reach 96 m), 240 m wide, the last row's trunks at NOTCH_U on the
+// bar's own flat, and one notch cut through the canopy 30 m wide, NOTCH_V (28 m) left of the centreline - the crown
+// of the giant standing just right of the centreline covers the whole strip. No gate: the notch is the only way onto
+// the bar because there is no other. Over the top there is no bar left - from 90 m up the Trailblazer at idle touches
+// 340 m in and overruns, and even a full forward slip touches 260-275 m in and overruns (measured, 2026-09-22); a
+// straight-in hits a tree; round the wall's end is 120 m of side-step with none to do it in. Out of the notch the
+// airplane is over the bar 28 m left of the strip and about 15 m up: a jink right onto the gravel, idle, and down;
+// the site's aim point is 170 m in. RoutePilot lands it 83 / 89 on seeds 307 / 4271 (touchdown 192-208 m, stopped
+// 271-282): a landing, not a pretty one, which is the mission. (2026-09-22, second cut: the first put the wall at the
+// threshold with an orange gate in a 40 m wall; Marc: "you shouldn't have a box that you're supposed to fly through
+// ... force the user to fly through the obstacle because there's no other easier way".)
 const theNotch = {
   id: 'the-notch', n: 37, title: 'The Notch', group: 'obstacles', difficulty: 5, tags: ['obstacles', 'bush'],
   aircraft: 'trailblazer', site: 'notchbar', time: 8.6, vis: 30000,
-  desc: 'The spruce in front of Moose Creek Bar have grown into a wall 40 metres tall and three rows deep, standing right at the end of the gravel, and the only way through is a notch 30 metres wide, 16 metres left of the strip. Come out of it low with the wings level and the bar already under you; then a jink right, power off, and down onto what is left of 340 m. Over the top counts as not doing the mission.',
+  desc: 'The spruce in front of Moose Creek Bar are giants, 85 metres tall and three rows deep, standing right at the end of the gravel, and the only way onto the bar is a notch in the canopy 30 metres wide, just left of the strip. There is no going over: from 90 m up there is no bar left to land on. Through the notch low, a jink right onto the gravel, power off, and down onto what is left of 340 m.',
   tips: [
-    'Full flap (F twice), 50 kt, and line up on the orange gate in the notch from a long way out. It is 16 m left of the centerline; your wings are 11 m.',
-    'Through the gap at 30 to 50 ft above the bar, wings level. The crowns are widest at the bottom of the green, so low and centred is the safe line.',
-    'Out of the notch the strip is beside you: a quick jink right onto the gravel, power to idle, push, and put it down by the 120 m mark. Brake gently (Space) or it will nose over.',
+    'Full flap (F twice), 50 kt, and line up on the notch from a long way out: the gap in the canopy 28 m left of the strip, its trunks 50 m apart below it. Your wings are 11 m.',
+    'Through it at 40 to 60 ft above the bar, wings level, and do not look up: the crowns start 90 ft up. Under them it is a corridor between trunks.',
+    'Out of the notch the strip is beside you: roll right at once, about 25 degrees, and back level on the centerline with the power at idle; the wheels want to be on by the 170 m mark. Brake gently (Space) or it will nose over.',
   ],
   wind: { rel: 25, speed: 6, turb: 0.3 }, weight: 'normal',
   spawn: { u: -850, v: -12, alt: 62, gamma: -3, flap: 1, speedKt: 52, fixed: true },
   failures: [], scoring: { type: 'bush' },
   course: {
     obstacles: [
-      { kind: 'treeWall', u: NOTCH_U, from: -110, to: 110, step: 9, scale: 1.6, rows: 3, rowGap: 13, jitter: 3, seed: 7, gap: { v: NOTCH_V, w: NOTCH_W } },
+      { kind: 'treeWall', u: NOTCH_U, from: -120, to: 120, step: 9, scale: 3.4, rows: 3, rowGap: 14, jitter: 3, seed: 7, gap: { v: NOTCH_V, w: NOTCH_W } },
     ],
-    gates: [{ u: NOTCH_U - 13, v: NOTCH_V, y: 17, w: 20, h: 16, name: 'the notch', required: true }],
     // keep the decorative forest off the line to the notch (the run-in over the ground before the bar's flat)
     clear: [{ u: -100, v: NOTCH_V, r: 40 }, { u: -60, v: NOTCH_V, r: 35 }],
   },
-  // RoutePilot: the line to the notch, through it at 17.5 m, then the jink right and down to the 120 m aim point
-  // (tools/fly-mission.mjs the-notch --node: 97 and 94 on seeds 307 and 4271, touching down 161-165 m in)
+  // RoutePilot: the line to the notch, through it at 15 m, then the jink right, slowing to 45 kt, to the 170 m aim
   route: [
     { u: -520, v: NOTCH_V, alt: 34, kt: 52 },
     { u: -120, v: NOTCH_V, alt: 21, kt: 50, over: true },
-    { u: NOTCH_U - 13, v: NOTCH_V, alt: 17.5, kt: 50, over: true },
-    { u: 30, v: -12, alt: 11, kt: 49 },
-    { u: 80, v: -4, alt: 6, kt: 48 },
+    { u: NOTCH_U - 13, v: NOTCH_V, alt: 15, kt: 50, over: true },
+    { u: 40, v: -20, alt: 9.5, kt: 48 },
+    { u: 90, v: -6, alt: 5.5, kt: 46 },
+    { u: 140, v: 0, alt: 3.5, kt: 45 },
   ],
   // The line to the notch: 12 m over the ground at the wall, and a 4-degree slope back from it.
   hint: (c) => {
     if (c.ac.onGround) return null;
-    // (the wall's three rows stand from about u -40 to 0, crowns included)
-    if (c.u < -42) {
+    // (the wall's three rows stand from about u -48 to 8, crowns included)
+    if (c.u < -50) {
       const off = c.v - NOTCH_V;
-      if (Math.abs(off) > 6) return `Line up on the notch: ${Math.round(Math.abs(off))} m ${off > 0 ? 'left' : 'right'}. It is the gap with the orange gate.`;
+      if (Math.abs(off) > 6) return `Line up on the notch: ${Math.round(Math.abs(off))} m ${off > 0 ? 'left' : 'right'}. It is the gap in the canopy, left of the strip.`;
       const agl = c.ra * 0.3048, want = 12 + (NOTCH_U - 13 - c.u) * 0.07;
       if (agl > want + 12) return 'High for the notch: power back and come down, 12 m over the ground at the trees.';
       if (agl < want - 8) return 'Low: a little power.';
       return 'On the notch. Wings level, 50 kt, 12 m over the ground at the trees.';
     }
-    if (c.u < 0) return 'In the notch. Wings level, hold it steady.';
-    if (c.u < 40) return 'Through! Jink right onto the gravel, power to idle.';
-    if (c.u < 140) return 'Push it down: touch down by the 120 m mark, then brake gently.';
+    if (c.u < 8) return 'In the notch. Wings level, hold it steady.';
+    if (c.u < 60) return 'Through! Roll right onto the gravel, power to idle.';
+    if (c.u < 190) return Math.abs(c.v) > 8 ? `The strip: ${Math.round(Math.abs(c.v))} m ${c.v > 0 ? 'left' : 'right'}. Level and down by the 170 m mark.` : 'Wings level, push it down: touch down by the 170 m mark, then brake gently.';
     return null;
   },
 };

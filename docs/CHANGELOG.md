@@ -3,6 +3,37 @@
 Newest first. Player-facing lines first in each entry, then the developer notes. The flight-model
 details behind each entry live in `docs/PHYSICS.md`.
 
+## 2026-09-22 (later) - no boxes: the obstacle is the rule
+
+Build **2026-09-22T20:11:46Z** (not deployed yet). Marc, playing the morning's build: Power Lines
+"you spawn really far and low", and The Notch "shouldn't have a box that you're supposed to fly
+through ... force the user to fly through the obstacle because there's no other easier way to do it".
+
+- **The Notch.** No gate. The spruce are giants now, 85 m tall, and the notch in their canopy is
+  28 m left of the strip, with the crown of the tree beside the centerline covering the whole strip:
+  through the notch is the only way onto the bar. Over the top there is no bar left (from 90 m up
+  the Trailblazer touches 340 m in, and even a full slip touches 260 m in and overruns); straight
+  in is a tree; round the end is 120 m of side-step with nowhere to do it. Out of the notch: a
+  jink right onto the gravel, idle, and down by the 170 m mark.
+- **Power Lines.** The start is an ordinary approach, 900 m out on the glideslope, instead of
+  2.6 km out at 50 ft. The glideslope runs through the wires at the threshold, so the mission is
+  the decision: over the top at 130 ft and a dive, or under at 35 ft after a four-metre slot over
+  the pole line by the road.
+
+### Developer notes
+
+- `src/missions/obstacles.js` (the two missions; the Moose Creek Notch site's aim point 170 m and
+  one scattered spruce moved off the run-in) and `tools/test-obstacles.mjs` (the-notch: no gate, an
+  85 m wall whose last row covers the strip, over the top must end off the bar; power-lines: the
+  start on the glideslope, a level run at wire height, the spawn's clearance from the path height).
+  Nothing else. `npm test` green, all suites; both flown in the real page.
+- The rule, from Marc: an obstacle mission's obstacle forces the line by itself - no gate - and
+  the proof is the wrong lines ending badly (`tools/test-obstacles.mjs` section 7), not a box the
+  pilot must cross. Harbor Cranes (three gates) and the city ladder (gates everywhere) still use
+  boxes; their rework waits on his word (an idea for the harbor: a basin with cranes on both quays,
+  every boom lowered, and the airliner started under the first one - it cannot climb out between
+  booms, so the lane is the only way).
+
 ## 2026-09-22 - the obstacle, then the runway
 
 Build **2026-09-22T18:16:13Z**, live the same day. Four missions and five failures rearranged so the

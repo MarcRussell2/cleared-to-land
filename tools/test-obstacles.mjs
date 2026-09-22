@@ -199,7 +199,9 @@ for (const sc of OBSTACLES_MISSIONS) {
   const rs = resolveScenario(sc, makeRng(307), { approach: 'short' });
   const rw = site.runways[0], h = rw.heading * DEG, dir = { x: Math.sin(h), z: -Math.cos(h) }, right = { x: -dir.z, z: dir.x };
   const sp = rs.spawn, sx = rw.x + dir.x * sp.u + right.x * sp.v, sz = rw.z + dir.z * sp.u + right.z * sp.v;
-  const clr = field.clearance({ x: sx, y: rw.elevation + sp.alt + 5, z: sz }, 3000);
+  // (a spawn with no `alt` starts on the glide path: its height there, as main.js spawn() computes it)
+  const spawnAlt = sp.alt != null ? sp.alt : ((rw.aimDistance || Math.min(400, rw.length * 0.15)) - sp.u) * Math.tan((rw.gsAngle || 3) * DEG);
+  const clr = field.clearance({ x: sx, y: rw.elevation + spawnAlt + 5, z: sz }, 3000);
   ok(clr.d > 40, `${sc.id}: the spawn must be at least 40 m from any solid (${clr.d.toFixed(0)} m)`);
   // every gate can be flown through anywhere inside its frame
   let traps = 0, tried = 0;
@@ -233,25 +235,29 @@ for (const sc of OBSTACLES_MISSIONS) {
   // on the glideslope hits them (section 7 flies it), so the mission is over the top or under
   const pathAt = (250 + cross) * Math.tan(3 * DEG) + 1.2;
   ok(pathAt > agl[0] + 2 && pathAt < agl[agl.length - 1] - 2, `power-lines: the glideslope passes ${pathAt.toFixed(1)} m up at the crossing, among the wires (${agl[0].toFixed(1)} to ${agl[agl.length - 1].toFixed(1)})`);
-  const sp = sc.spawn, spawnAgl = sp.alt;
-  ok(Math.abs(spawnAgl - agl[0]) < 1.5, `power-lines: the start height (${spawnAgl} m) is the height of the lowest wires (${agl[0].toFixed(1)}): level flight meets them`);
-  say(`power-lines: wires over the centreline ${agl.map((x) => x.toFixed(1)).join(' / ')} m above the ground, ${cross.toFixed(0)} m out; start at ${spawnAgl} m`);
+  const sp = sc.spawn;
+  ok(sp.alt == null && sp.gamma == null && sp.u === -900, `power-lines: the start is an ordinary one, 900 m out on the glideslope (u ${sp.u}, alt ${sp.alt})`);
+  say(`power-lines: wires over the centreline ${agl.map((x) => x.toFixed(1)).join(' / ')} m above the ground, ${cross.toFixed(0)} m out; the glideslope ${pathAt.toFixed(1)} m up there; start 900 m out on it`);
 }
 {
   const sc = missionOf('the-notch'), { course } = planned(sc);
-  // (the wall's three rows stand at u -6, -19 and -32, on the bar's own flat: world z 6..32)
-  const crowns = course.prims.filter((p) => p.look === 'tree' && Math.abs(p.z - 19) < 40);
-  const nv = -16;
+  // (the wall's three rows stand at u -6, -20 and -34, on the bar's own flat: world z 6..34; no gate - the notch is
+  // the only way because the wall cannot be flown over onto 340 m, section 7 proves it)
+  const crowns = course.prims.filter((p) => p.look === 'tree' && Math.abs(p.z - 20) < 45);
+  const nv = -28;
   const edge = Math.min(...crowns.map((p) => Math.abs(p.x - nv) - p.r0));
   const hMin = Math.min(...crowns.map((p) => p.y1 - p.base)), hMax = Math.max(...crowns.map((p) => p.y1 - p.base));
   const topMax = Math.max(...crowns.filter((p) => Math.abs(p.x - nv) < 45).map((p) => p.y1 - 520));
   const uMax = Math.max(...crowns.map((p) => -p.z + p.r0));
+  const covers = crowns.some((p) => Math.abs(p.z - 6) < 8 && p.x - p.r0 <= -7 && p.x + p.r0 >= 7);
+  ok(course.gates.length === 0, 'the-notch: no gate (the obstacle forces the line by itself)');
   ok(edge >= 14.9, `the-notch: the notch is at least 30 m wide between the crowns (${(2 * edge).toFixed(1)} m)`);
-  ok(hMin > 36 && hMax < 44, `the-notch: the wall's spruce are about 40 m tall (${hMin.toFixed(1)}..${hMax.toFixed(1)})`);
-  ok(topMax > 38 && topMax < 46, `the-notch: beside the notch the wall stands about 40 m above the bar (${topMax.toFixed(1)} m at its highest)`);
-  ok(uMax > -8 && uMax < 4, `the-notch: the last row's crowns reach the threshold (to u ${uMax.toFixed(1)})`);
-  ok(crowns.length >= 55, `the-notch: three rows of spruce (${crowns.length} near the notch line)`);
-  say(`the-notch: ${crowns.length} spruce in the wall, ${hMin.toFixed(0)}-${hMax.toFixed(0)} m tall, tops to ${topMax.toFixed(0)} m over the bar, crowns to u ${uMax.toFixed(1)}; notch ${(2 * edge).toFixed(1)} m wide at the crown base`);
+  ok(hMin > 78 && hMax < 92, `the-notch: the wall's spruce are about 85 m tall (${hMin.toFixed(1)}..${hMax.toFixed(1)})`);
+  ok(topMax > 78 && topMax < 92, `the-notch: beside the notch the wall stands about 85 m above the bar (${topMax.toFixed(1)} m at its highest)`);
+  ok(uMax > 4 && uMax < 12, `the-notch: the last row's crowns reach past the threshold (to u ${uMax.toFixed(1)})`);
+  ok(covers, 'the-notch: a crown in the last row covers the whole strip, so the notch is beside the strip, not over it');
+  ok(crowns.length >= 50, `the-notch: three rows of spruce (${crowns.length} near the notch line)`);
+  say(`the-notch: ${crowns.length} spruce in the wall, ${hMin.toFixed(0)}-${hMax.toFixed(0)} m tall, tops to ${topMax.toFixed(0)} m over the bar, crowns to u ${uMax.toFixed(1)}; notch ${(2 * edge).toFixed(1)} m wide at the crown base, no gate`);
 }
 {
   const sc = missionOf('harbor-cranes'), { course } = planned(sc);
@@ -772,7 +778,7 @@ function budgetOf(built) {
     const lastRow = crowns.filter((p) => Math.abs(p.z - 10) < 3).map((p) => p.x).sort((a, b) => a - b);
     const gap = Math.max(...lastRow.map((x, i) => (i ? x - lastRow[i - 1] : 0)));
     ok(crowns.length >= 30 && hMin > 32 && hMax < 38 && uMax > -8 && uMax < -2 && gap < 9, `gravelbar: the wall is ${crowns.length} spruce ${hMin.toFixed(0)}-${hMax.toFixed(0)} m tall, crowns to u ${uMax.toFixed(1)}, no gap wider than ${gap.toFixed(1)} m in its last row`);
-    ok(SITES.gravelbar.runways[0].aimDistance === 130 && SITES.notchbar.runways[0].aimDistance === 120, 'the bush aim points: Gravel Bar 130 m, Moose Creek Notch 120 m');
+    ok(SITES.gravelbar.runways[0].aimDistance === 130 && SITES.notchbar.runways[0].aimDistance === 170, 'the bush aim points: Gravel Bar 130 m, Moose Creek Notch 170 m');
     say(`gravelbar: ${crowns.length} spruce in the wall, ${hMin.toFixed(0)}-${hMax.toFixed(0)} m tall, crowns to u ${uMax.toFixed(1)}`);
   }
   say('mission data: ids, n, fields, 2-3 sentence descriptions, three tips, touch words; only the Gravel Bar among the originals builds a field');
@@ -787,15 +793,16 @@ function budgetOf(built) {
     ['the-notch', { seed: 307 }, 'land'], ['the-notch', { seed: 4271 }, 'land'],
     ['harbor-cranes', { seed: 307 }, 'land'], ['harbor-cranes', { seed: 4271 }, 'land'],
     // the challenge is real: the obvious wrong lines end in the obstacle
-    // (level at the start height, the lowest wires' 14.5 m; and the stock straight-in on the glideslope, 20.6 m up there)
-    ['power-lines', { seed: 307, route: [{ u: 200, v: 0, alt: 14.5, kt: 72 }] }, 'Hit the power lines'],
+    // (the stock straight-in on the glideslope, 20.6 m up at the pylons among the wires; and a level run at the
+    // middle pair's own height)
     ['power-lines', { seed: 307, pilot: 'autoland' }, 'Hit the power lines'],
+    ['power-lines', { seed: 307, route: [{ u: -500, v: 0, alt: 21, kt: 72 }, { u: 200, v: 0, alt: 21, kt: 72 }] }, 'Hit the power lines'],
     ['the-notch', { seed: 307, pilot: 'autoland' }, 'Hit a tree'],
     ['harbor-cranes', { seed: 307, route: [{ u: -4500, v: 1290, alt: 55 }, { u: -3850, v: 1170, alt: 48 }, { u: -2300, v: 1170, alt: 44 }] }, /^Hit (the lowered crane boom|a container crane)$/],
     // the Gravel Bar's wall at the threshold: the stock straight-in (obstacle-blind) flies into it
     ['gravel', { seed: 307, pilot: 'autoland' }, 'Hit a tree'],
-    // over the top of the notch: a landing, but not the mission
-    ['the-notch', { seed: 307, route: [{ u: -520, v: -3, alt: 62, kt: 50 }, { u: -6, v: 0, alt: 56, kt: 50 }] }, 'missed'],
+    // over the top of the notch's giants: no bar left to land on (the wall is the rule; there is no gate)
+    ['the-notch', { seed: 307, route: [{ u: -700, v: -3, alt: 103, kt: 52 }, { u: -46, v: 0, alt: 93, kt: 50, over: true }, { u: 4, v: 0, alt: 93, kt: 50, over: true }, { u: 200, v: 0, alt: 6, kt: 48 }] }, 'overrun'],
     // over the boom instead of under it: the mission without the bonus
     ['harbor-cranes', { seed: 307, route: [{ u: -4500, v: 1290, alt: 55 }, { u: -3850, v: 1170, alt: 70 }, { u: -2400, v: 1170, alt: 72 }, ...sCurve(-2400, 1170, -400, 0, 60, 46, 146, 40)] }, 'land-nobonus'],
   ];
@@ -809,9 +816,10 @@ function budgetOf(built) {
       ok(!r.crashed && r.touchdown && allRequired && r.points >= 50, `${tag}: must land with every required gate (${r.points} ${r.grade}; ${r.reason}; gates ${gates})`);
       if (expect === 'land-nobonus') ok(r.gates.some((g) => /under the boom: missed/.test(g)) && !r.lines.some((l) => /\(\+10\)/.test(l)), `${tag}: over the boom is the mission without the bonus`);
       console.log(`PASS ${tag}: ${r.points} ${r.grade}, touchdown ${r.touchdown ? `${r.touchdown.u} m in, ${r.touchdown.fpm} fpm, ${r.touchdown.kt} kt` : '-'}; ${gates || 'no gates'}; closest ${r.closest}`);
-    } else if (expect === 'missed') {
-      ok(!r.crashed && r.touchdown && r.points <= MISSION_CAP && r.grade === 'MISSED GATE', `${tag}: over the top lands but fails the mission (${r.points} ${r.grade}; ${gates})`);
-      console.log(`PASS ${tag}: over the top ${r.points} ${r.grade} (${gates})`);
+    } else if (expect === 'overrun') {
+      const bad = r.crashed || r.lines.some((l) => /OVERRAN THE END|LEFT THE RUNWAY/.test(l));
+      ok(bad, `${tag}: over the top must end off the bar (${r.crashed ? r.reason : r.points + ' ' + r.grade + ', touchdown ' + (r.touchdown ? r.touchdown.u : '-') + ' m'})`);
+      console.log(`PASS ${tag}: over the top ends ${r.crashed ? r.reason : r.lines.find((l) => /^Rollout/.test(l)) + ' (touchdown ' + r.touchdown.u + ' m)'}`);
     } else {
       ok(r.crashed && (expect instanceof RegExp ? expect.test(r.reason) : r.reason === expect), `${tag}: the wrong line must end "${expect}" (got ${r.crashed ? r.reason : 'no crash: ' + r.points + ' ' + r.grade})`);
       console.log(`PASS ${tag}: the wrong line ends "${r.reason}" after ${r.t} s (${r.part})`);
@@ -895,6 +903,7 @@ function budgetOf(built) {
   // Moose Creek Notch on its own is just the bar: free flight there, straight in on Autoland, lands
   const site = SITES.notchbar;
   ok(site.missionOnly === true && !(site.course.obstacles || []).some((o) => o.kind === 'treeWall'), 'Moose Creek Notch is mission-only and its tree wall belongs to the mission');
+  ok(!(site.course.obstacles || []).some((o) => Math.abs(o.v - -28) < 12 && o.u > -400 && o.u < 0), 'nothing of the site stands on the run-in to the notch');
   const free = makeFreeFlight({ site: 'notchbar', aircraft: 'trailblazer', time: 9, vis: 30000, windDir: 0, windSpeed: 4, windGust: 0, turb: 0.1, weight: 'normal', dist: 900, failures: [] });
   const r = await simulate('free', { scenario: free, seed: 307 });
   ok(!r.crashed && r.touchdown, `free flight at Moose Creek Notch, straight in on Autoland, lands (${r.crashed ? r.reason : r.points + ' ' + r.grade})`);
