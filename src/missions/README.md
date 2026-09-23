@@ -330,67 +330,47 @@ degrees at 155 kt), the Skylark and the Trailblazer.
 
 ## The city ladder (Metro City and "The city", n 44-49)
 
-*Written 2026-09-19 with the six missions of `src/missions/city.js`, on the engine above; revised the same week after
-review (the Needle's line and cue, the arc law, the under-gates, the budget test).*
+*Written 2026-09-19 with the six missions of `src/missions/city.js`; rewritten 2026-09-23 when the ladder lost its
+gates (Marc: "no boxes ... force the user to fly through the obstacle because there's no other easier way").*
 
 - **Metro City** (`CITY_SITES.metro`): the coast style, terrain seed 638 and `coastX` 500, found by scanning seeds for
   a coast that crosses the extended centerline (water under it 4 to 7.7 km out, land for the last 4 km). A 3,000 m
-  runway heading north with ILS, lights and PAPI. Its course is the shared skyline: six generated districts (4,542
-  buildings), Checkerboard Hill, the Harbor Bridge, Container Island, a sea wall. **Nothing in it touches the
-  straight-in path** (the 3-degree path is 34 m clear at the closest, checked from 9 km out): free flight, Autoland,
-  the looksheet and perf-probe fly it. Mission-only things (the avenue, the skybridges, the slalom towers, the
-  Needle) live in the missions' courses.
-- **Districts** grow round everything placed by hand: resolveCourse places the hand-placed kinds, then the gates, the
-  `clear` circles and a low route's corridor, and only then the districts, which avoid all of those and the `carve`
-  rectangles. A mission clears the SITE's blocks where its own towers stand with `carve` (its own districts are spared:
-  Downtown's second row stands inside its carve), and gives that ground its own look with `ground` (`avenue`,
-  `plaza`). A district adds coarse keep-out circles (230 m) for the forest instead of one per building (the terrain
-  scans them linearly per tree), and no circle is kept out on the water.
-- **The look** (`src/art/city-look.js`, its facade shader in `src/art/city-facades.js`) is the art department's:
-  Codex's three passes of 2026-09-19 (briefs `docs/briefs/city/city-look.txt`, `city-look-2.txt` and
-  `city-look-3.txt` for the day facades, with the correction `city-look-3b.txt`; all run). The header of
-  city-look.js is the drawing contract, unchanged by those passes, which changed neither the flying nor the budget. `tools/test-obstacles.mjs` section 4 checks the
-  contract (every drawn vertex inside its prim's volume, every prim's drawing filling it, over 17 kinds) and section 10
-  the city's budget on every course a flight at Metro City builds (free flight and the six missions, at three tiers):
-  at most 60 draws, 450k / 250k / 120k triangles a pass, and at most 6 programs of its own **counted by variant** (a
-  material drawn with and without instance colours is two programs; the look compiles 3, and Checkerboard reaches 67
-  of the scene's 70 with the cockpit shown). Shapes that cast a shadow are geometry: the shadow pass never runs a
-  material's onBeforeCompile (the plain look's round frustums, the hill among them, are tapered geometry now).
-- **Gates under something** (the skybridges, the bridge deck) are built by `underGate()`: the CG between a floor and
-  the underside less the Condor's fin (`FIN`, 9.1 m; the hull's fin tops out at 9.02) and half a metre, so a crossing
-  that takes the whole airplane under counts. (They used to stop 12 m under, and a clean pass 2-3 m under a skybridge
-  scored MISSED GATE.) The tips and hints quote those heights from the same numbers (`altFt`, `raFt`).
-- **Routes with arcs** (`arc: 'L' | 'R', r`): see the header of `src/systems/routepilot.js` for the arc law. The arcs
-  have their own roll loop (a bank reference moved at no more than 15 degrees a second, tracked stiffly): the stock
-  loop let a roll to 40 degrees overshoot to 46 and creep back, and the path loop chased the swing. Design the legs
-  either side of an arc tangent to it; S-curves (`sCurve()` in city.js) are two arcs. Switched off and on inside an
-  arc, RoutePilot keeps the arc's own circle (a chord from the airplane would cut inside it).
-- **End a route on Autoland's path, including the CG height** (`onPath(u)` in city.js adds the Condor's 4.1 m), near
-  Vref (146 kt), and let a level run under the path end where it meets it (`meetPath(alt)`). Handovers after short
-  finals land firmer than a long straight-in, and Autoland lands crabbed, so a strong crosswind costs it about 20
-  points whatever the route does: Checkerboard's wind is 11 kt from 25 degrees right (it was 12 gusting 18 from 50,
-  where even a stock straight-in Autoland scored a median of 58 and RoutePilot 47, a third of its landings DAMAGED).
-- **The Needle** (48, and 49's first gate): two lines through the same aim point. The pilot's is a 35-degree turn at
-  150 kt in still air (NEEDLE_R 867 m) from the line the flight starts on; the tips describe it, and the HUD hint is a
-  flight director on it (`needleCue`: a countdown to the roll, then the bank to hold, which the wind moves: 29-33
-  degrees at the eye in both missions' winds). RoutePilot's is a 40-degree turn through the same eye (NEEDLE_R_AP
-  723 m). The gap is 34 m: the Condor's probe footprint is 35.0 m wings level (winglets), 31.3 at 30 degrees, 29.9 at
-  35, 28.2 at 40, 26.3 at 45, and its middle leans about a metre toward the low wing, so the gap's middle sits
-  NEEDLE_LEAN inside the aim point and the gate frame is centred on the aim point. A 33 m gap left a pilot held to
-  the Assist's 35 degrees about a metre at the 29-33 degrees the director asks for. **TIGHTEN LATER** (NEEDLE_GAP,
-  NEEDLE_BANK, NEEDLE_AP_BANK in city.js) once the flight-physics review removes the Assist's bank limit.
-- **What the suite proves** (`tools/test-city.mjs`): RoutePilot on ten seeds per mission (no crash, every gate on nine
-  or more, a median of at least 60), the wrong line into each obstacle, the autopilot switched off and on 300 m
-  before the eye, and a pilot who does only what the HUD hint says, never past 35 degrees: through the eye on every
-  seed in the Needle's wind and on 8 of 10 in the Gauntlet's 18-kt gusts, where the Assist's limit leaves about a
-  metre (RoutePilot, at 40 degrees, gets through on all of them).
-- **Perf** (`tools/perf-probe.mjs`, the RTX 4080, 1920x1080, high, after the review fixes): Checkerboard in the chase
-  view 357 fps median (p95 313), 132 draws (24 in the shadow pass), 456k triangles (112k shadow), 62 programs, GPU
-  1.3 / 2.3 ms at p50 / p95; in the cockpit 345 fps median, p95 44 (GPU p95 22 ms: the spikes the stock heavy
-  challenge's cockpit shows too), 116 draws, 398k triangles, 67 programs of the 70 allowed. Flown in the page, no
-  city mission compiled a shader after its first 0.2 s. Checkerboard is in perf-probe's BUDGET_MATRIX (chase and
-  cockpit): the scene the city's art pass is held to.
-- **Measuring on the Intel proxy**: `--gpu intel` pins an adapter by a LUID that changes at every boot; perf-probe now
-  refuses the run when the page renders on another vendor's GPU. Read the current LUIDs (dxgi EnumAdapters1) and pass
-  `--gpu <high,low>`. The review measured the phone proxy that way (UHD 770, phone medium): Checkerboard 7.0 / 8.0 ms
-  GPU at p50 / p95, 71 fps, loadSite 2,350 ms, against the stock heavy challenge's 7.0 / 9.2 ms, 56 fps, 1,912 ms.
+  runway heading north with ILS, lights and PAPI. Its course is the shared skyline: six generated districts, Checkerboard
+  Hill, the Harbor Bridge, Container Island, a sea wall. **Nothing in it touches the straight-in path** (the 3-degree
+  path is 34 m clear at the closest, checked from 9 km out): free flight, Autoland, the looksheet and perf-probe fly
+  it. Everything a mission is about lives in the mission's own course.
+- **No gates.** Each rung's line is forced by geometry, and each rung starts too low and too close to climb over
+  anything: the Checkerboard's corner is a district of 220-300 m towers with `clear` circles along the turn; Downtown's
+  skybridges are gate buildings (`avenueCourse`: a slab from the archway up to `GATE_TOP`, 500 m) with a 200-320 m
+  second row (`tallRow`) so "over the rooftops beside the avenue" is a wall too; the Slalom is a `canyon()` of 400 m
+  slabs with slotted cross-walls; Under the Bridge is a `viaduct()` whose 128 stays fan from four pylons and cross, a
+  mesh over the deck; the Needle stands at the end of a `crescent()`, a curved canyon along the pilot's circle that
+  narrows to the eye's towers and opens again to the roll-out, with a straight walled mouth before the turn; the
+  Gauntlet chains a Crescent in the bay, the Harbor Bridge (scenery: under it or over the middle of its span), a canyon
+  and the avenue's gate building. The hints read the geometry (`pastEye`, `slotHint`, `gateHint`), never a gate.
+- **Districts** grow round everything placed by hand: resolveCourse places the hand-placed kinds, the `clear` circles
+  and a low route's corridor, and only then the districts, which avoid all of those and the `carve` rectangles. A
+  mission clears the SITE's blocks where its own towers stand with `carve` (its own districts are spared), and gives
+  that ground its own look with `ground` (`avenue`, `plaza`).
+- **The Needle's geometry is a function** - `needleGeom(aimU, mouth)` - so the standalone rung (the eye 1.9 km out, a
+  600 m mouth) and the Gauntlet's (7 km out, 1,600 m) share one director (`needleCue`, the flight director on the
+  pilot's 867 m circle) and one set of numbers: the gap 34 m, the Condor's footprint 35.0 / 31.3 / 29.9 / 28.2 / 26.3 m
+  wings level and banked 30 / 35 / 40 / 45, the gap's middle NEEDLE_LEAN inside the aim point. RoutePilot flies the
+  tighter 723 m circle at 40 degrees through the same eye and starts 42 m to the right of the pilot's line, which is
+  why the mouths are long: it needs the straight to settle (in 18-kt gusts, 1,600 m). **TIGHTEN LATER** (NEEDLE_GAP,
+  NEEDLE_BANK, NEEDLE_AP_BANK) once the flight-physics review removes the Assist's bank limit.
+- **Routes with arcs** (`arc: 'L' | 'R', r`): see the header of `src/systems/routepilot.js` for the arc law. Design
+  the legs either side of an arc tangent to it; S-curves (`sCurve()`) are two arcs. **End a route on Autoland's path,
+  including the CG height** (`onPath(u)` adds the Condor's 4.1 m), near Vref; a low leg (an avenue, a canyon) climbs
+  onto the path before the handover or Autoland lands it firm. Autoland lands crabbed, so a strong crosswind costs it
+  about 20 points whatever the route does.
+- **What the suite proves** (`tools/test-city.mjs`, 305 checks): the courses' numbers, the Needle's geometry for both
+  eyes, RoutePilot on ten seeds per rung (a landing every time, a median of at least 55 - 50 for the Gauntlet), 21
+  wrong lines that all end in a "Hit" (straight in on the glideslope, over, round, a full pull-up from the start,
+  wings level through the eye, a turn too tight, straight past the mouth), the autopilot switched off and on 300 m
+  before the eye, and a pilot who does only what the HUD hint says, never past 35 degrees: through the Needle's eye
+  on 10 of 10 seeds, the Gauntlet's on 7 of 10.
+- **Perf**: `tools/perf-probe.mjs` holds the Checkerboard scene in its BUDGET_MATRIX; it was last measured on the
+  2026-09-19 layout (357 fps median in the chase view on the RTX 4080, 62 programs; 67 of 70 with the cockpit shown)
+  and NOT re-run on the gate-free courses. `--gpu intel` pins an adapter by a LUID that changes at every boot; read
+  the current LUIDs (dxgi EnumAdapters1) and pass `--gpu <high,low>`.

@@ -3,9 +3,58 @@
 Newest first. Player-facing lines first in each entry, then the developer notes. The flight-model
 details behind each entry live in `docs/PHYSICS.md`.
 
+## 2026-09-23 - the city without gates
+
+Build **2026-09-23T20:10:06Z** (not deployed yet: the Pi has been off the network since the afternoon
+before). Marc: "continue" - the rule from the day before ("no boxes; force the obstacle because there is
+no other easier way"), applied to the last place that still used gates: the six rungs of the city.
+
+- **Checkerboard.** The inside of the corner is a new district of 220-300 m towers, kept 130 m clear
+  of the run-in, the turn and the final. Cutting the corner, turning early or heading straight for the
+  runway from the start is a wall; flying on at the board is still the hill. The start is 2.5 km before
+  the turn instead of 4.2.
+- **Downtown.** The two skybridges are gate buildings now, 500 m tall with an archway each (100 m and
+  82 m up), and the second row behind the avenue is 200-320 m. You start 700 m short of the avenue at
+  220 ft. There is no over and no round: under both archways, then up onto the glideslope.
+- **Slalom.** A canyon of 400 m walls 288 m apart, with three cross-walls and one 56 m slot in each,
+  60 m right, left and right of the centerline. You start inside it at 370 ft; the slots are the only
+  way through.
+- **Under the Bridge.** Not the Harbor Bridge any more: the Coast Road's viaduct 1.2 km out, a deck
+  70 m up, four 300 m pylons and a mesh of stays over the deck from end to end. You start 450 m short
+  of it at 150 ft; under the deck between the middle pylons is the only way.
+- **The Needle.** The eye is exactly what it was (34 m between the towers, flown banked 35 degrees),
+  but it stands at the end of the Crescent: a curved canyon of 300 m towers on the waterfront 1.9 km
+  out that narrows to the gap and opens again onto the final. You start inside the Crescent, 800 m
+  short of the turn, at 250 ft.
+- **The Gauntlet.** The Crescent out in the bay (the eye 7 km out, a 1.6 km mouth), the Harbor Bridge
+  under or over, a canyon with two slots that runs on into Grand Avenue and its gate building, at
+  night in the storm.
+- No gates anywhere in the game now: no gate count on the HUD, no MISSED GATE, no bonus. A landing is
+  a landing; a wrong line is a crash.
+
+### Developer notes
+
+- `src/missions/city.js` rewritten around geometry: `needleGeom(aimU, mouth)` (the eye, the turns, the
+  director's circle, the start, "past the eye"), `crescent()`, `canyon()`, `avenueCourse()` with
+  `GATE_TOP` slabs, `viaduct()` (a `box` deck, `tower` pylons, 128 `cable` stays whose fans cross),
+  `cbCourse()` (a district in the corner plus `clear` circles along the line), `tallRow()`. Hints read the
+  geometry (`pastEye`, `slotHint`, `gateHint`), not `mission.next()`. Nothing in the engine changed.
+- `tools/test-city.mjs` (305 checks): the courses' numbers (the archways and their 500 m tops, the
+  canyon's slots to the metre, the viaduct's mesh sampled at 90 and 150 m over the reachable 440 m of
+  deck - nowhere a wingspan fits, the corner's towers with the line 137 m clear), the Needle's geometry
+  for both eyes, RoutePilot on ten seeds per rung (a landing every time; medians 61 / 63.5 / 75 / 86.5 /
+  91.5 / 76.5), 21 wrong lines that all end in a "Hit" (straight in on the glideslope, over, round, a
+  full pull-up from the start, wings level through the eye, a turn too tight, straight past the mouth),
+  the autopilot resumed 300 m before the eye, and the hint-following pilot: 10 of 10 through the Needle's
+  eye, 7 of 10 through the Gauntlet's in its gusts.
+- Two things learned: RoutePilot needs a straight to settle onto its own circle after a start on the
+  pilot's line (600 m in the Needle's 5 kt, 1,600 in the Gauntlet's 18-kt gusts - the Crescents' mouths
+  are that long for it), and an eye must stand well before anything that has to be flown low right
+  after it (the Gauntlet's moved from 6.5 to 7 km out when a pilot handed over at the eye hit the bridge).
+
 ## 2026-09-22 (evening) - Harbor Cranes: the basin
 
-Build **2026-09-22T21:29:42Z** (not deployed yet). Marc: "do the harbor next, no gates".
+Build **2026-09-22T21:29:42Z** (not deployed: the Pi went off the network minutes before the deploy). Marc: "do the harbor next, no gates".
 
 - **Harbor Cranes** has no gates and no choice of line. It is a container basin now: two quays 170 m
   apart, five ship-to-shore cranes on each, every boom lowered to 50 m over the water and reaching
