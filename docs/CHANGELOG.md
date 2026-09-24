@@ -5,8 +5,9 @@ details behind each entry live in `docs/PHYSICS.md`.
 
 ## 2026-09-23 - the city without gates
 
-Build **2026-09-23T20:10:06Z** (not deployed yet: the Pi has been off the network since the afternoon
-before). Marc: "continue" - the rule from the day before ("no boxes; force the obstacle because there is
+Build **2026-09-23T20:10:06Z**, **LIVE** (deployed 2026-09-24 11:29 MDT on Marc's "deploy", once the Pi was back
+from a thirty-hour outage and its SD card had been cloned to a new one; `npm test` green, six checks green, then
+Harbor Cranes and the Needle flown headless on goodmarc.com and landed). Marc: "continue" - the rule from the day before ("no boxes; force the obstacle because there is
 no other easier way"), applied to the last place that still used gates: the six rungs of the city.
 
 - **Checkerboard.** The inside of the corner is a new district of 220-300 m towers, kept 130 m clear
@@ -54,7 +55,8 @@ no other easier way"), applied to the last place that still used gates: the six 
 
 ## 2026-09-22 (evening) - Harbor Cranes: the basin
 
-Build **2026-09-22T21:29:42Z** (not deployed: the Pi went off the network minutes before the deploy). Marc: "do the harbor next, no gates".
+Build **2026-09-22T21:29:42Z**, shipped inside build 2026-09-23T20:10:06Z (**LIVE** 2026-09-24 11:29 MDT; the Pi
+went off the network minutes before the first deploy attempt). Marc: "do the harbor next, no gates".
 
 - **Harbor Cranes** has no gates and no choice of line. It is a container basin now: two quays 170 m
   apart, five ship-to-shore cranes on each, every boom lowered to 50 m over the water and reaching
